@@ -36,6 +36,25 @@ function summary(over: Partial<SessionSummary>): SessionSummary {
 const kinds = (facts: WorkFact[]) => facts.map((f) => f.kind)
 
 describe('WorkFactTracker for the game', () => {
+  it('drops the tokens of a session it does not count, so none reach a later turn', () => {
+    const c = clock()
+    const tracker = new WorkFactTracker(c, 'boot')
+    tracker.noteUsage('s1', [
+      {
+        model: 'gpt-5',
+        tokens: { total: 9, input: 9, output: 0, thought: null, cacheRead: null, cacheWrite: null },
+      },
+    ])
+    tracker.observe(summary({ origin: 'subagent' }))
+    tracker.observe(summary({}))
+    const start = c.wall()
+    tracker.observe(summary({ status: 'running', turnStartedAt: start }))
+    c.advance(1_000)
+    const facts = tracker.observe(summary({ status: 'ready', turnStartedAt: null }))
+    expect(facts).toHaveLength(1)
+    expect(facts[0]).toMatchObject({ kind: 'turn.completed', models: [] })
+  })
+
   it('reports a finished turn with its work, waits and tokens per model', () => {
     const c = clock()
     const tracker = new WorkFactTracker(c, 'boot')

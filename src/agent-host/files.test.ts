@@ -1,3 +1,4 @@
+import { readdirSync } from 'node:fs'
 import {
   lstat,
   mkdir,
@@ -400,7 +401,38 @@ describe('FilesService home and walk bounds', () => {
     expect(listed.paths.length).toBeLessThan(6)
   })
 
-  it('coalesces concurrent list calls for the same root into a single scan', async () => {
+  it('scans again for a call that comes while a scan runs, as the disk may have changed', async () => {
+    const root = await realpath(await tempFolder('sarto-rescan-'))
+    await writeFile(path.join(root, 'a.txt'), 'a')
+    let scans = 0
+    const git: Exec = async (_command, args) => {
+      const all = args.includes('--cached')
+      if (all) scans += 1
+      const stdout = all
+        ? readdirSync(root)
+            .map((name) => `${name}\0`)
+            .join('')
+        : ''
+      await new Promise((resolve) => setTimeout(resolve, 30))
+      return { code: 0, stdout, stderr: '', failure: null, message: '' }
+    }
+    const files = new FilesService({
+      exec: git,
+      platform: 'darwin',
+      homeDir: '/nonexistent-home',
+      media: async () => null,
+      describeMedia: async () => null,
+      trash: async () => {},
+    })
+    const first = files.list(root)
+    await writeFile(path.join(root, 'b.txt'), 'b')
+    const second = files.list(root)
+    expect((await first).paths).toEqual(['a.txt'])
+    expect((await second).paths).toEqual(['a.txt', 'b.txt'])
+    expect(scans).toBe(2)
+  })
+
+  it('runs one scan behind the running one however many calls come meanwhile', async () => {
     const root = await realpath(await tempFolder('sarto-singleflight-'))
     await writeFile(path.join(root, 'a.txt'), 'a')
     let gitCalls = 0
@@ -430,7 +462,8 @@ describe('FilesService home and walk bounds', () => {
     ])
     expect(first).toEqual(second)
     expect(second).toEqual(third)
-    // `listOnce` issues 4 parallel git commands; single-flight keeps concurrent callers to 1 run.
-    expect(gitCalls).toBe(4)
+    // `listOnce` issues 4 parallel git commands: the first call's scan, then one more that the
+    // two calls made while it ran share.
+    expect(gitCalls).toBe(8)
   })
 })

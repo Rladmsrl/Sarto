@@ -346,7 +346,11 @@ export class FilesService {
   private readonly paths: path.PlatformPath
   private readonly homeDir: string | undefined
   private readonly ignorePaths: readonly string[]
-  private readonly inFlightLists = new Map<string, Promise<FileList>>()
+  /** Per root: the scan running, and the one queued to start once it ends. */
+  private readonly lists = new Map<
+    string,
+    { running: Promise<FileList>; queued: Promise<FileList> | null }
+  >()
 
   constructor(private readonly deps: FilesServiceDeps) {
     this.limits = { ...DEFAULT_LIMITS, ...deps.limits }
@@ -357,18 +361,29 @@ export class FilesService {
 
   /**
    * The files under `root`, relative and sorted. `root` is a canonical project path.
-   * Concurrent calls for the same `root` share one in-flight scan so rapid watcher bursts
-   * never pile up parallel directory walks.
+   * A scan runs at most once at a time per root, so rapid watcher bursts never pile up parallel
+   * walks. A call made while one runs may follow a change that scan has already read past, so
+   * it gets the next scan, which starts once the running one ends and which every call made
+   * meanwhile shares.
    */
   list(root: string): Promise<FileList> {
     const key = pathKey(root, this.deps.platform)
-    const existing = this.inFlightLists.get(key)
-    if (existing) return existing
-    const run = this.listOnce(root).finally(() => {
-      if (this.inFlightLists.get(key) === run) this.inFlightLists.delete(key)
+    const entry = this.lists.get(key)
+    if (!entry) return this.startList(key, root)
+    entry.queued ??= entry.running.then(
+      () => this.startList(key, root),
+      () => this.startList(key, root),
+    )
+    return entry.queued
+  }
+
+  private startList(key: string, root: string): Promise<FileList> {
+    const running: Promise<FileList> = this.listOnce(root).finally(() => {
+      const entry = this.lists.get(key)
+      if (entry?.running === running && entry.queued === null) this.lists.delete(key)
     })
-    this.inFlightLists.set(key, run)
-    return run
+    this.lists.set(key, { running, queued: null })
+    return running
   }
 
   private async listOnce(root: string): Promise<FileList> {

@@ -292,17 +292,20 @@ async function conversationOf(file: string): Promise<Conversation | null> {
   }
 }
 
-const MAX_CONVERSATION_DIRS = 200
-const MAX_CONVERSATION_ENTRIES = 4_000
+// Bounds for each conversations folder, far above what any user's history holds (each
+// conversation is a database with its WAL beside it), so only a folder pointed at something
+// unrelated stops early.
+const MAX_CONVERSATION_DIRS = 5_000
+const MAX_CONVERSATION_ENTRIES = 500_000
 const MAX_CONVERSATION_DEPTH = 6
 
 /** The conversation databases under the folders that exist; null when none does. */
-async function listConversations(folders: readonly string[]): Promise<string[] | null> {
+export async function listConversations(folders: readonly string[]): Promise<string[] | null> {
   let found = false
   const files: string[] = []
-  let dirsScanned = 0
-  let entriesSeen = 0
   for (const folder of folders) {
+    let dirsScanned = 0
+    let entriesSeen = 0
     let level: string[] = [folder]
     for (let depth = 0; level.length > 0 && depth <= MAX_CONVERSATION_DEPTH; depth++) {
       const next: string[] = []

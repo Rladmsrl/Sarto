@@ -110,10 +110,10 @@ export class FilesWatches {
       platform,
       // Broad roots like `$HOME` or `/` must never hold a recursive FSEvents stream: system writes
       // under `~/Library` (including Sarto's own daemon data) would fire `files.changed` non-stop.
+      // They get one watcher per folder the tree shows instead, none on a protected folder.
       recursive: broad
         ? false
         : (this.options.recursive ?? (platform === 'darwin' || platform === 'win32')),
-      shallowOnly: broad,
       protectedPrefixes,
       debounceMs: this.options.debounceMs ?? DEBOUNCE_MS,
       intervalMs: this.options.intervalMs ?? INTERVAL_MS,
@@ -136,7 +136,6 @@ interface FolderWatchOptions {
   root: string
   platform: Platform
   recursive: boolean
-  shallowOnly: boolean
   protectedPrefixes: readonly string[]
   debounceMs: number
   intervalMs: number
@@ -254,7 +253,6 @@ class FolderWatch {
     const segments = relative.split(/[\\/]/).filter((s) => s !== '' && s !== '.')
     if (segments.length === 0) return true
     if (this.isProtected(segments)) return false
-    if (this.options.shallowOnly && segments.length > 1) return false
     return this.shows(segments.slice(0, -1))
   }
 
@@ -274,13 +272,13 @@ class FolderWatch {
 
   /** In a watcher per folder: the folders the tree shows, shallow first, as many as allowed. */
   private wanted(): string[] {
-    if (this.options.shallowOnly) return ['']
     const candidates = new Set<string>([''])
     for (const folder of this.listedFolders ?? []) candidates.add(folder)
     for (const folder of this.readFolders) candidates.add(folder)
-    const shown = [...candidates].filter((folder) =>
-      this.shows(folder === '' ? [] : folder.split('/')),
-    )
+    const shown = [...candidates].filter((folder) => {
+      const segments = folder === '' ? [] : folder.split('/')
+      return !this.isProtected(segments) && this.shows(segments)
+    })
     const depth = (folder: string) => (folder === '' ? 0 : folder.split('/').length)
     shown.sort((a, b) => depth(a) - depth(b) || (a < b ? -1 : a > b ? 1 : 0))
     return shown.slice(0, this.options.folderLimit)

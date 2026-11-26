@@ -104,7 +104,10 @@ export class WorkFactTracker {
   /** The facts a session's new summary makes; none the first time the session is seen. */
   observe(summary: SessionSummary): WorkFact[] {
     if (!counted(summary)) {
+      // Nothing of a session the game does not count is kept, its tokens included, so none of
+      // it reaches a turn that counts later.
       this.seen.delete(summary.id)
+      this.usage.delete(summary.id)
       return []
     }
     const now = this.clock.mono()

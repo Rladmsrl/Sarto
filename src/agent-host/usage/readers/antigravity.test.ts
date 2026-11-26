@@ -4,7 +4,12 @@ import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { memoryContext } from '../testing'
-import { antigravityReader, conversationCalls, decodeFields } from './antigravity'
+import {
+  antigravityReader,
+  conversationCalls,
+  decodeFields,
+  listConversations,
+} from './antigravity'
 
 // Protobuf's wire format, enough to write the fields the reader takes.
 const varint = (value: number): number[] => {
@@ -96,6 +101,28 @@ describe("Antigravity's conversation records", () => {
       },
       { id: '#1', model: 'gemini-4-carbon', at: null, input: 10, output: 5, cacheRead: 0 },
     ])
+  })
+})
+
+describe("Antigravity's conversation list", () => {
+  it('lists every conversation of a heavy user, in both folders', async () => {
+    const base = mkdtempSync(path.join(tmpdir(), 'sarto-antigravity-many-'))
+    try {
+      const desktop = path.join(base, 'desktop')
+      const cli = path.join(base, 'cli')
+      mkdirSync(desktop)
+      mkdirSync(cli)
+      for (let i = 0; i < 2_100; i++) {
+        writeFileSync(path.join(desktop, `c${i}.db`), '')
+        writeFileSync(path.join(desktop, `c${i}.db-wal`), '')
+      }
+      writeFileSync(path.join(cli, 'last.db'), '')
+      const files = await listConversations([desktop, cli])
+      expect(files).toHaveLength(2_101)
+      expect(files).toContain(path.join(cli, 'last.db'))
+    } finally {
+      rmSync(base, { recursive: true, force: true })
+    }
   })
 })
 

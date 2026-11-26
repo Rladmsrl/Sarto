@@ -133,25 +133,29 @@ struct GitHubMarkdownHTMLRenderer {
 
     private static let allSafeHTMLTags: Set<String> = structuralHTMLTags.union(inlineSafeHTMLTags).union(["pre", "source"])
 
-    private static let shieldsNamedColors: [String: String] = [
-        "brightgreen": "#4c1",
-        "green": "#97ca00",
-        "yellowgreen": "#a4a61d",
-        "yellow": "#dfb317",
-        "orange": "#fe7d37",
-        "red": "#e05d44",
-        "blue": "#007ec6",
-        "lightgrey": "#9f9f9f",
-        "lightgray": "#9f9f9f",
-        "grey": "#555",
-        "gray": "#555",
-        "blueviolet": "#8a2be2",
-        "ff69b4": "#ff69b4",
-        "success": "#2ea043",
-        "important": "#fe7d37",
-        "critical": "#e05d44",
-        "informational": "#007ec6",
-        "inactive": "#9f9f9f",
+    /// What Shields' named badge colors mean, drawn in the palette's own colors.
+    private enum BadgeTone {
+        case success, warning, danger, info, accent, muted
+    }
+
+    private static let shieldsNamedTones: [String: BadgeTone] = [
+        "brightgreen": .success,
+        "green": .success,
+        "yellowgreen": .success,
+        "success": .success,
+        "yellow": .warning,
+        "orange": .warning,
+        "important": .warning,
+        "red": .danger,
+        "critical": .danger,
+        "blue": .info,
+        "informational": .info,
+        "blueviolet": .accent,
+        "lightgrey": .muted,
+        "lightgray": .muted,
+        "grey": .muted,
+        "gray": .muted,
+        "inactive": .muted,
     ]
 
     static func render(markdown: String, options: Options) -> Output {
@@ -1270,7 +1274,8 @@ struct GitHubMarkdownHTMLRenderer {
             }
 
             // 3. Static `img.shields.io/badge/...` -> instant offline vector SVG badge (unless live remote images explicitly enabled)
-            if !options.allowRemoteImages, let badgeDataURI = Self.synthesizeShieldsBadgeDataURI(trimmedSrc) {
+            if !options.allowRemoteImages,
+               let badgeDataURI = Self.synthesizeShieldsBadgeDataURI(trimmedSrc, theme: options.theme) {
                 attrs["src"] = badgeDataURI
                 let existingClass = attrs["class"]
                 attrs["class"] = existingClass.map { "\($0) md-badge" } ?? "md-badge"
@@ -1474,7 +1479,9 @@ struct GitHubMarkdownHTMLRenderer {
     }
 
     /// Synthesizes a crisp offline two-tone SVG `data:image/svg+xml;base64,...` for `img.shields.io/badge/<label>-<message>-<color>`.
-    static func synthesizeShieldsBadgeDataURI(_ rawURL: String) -> String? {
+    /// Named colors take the palette's matching token; a color the badge spells out in hex is the
+    /// author's and stays.
+    static func synthesizeShieldsBadgeDataURI(_ rawURL: String, theme: MarkdownPreviewTheme) -> String? {
         guard let url = URL(string: rawURL),
               let host = url.host?.lowercased(),
               host == "img.shields.io",
@@ -1502,24 +1509,28 @@ struct GitHubMarkdownHTMLRenderer {
             return nil
         }
 
-        let rightColor = resolveShieldsColor(rawColor)
+        let rightColor = resolveShieldsColor(rawColor, theme: theme)
         let cleanLabel = decodeShieldsText(label)
         let cleanMsg = decodeShieldsText(message)
         let leftW = cleanLabel.isEmpty ? 0 : Int(ceil(visualTextWidth(cleanLabel) + 14))
         let rightW = max(24, Int(ceil(visualTextWidth(cleanMsg) + 14)))
         let totalW = leftW + rightW
-        let msgFg = isLightHexColor(rightColor) ? "#1f2328" : "#ffffff"
+        // The palette's darkest or lightest text, whichever reads on the message's color.
+        let (dark, light) = cssLuminance(theme.foreground) < cssLuminance(theme.background)
+            ? (theme.foreground, theme.background)
+            : (theme.background, theme.foreground)
+        let msgFg = cssLuminance(rightColor) > 0.55 ? dark : light
 
         let svg: String
         if leftW > 0 {
             svg = """
             <svg xmlns="http://www.w3.org/2000/svg" width="\(totalW)" height="20" role="img" aria-label="\(escAttr(cleanLabel)): \(escAttr(cleanMsg))">
-              <clipPath id="r"><rect width="\(totalW)" height="20" rx="3" fill="#fff"/></clipPath>
+              <clipPath id="r"><rect width="\(totalW)" height="20" rx="3"/></clipPath>
               <g clip-path="url(#r)">
-                <rect width="\(leftW)" height="20" fill="#555"/>
+                <rect width="\(leftW)" height="20" fill="\(theme.surface2)"/>
                 <rect x="\(leftW)" width="\(rightW)" height="20" fill="\(rightColor)"/>
               </g>
-              <g fill="#fff" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,PingFang SC,sans-serif" font-size="11">
+              <g fill="\(theme.foreground)" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,PingFang SC,sans-serif" font-size="11">
                 <text x="\(Double(leftW) / 2.0)" y="14">\(escHTML(cleanLabel))</text>
                 <text x="\(Double(leftW) + Double(rightW) / 2.0)" y="14" fill="\(msgFg)" font-weight="500">\(escHTML(cleanMsg))</text>
               </g>
@@ -1583,26 +1594,38 @@ struct GitHubMarkdownHTMLRenderer {
         return out
     }
 
-    private static func resolveShieldsColor(_ raw: String) -> String {
+    private static func resolveShieldsColor(_ raw: String, theme: MarkdownPreviewTheme) -> String {
         let lower = (raw.removingPercentEncoding ?? raw).lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "# "))
-        if let named = shieldsNamedColors[lower] { return named }
         if (lower.count == 6 || lower.count == 3) && lower.allSatisfy(\.isHexDigit) {
             return "#\(lower)"
         }
-        return "#4c1"
+        switch shieldsNamedTones[lower] ?? .success {
+        case .success: return theme.success
+        case .warning: return theme.warning
+        case .danger: return theme.danger
+        case .info: return theme.cobalt
+        case .accent: return theme.iris
+        case .muted: return theme.mutedForeground
+        }
     }
 
-    private static func isLightHexColor(_ hexColor: String) -> Bool {
-        var hex = hexColor.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
-        if hex.count == 3 {
-            hex = hex.map { "\($0)\($0)" }.joined()
+    /// Perceived lightness, 0...1, of a CSS `#rgb`, `#rrggbb`, `rgb()` or `rgba()` color; 0 for
+    /// anything else.
+    private static func cssLuminance(_ css: String) -> Double {
+        let channels: [Double]
+        if css.hasPrefix("#") {
+            var hex = String(css.dropFirst())
+            if hex.count == 3 { hex = hex.map { "\($0)\($0)" }.joined() }
+            guard hex.count == 6, let value = UInt32(hex, radix: 16) else { return 0 }
+            channels = [Double((value >> 16) & 0xFF), Double((value >> 8) & 0xFF), Double(value & 0xFF)]
+        } else if let open = css.firstIndex(of: "("), let close = css.lastIndex(of: ")") {
+            let parts = css[css.index(after: open)..<close].split(separator: ",").prefix(3)
+            channels = parts.compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+            guard channels.count == 3 else { return 0 }
+        } else {
+            return 0
         }
-        guard hex.count == 6, let val = UInt32(hex, radix: 16) else { return false }
-        let r = Double((val >> 16) & 0xFF)
-        let g = Double((val >> 8) & 0xFF)
-        let b = Double(val & 0xFF)
-        let lum = 0.299 * r + 0.587 * g + 0.114 * b
-        return lum > 186
+        return (0.299 * channels[0] + 0.587 * channels[1] + 0.114 * channels[2]) / 255
     }
 
     private static func visualTextWidth(_ s: String) -> Double {

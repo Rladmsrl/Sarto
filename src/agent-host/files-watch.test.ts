@@ -158,16 +158,23 @@ describe('FilesWatches broad root and protected path guards', () => {
     })
 
     watches.add(home, 'port-1', home)
-    watches.listed(home, { paths: ['proj/a.ts'], folders: [], truncated: false })
+    watches.listed(home, {
+      paths: ['proj/a.ts', 'Library/Caches/foo'],
+      folders: [],
+      truncated: false,
+    })
 
-    // Only a single non-recursive watcher on home itself is created.
-    expect(calls).toEqual([{ target: home, recursive: false }])
+    // Home and the folders the tree shows each get a watcher of their own, never a recursive
+    // one, and never one on a protected folder such as ~/Library.
+    expect(calls).toEqual([
+      { target: home, recursive: false },
+      { target: path.join(home, 'proj'), recursive: false },
+    ])
 
     const emit = listeners.get(home)!
     emit('change', 'Library')
     emit('change', 'Library/Caches/foo')
     emit('change', '.Trash/item')
-    emit('change', 'proj/a.ts')
     await delay(100)
     expect(changes).toEqual([])
 
@@ -175,6 +182,11 @@ describe('FilesWatches broad root and protected path guards', () => {
     emit('rename', 'notes.txt')
     await until(() => changes.length > 0, 1000)
     expect(changes).toEqual([{ portId: 'port-1', projectPath: home }])
+
+    // So does a change in a folder the tree shows.
+    listeners.get(path.join(home, 'proj'))!('rename', 'b.ts')
+    await until(() => changes.length > 1, 1000)
+    expect(changes).toHaveLength(2)
     watches.stop()
   })
 })
