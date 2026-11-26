@@ -259,3 +259,27 @@ Types, limits and helpers live in [`src/reports.ts`](./src/reports.ts).
   `{"error":"unauthorized"}` so signed-in clients refresh and retry; only requests with no
   `Authorization` header and no web session are accepted as anonymous (`accountId = "anonymous"`),
   which only maintainers (`role = "owner"`) may inspect or delete.
+
+## 6. Game, protocol 1
+
+The idle game runs on its own service and origin. `game.ts` holds every type and validator.
+
+- **Who talks to it.** A daemon connects over `WS /v1/stream` with a game token for its account
+  and device. The account service issues the token; development servers also accept
+  `dev.<account>.<kind>`. Apps and iOS connect the same way as viewers. `POST /v1/facts`,
+  `POST /v1/actions`, `GET /v1/state`, `GET /v1/export` and `DELETE /v1/me` mirror the socket.
+- **Facts.** Only a daemon sends them. There are two kinds:
+  - `turn`: work and waiting intervals, seconds per work kind, success, and token counts per model.
+    The model name is `custom` unless it is in the public price snapshot.
+  - `todo`: an opaque plan reference, its version and a step index.
+
+  Facts never carry text, paths or ids that mean anything outside the account. Each has a unique
+  `id` and a per-device `seq`.
+
+- **Frames from the service.** `hello`, `state`, `battle` (events in game time, computed live by
+  the service), `notice`, `factsResult`, `commandResult` and `error`.
+- **Commands** carry `actionId`, which makes them idempotent, and `actor`. Commands include loadout
+  and workshop actions (`equipMain`, `equipCard`, `unequipCard`, `merge`, `craftCard`), battle and
+  choice actions (`challengeBoss`, `castUlt`, `setUltMode`, `pick`, `setPolicy`, `claim`), and
+  Hackathon run actions (`runStart`, `runChoose`, `runPick`, `runBuy`, `runCoffee`, `runSkipFight`,
+  `runMemory`, `runAbandon`). A command from the `agent` actor never mints or spends anything.

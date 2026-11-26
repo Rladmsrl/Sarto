@@ -1,26 +1,82 @@
 <div align="center">
 
-<img src="./docs/sarto-brand-kit/svg/sarto-symbol-color.svg" alt="Sarto" width="112">
+<img src="./docs/sarto-brand-kit/svg/sarto-symbol-color.svg" alt="Sarto — Native macOS Agentic Development Environment (ADE)" width="112">
 
 <h1>Sarto</h1>
 
-**A native, beautiful, private macOS workspace for every coding agent.**
+**The native macOS Agentic Development Environment (ADE) — run 46 coding agents in parallel and play a built-in idle RPG while you ship.**
 
-_Sarto_ is Italian for _tailor_: it cuts the best ideas of the tools around it to fit one workspace.
+_Sarto_ is Italian for _tailor_: a pure SwiftUI and Metal ADE that stitches every coding agent, Git worktree, terminal, browser and a pixel idle game into one private workspace — code while your agents grind.
 
-[![macOS 15+](https://img.shields.io/badge/macOS-15%2B-111111?logo=apple&logoColor=white)](#install)
+[![ADE](https://img.shields.io/badge/ADE-Agentic%20Dev%20Environment-0F172A)](#why-an-ade)
+[![macOS 15+](https://img.shields.io/badge/macOS-15%2B%20Native-111111?logo=apple&logoColor=white)](#native-to-the-mac)
 [![Apple silicon](https://img.shields.io/badge/Apple%20silicon-arm64-444444)](#install)
-[![Version](https://img.shields.io/badge/version-0.3.2-7C5CFF)](https://sarto.1o.ink/releases/latest)
 [![Agents](https://img.shields.io/badge/agents-46-2F80ED)](#supported-agents)
+[![Idle RPG](https://img.shields.io/badge/idle%20RPG-built--in-D97706)](#idle-rpg-grind-while-you-code)
 [![Telemetry](https://img.shields.io/badge/telemetry-none-2EA043)](./PRIVACY.md)
+[![Version](https://img.shields.io/badge/version-0.3.2-7C5CFF)](https://sarto.1o.ink/releases/latest)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](./LICENSE)
 
-[Download](https://sarto.1o.ink/releases/latest) · [Security](./SECURITY.md) · [Privacy](./PRIVACY.md) · [简体中文](./README.zh-CN.md)
+[Download](https://sarto.1o.ink/releases/latest) · [Why an ADE](#why-an-ade) · [Idle RPG](#idle-rpg-grind-while-you-code) · [Supported Agents](#supported-agents) · [Security](./SECURITY.md) · [Privacy](./PRIVACY.md) · [简体中文](./README.zh-CN.md)
 
 </div>
 
 > [!NOTE]
 > Sarto is in early, active development: v0.3.2 for macOS 15 or later on Apple silicon.
+
+## Why an ADE
+
+Traditional IDEs were built around typing one file at a time; terminal CLIs leave you juggling tabs without diffs, previews or approvals. **Sarto is an Agentic Development Environment (ADE)** — a native desktop workspace designed from the ground up for directing multiple AI coding agents at once, reviewing what they changed, and enjoying the wait while they work.
+
+- **Pure native macOS, zero Electron.** Built with Swift 6, SwiftUI, AppKit and Metal with zero third-party Swift packages. Fast startup, MacBook notch Dynamic Island, menu bar quota tracking, and thermal- and battery-aware rendering.
+- **Multi-agent orchestration in one GUI.** Run **Claude Code**, **OpenAI Codex**, **Gemini CLI**, **Cursor**, **GitHub Copilot**, **Google Antigravity**, **OpenCode**, **Cline**, **DeepSeek Harness**, **Pi** and 36 more **ACP (Agent Client Protocol)** agents side by side with your own CLI installs, API keys and subscriptions — across isolated Git worktrees or multiple Macs.
+- **Code while you idle.** Waiting on a long agent run shouldn't mean staring at a spinner. Real coding turns and completed plan steps power a built-in pixel **Agent Idle RPG**: your agents fight through to-do lists, drop gear and level up in the side rail while they ship your code.
+- **Local-first and end-to-end encrypted.** No telemetry, optional account, no server-side code storage, and `Noise_IK` + `AES-256-GCM` everywhere data leaves your Mac.
+
+## Highlights
+
+<table>
+<tr>
+<td width="33%" valign="top">
+
+**Native macOS ADE**<br/>
+SwiftUI, AppKit and Metal with zero Electron and zero third-party Swift packages. Menu bar, `⌘` shortcuts, Low Power Mode and thermal aware.
+
+</td>
+<td width="33%" valign="top">
+
+**46 agents, one workspace**<br/>
+Claude Code, Codex, Gemini CLI, Cursor, Copilot, Antigravity, OpenCode, Cline and 38 more — using your own installs and accounts.
+
+</td>
+<td width="33%" valign="top">
+
+**Grind while you code**<br/>
+A built-in pixel idle RPG where your agents battle through to-do lists, fire skills, earn loot and level up as they ship code. _In development._
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+**Beautiful**<br/>
+Four Metal-lit optical palettes, matching runtime Dock icons, restrained motion and a Dynamic Island that grows out of the notch.
+
+</td>
+<td valign="top">
+
+**Remote Claude Code**<br/>
+Run Claude Code's model on another of your Macs while files, commands and permissions stay on this one.
+
+</td>
+<td valign="top">
+
+**Tailored from the best**<br/>
+Proven ideas from the tools developers already love, stitched into one consistent agentic workbench.
+
+</td>
+</tr>
+</table>
 
 ## Private by design, verifiable by anyone
 
@@ -40,67 +96,7 @@ flowchart LR
 
 [SECURITY.md](./SECURITY.md) and [PRIVACY.md](./PRIVACY.md) list every request Sarto makes, what the server can and cannot see, and the commands to verify a download.
 
-## Highlights
-
-<table>
-<tr>
-<td width="33%" valign="top">
-
-**Beautiful**<br/>
-Four Metal-lit palettes, matching Dock icons, restrained motion and a Dynamic Island that grows out of the notch.
-
-</td>
-<td width="33%" valign="top">
-
-**Native**<br/>
-SwiftUI, AppKit and Metal with zero third-party Swift packages. Menu bar, `⌘` shortcuts, Low Power Mode and thermal aware.
-
-</td>
-<td width="33%" valign="top">
-
-**46 agents, one interface**<br/>
-Claude Code, Codex, Gemini CLI, Cursor, Copilot, Antigravity and 40 more, with your own installs and accounts.
-
-</td>
-</tr>
-<tr>
-<td valign="top">
-
-**Tailored from the best**<br/>
-Ideas from the tools developers already love, stitched into one consistent workspace.
-
-</td>
-<td valign="top">
-
-**Remote Claude Code**<br/>
-Run Claude Code's model on another of your Macs while files, commands and permissions stay on this one.
-
-</td>
-<td valign="top">
-
-**An idle game for your agents**<br/>
-Your agent fights through its to-do list and levels up while it works. _In development._
-
-</td>
-</tr>
-</table>
-
-## Beautiful
-
-- **Prism visual system**: four optical palettes, `Obsidian Dark`, `Warm Charcoal`, `Daylight Crystal` and `Warm Alabaster`, drawn with Metal, each with a matching Dock icon that switches at runtime. Accent presets and an HSB color wheel, System, Dark or Light appearance, and adjustable thread text size, reading width and terminal font.
-- **Calm by default**: motion tiers from Off to Ultra honor Reduce Motion, and every animated canvas lowers its frame rate for still views, Low Power Mode and thermal pressure.
-- **A thread you can scan**: multi-step tool runs fold into one-line summaries on an expandable timeline rail, edits show as unified diff hunks, and permission, plan and question cards never fold away.
-- **Rich replies**: syntax highlighting with folding for long code blocks, GFM tables, alerts, SVG and Mermaid diagrams (flowchart, sequence and state), and math.
-- **Fully bilingual**: every screen in English and Simplified Chinese.
-
-## Native to the Mac
-
-- **Dynamic Island**: a concave-shoulder island under the MacBook notch or atop any display, on one or several screens you pick on a display map. It shows live plan progress and lets you answer permissions, questions and plans from any of your Macs, with a stack of sessions, a usage tab and a nine-dot activity indicator.
-- **Menu bar usage panel**: liquid quota tubes, plan rings, a live session banner, today's model ranking and 7, 30 and 90-day stacked usage charts across your agents and Macs. Closing the windows keeps Sarto and your agents running in the menu bar; `⌘Q` asks twice before closing the windows.
-- **Signed self-updates**: Stable and Beta channels, binary delta patches, SHA-512 and code-signature checks, installed when you quit or step away. App-only updates keep the daemon and your running sessions alive.
-- **Standalone daemon**: run Sarto's daemon on a headless Mac with the `sarto` CLI (`sarto login`, `status`, `update`, `logs`, `devices`, `terminal`, `service`).
-
-## Every agent, one interface
+## Multi-agent orchestration
 
 - **6 native drivers and 40 ACP agents**: dedicated SDK, server and RPC drivers for **Claude Code**, **Codex**, **OpenCode**, **Pi**, **DeepSeek Harness** and **Cline** (OpenCode and Cline fall back to ACP), and the Agent Client Protocol for 40 more, including **Google Antigravity**, **Gemini CLI**, **Cursor**, **GitHub Copilot**, **Qwen Code** and **Kimi Code**. Sarto implements no agent: it drives your own installs, accounts and configurations.
 - **Deep Antigravity support**: its context breakdown, per-request telemetry, plan mode, subagents, steering, question forms, plugins and plan limits.
@@ -108,6 +104,18 @@ Your agent fights through its to-do list and levels up while it works. _In devel
 - **Switch agents mid-session**: hand a session to another agent between turns with its context carried over, optionally summarized first.
 - **Bring your history**: import sessions you started in Claude Code, Codex, Pi or any ACP agent that lists its sessions.
 - **Plan quotas at a glance**: reads each signed-in agent's plan limits and balance from its vendor, and tracks tokens and spend from local logs at API list prices.
+
+## Idle RPG: grind while you code
+
+> [!NOTE]
+> In development: the game, its balance and its art are still changing.
+
+Agentic coding has natural pauses while models think, run test suites and execute multi-step plans. Sarto turns those background runs into a zero-distraction **Agent Idle RPG** tucked into the collapsible right rail — so you can **code and grind at the same time**:
+
+- **Pixel Co-Op Todo Battles**: whenever a session has an active plan, Sarto and your coding agent team up in a pixel battle arena. Live coding turns fire attacks and auto-skills, and each completed plan step lands a finishing hit.
+- **Per-agent RPG sheets and builds**: every agent grows its own RPG profile — rank tiers, power score (`PWR`), `DPS`, weapons, gear loadouts, medals and commander bond levels — fueled by real coding turns rather than mindless clicking.
+- **Calm, battery-friendly motion**: four energy tiers step down from full **Arcade** combat (weapons, auto-skills and floating pixel damage popups) to **Calm**, **Still** or **Off**, automatically throttling for idle windows, Low Power Mode and thermal pressure.
+- **Private while playing**: game progression uses only minimal opaque work facts (turn timing and step counts) — source code, prompts and file paths never leave your Mac.
 
 ## A workspace around the conversation
 
@@ -119,6 +127,21 @@ Your agent fights through its to-do list and levels up while it works. _In devel
 - **Git**: diffs against `HEAD` with per-file commit selection, branch and worktree-isolated sessions, AI-drafted commit messages and pull requests, and a next-step panel for conflicts, failed checks, reviews, publishing and merging on GitHub.
 - **Files and terminals**: a project file tree with an editor that detects conflicting saves and restores drafts, and PTY terminals you can take over from an agent and hand back. Sarto pauses agent input when a terminal asks for a password.
 - **Preview**: a built-in web browser agents can inspect and drive (and you can take over), iOS simulators, and Android emulators and devices, side by side.
+
+## Native to the Mac
+
+- **Dynamic Island**: a concave-shoulder island under the MacBook notch or atop any display, on one or several screens you pick on a display map. It shows live plan progress and lets you answer permissions, questions and plans from any of your Macs, with a stack of sessions, a usage tab and a nine-dot activity indicator.
+- **Menu bar usage panel**: liquid quota tubes, plan rings, a live session banner, today's model ranking and 7, 30 and 90-day stacked usage charts across your agents and Macs. Closing the windows keeps Sarto and your agents running in the menu bar; `⌘Q` asks twice before closing the windows.
+- **Signed self-updates**: Stable and Beta channels, binary delta patches, SHA-512 and code-signature checks, installed when you quit or step away. App-only updates keep the daemon and your running sessions alive.
+- **Standalone daemon**: run Sarto's daemon on a headless Mac with the `sarto` CLI (`sarto login`, `status`, `update`, `logs`, `devices`, `terminal`, `service`).
+
+## Beautiful
+
+- **Prism visual system**: four optical palettes, `Obsidian Dark`, `Warm Charcoal`, `Daylight Crystal` and `Warm Alabaster`, drawn with Metal, each with a matching Dock icon that switches at runtime. Accent presets and an HSB color wheel, System, Dark or Light appearance, and adjustable thread text size, reading width and terminal font.
+- **Calm by default**: motion tiers from Off to Ultra honor Reduce Motion, and every animated canvas lowers its frame rate for still views, Low Power Mode and thermal pressure.
+- **A thread you can scan**: multi-step tool runs fold into one-line summaries on an expandable timeline rail, edits show as unified diff hunks, and permission, plan and question cards never fold away.
+- **Rich replies**: syntax highlighting with folding for long code blocks, GFM tables, alerts, SVG and Mermaid diagrams (flowchart, sequence and state), and math.
+- **Fully bilingual**: every screen in English and Simplified Chinese.
 
 ## Remote Claude Code
 
@@ -142,13 +165,6 @@ Start a Claude Code session on this Mac and let its **model run on another Mac o
 - **Agent plugins**: manage plugins and marketplaces for Claude Code and Codex, and plugins for Antigravity.
 - **Memory**: one memory across agents, global and per project. Agents propose global entries for you to approve, and you can edit, move and import entries, including Claude Code's own project memory.
 - **Sarto's tools for agents**: agents can use Sarto's sessions, terminals, browser, devices, memory and settings through MCP.
-
-## The Agent RPG
-
-> [!NOTE]
-> In development: the game, its balance and its art are still changing.
-
-While your agents work, a collapsible rail groups the running and waiting sessions with live quota meters. When a session has a plan, Sarto and your agent team up in a pixel **Co-Op Todo Battle**: each finished step lands a hit, and your agent earns experience, gear, medals and bond levels in an idle RPG profile. It steps down from full animation to calm and to still, to save energy.
 
 ## Tailored from the best
 
@@ -211,6 +227,10 @@ Run the **SartoMac** scheme. [CONTRIBUTING.md](./CONTRIBUTING.md) covers develop
 | [Poolside](https://poolside.ai)                                     | [Stakpak](https://stakpak.dev)                                                      |                                                          |                                                                             |
 
 </details>
+
+## Topics
+
+`ade` · `agentic-development-environment` · `agent-development-environment` · `macos` · `swiftui` · `metal` · `native-macos-app` · `multi-agent` · `coding-agents` · `ai-coding` · `vibe-coding` · `idle-game` · `idle-rpg` · `gamified-coding` · `claude-code` · `claude-code-gui` · `codex` · `gemini-cli` · `cursor` · `github-copilot` · `opencode` · `cline` · `antigravity` · `agent-client-protocol` · `acp` · `model-context-protocol` · `mcp` · `git-worktree` · `dynamic-island` · `end-to-end-encryption`
 
 ## Feedback
 

@@ -528,6 +528,7 @@ struct IslandExpandedUsageTab: View {
     var model: PrismIslandModel
     @ObservedObject var usageStore: PrismUsageStore
     @ObservedObject var settingsStore: UsageSettingsStore
+    var isMeasuring: Bool = false
     @State private var pinnedProviderId: String?
 
     var body: some View {
@@ -575,9 +576,13 @@ struct IslandExpandedUsageTab: View {
             }
         }
         .padding(.top, 2)
-        .onAppear { usageStore.setShown(true) }
+        .onAppear {
+            guard !isMeasuring else { return }
+            usageStore.setShown(true)
+        }
         .onDisappear {
             pinnedProviderId = nil
+            guard !isMeasuring else { return }
             usageStore.setShown(false)
         }
     }

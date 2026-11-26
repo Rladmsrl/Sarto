@@ -15,6 +15,7 @@
 		1AE2BA7ACC8BE28D483607CF /* PrismSettingsRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01BB4D5EE8C0A275A969DF8D /* PrismSettingsRouter.swift */; };
 		1D6F9737EB949294ECD6127E /* ThreadTimelineModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE0AE72E3902044CF58D12FF /* ThreadTimelineModel.swift */; };
 		270E2478ECB9E23EB8AE6F2B /* UsageCore in Frameworks */ = {isa = PBXBuildFile; productRef = DBE37E286112AB22555CDF89 /* UsageCore */; };
+		2CCCDC1B40C85C5E87C23D43 /* ExpeditionWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8669843EA2D75ED074B91131 /* ExpeditionWindowView.swift */; };
 		2DA7D03E3F52328BAA78FE5A /* IslandViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DFA362578C4452E75E6D340 /* IslandViews.swift */; };
 		2E0C3459373EF01F21A18F6A /* DaemonManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1236BB960F29C2A5F5ECB43 /* DaemonManager.swift */; };
 		32BB0F3CE7E3A1607FD12EE5 /* SartoAppPaths.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70F21ACDBB51B4C78F02C882 /* SartoAppPaths.swift */; };
@@ -35,6 +36,7 @@
 		6E48ABB1076EDF73F2D64DF4 /* UpdatesSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81E1A3C0B06A944F8CABC182 /* UpdatesSettingsView.swift */; };
 		773BB57E80B6484D0A5AF7B2 /* SartoProtocol in Frameworks */ = {isa = PBXBuildFile; productRef = A8B6FC8E2C6EA5823D4A89E6 /* SartoProtocol */; };
 		794531FE02C80B2CCD06F057 /* UsageStoreModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA52CBC99D86632D92784C00 /* UsageStoreModel.swift */; };
+		7A268298CAF229BF198B9AD0 /* RailGameStrip.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05FC5E2493CA6F5A2189B434 /* RailGameStrip.swift */; };
 		7CA9E3524D365CD66430EDAE /* SartoState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57911F287D767C7028EA8A51 /* SartoState.swift */; };
 		7D5018586192D9CBE8E65EF7 /* AgentInstallSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = C22F2123D08D4044AD5B3BA0 /* AgentInstallSheet.swift */; };
 		7F1A0DD5EC9599986F4C584D /* GitFlowViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34CDC75E31D5D926F3249B53 /* GitFlowViews.swift */; };
@@ -51,6 +53,7 @@
 		98A07F97597C47985446E12C /* IslandLocalization.swift in Sources */ = {isa = PBXBuildFile; fileRef = E94215AF7808E5564055272C /* IslandLocalization.swift */; };
 		9E2F70A1994BC4DED337F8AB /* IslandModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E923628483BC400FCE16D7F /* IslandModels.swift */; };
 		A15BC0133B58D26CA8B2E1A8 /* AgentRPGModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 473DBA9B121DF86F1817513D /* AgentRPGModels.swift */; };
+		A2E3DDFE1D2880B8604ACDE1 /* MarkdownHTMLPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1EAD0A984A098F76C6D042C8 /* MarkdownHTMLPreview.swift */; };
 		A34A9999A6AD4548AF67D2D3 /* IslandProjection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85B7FDC05E4823D967460825 /* IslandProjection.swift */; };
 		A6407B1050B32003A9EACB26 /* ImportCLISessionsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D53724818126E257758F3376 /* ImportCLISessionsSheet.swift */; };
 		A98036750192A71459F20C63 /* IslandCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0EB7307AAB278DF056623DC1 /* IslandCoordinator.swift */; };
@@ -67,6 +70,7 @@
 		D266A74415ADB63D29BEBCD1 /* ProblemReportCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CED7A7ED2873BB603608356 /* ProblemReportCoordinator.swift */; };
 		D381532972FEAA12913D518E /* SartoUpdate in Frameworks */ = {isa = PBXBuildFile; productRef = F08FC6CB50DD9D89491EC387 /* SartoUpdate */; };
 		D3E49CE373C2E2E81F39A5B3 /* IslandAssets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9AB6944800D65D863968370A /* IslandAssets.swift */; };
+		D584712B6F794EE895CE2491 /* GameStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EFAE74C5A4D5705FB81D7F4 /* GameStore.swift */; };
 		D9CF872CAB78B4AF9D7D2E12 /* DisplayMapPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 733B4B70F2EAE1560AAB417A /* DisplayMapPicker.swift */; };
 		DF919AB9AC36E48BD460B978 /* AgentRPGStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60BD2F5CAD7B326506141950 /* AgentRPGStore.swift */; };
 		E50502C9907BC3C83D72A16F /* IslandUsageViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4ABC19CF9AAEFCEF9877C2C7 /* IslandUsageViews.swift */; };
@@ -83,11 +87,13 @@
 
 /* Begin PBXFileReference section */
 		01BB4D5EE8C0A275A969DF8D /* PrismSettingsRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrismSettingsRouter.swift; sourceTree = "<group>"; };
+		05FC5E2493CA6F5A2189B434 /* RailGameStrip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RailGameStrip.swift; sourceTree = "<group>"; };
 		06C51E3E7A2FC4562753206C /* FileDownload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileDownload.swift; sourceTree = "<group>"; };
 		0EB7307AAB278DF056623DC1 /* IslandCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IslandCoordinator.swift; sourceTree = "<group>"; };
 		18CC02915CA661B045A3D897 /* UsageIslandKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = UsageIslandKit; path = Packages/UsageIslandKit; sourceTree = SOURCE_ROOT; };
 		1CD180FA8BFB1A9C52AB3614 /* SartoMac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SartoMac.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		1DFA362578C4452E75E6D340 /* IslandViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IslandViews.swift; sourceTree = "<group>"; };
+		1EAD0A984A098F76C6D042C8 /* MarkdownHTMLPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownHTMLPreview.swift; sourceTree = "<group>"; };
 		2099C185F435C4298DAEBB5D /* SettingsClientSectionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsClientSectionsView.swift; sourceTree = "<group>"; };
 		286F49D38195DD675CA2CAF4 /* QuitCountdown.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuitCountdown.swift; sourceTree = "<group>"; };
 		34CDC75E31D5D926F3249B53 /* GitFlowViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitFlowViews.swift; sourceTree = "<group>"; };
@@ -116,9 +122,11 @@
 		81E1A3C0B06A944F8CABC182 /* UpdatesSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdatesSettingsView.swift; sourceTree = "<group>"; };
 		85B7FDC05E4823D967460825 /* IslandProjection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IslandProjection.swift; sourceTree = "<group>"; };
 		85C2A422633CB24769BDDF5C /* SartoState+AgentAvailability.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SartoState+AgentAvailability.swift"; sourceTree = "<group>"; };
+		8669843EA2D75ED074B91131 /* ExpeditionWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExpeditionWindowView.swift; sourceTree = "<group>"; };
 		8992E1D1C10EA5BBED6C3C0F /* PrismBrowserPaneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrismBrowserPaneView.swift; sourceTree = "<group>"; };
 		8E923628483BC400FCE16D7F /* IslandModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IslandModels.swift; sourceTree = "<group>"; };
 		8EBCBDA9DCE3B77AA00EC56A /* AgentAvailability.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentAvailability.swift; sourceTree = "<group>"; };
+		8EFAE74C5A4D5705FB81D7F4 /* GameStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameStore.swift; sourceTree = "<group>"; };
 		949F2883FAF8DCF4033FE08F /* ComposerPopoversView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerPopoversView.swift; sourceTree = "<group>"; };
 		96E80FD288C519E51AD8D86C /* ComposerOverlaysAndPreviews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerOverlaysAndPreviews.swift; sourceTree = "<group>"; };
 		97EF65BB06EE0343203E4769 /* NewSessionStageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewSessionStageView.swift; sourceTree = "<group>"; };
@@ -223,6 +231,16 @@
 			path = ProblemReport;
 			sourceTree = "<group>";
 		};
+		772C2E16A1906CFB3F90A4B9 /* Game */ = {
+			isa = PBXGroup;
+			children = (
+				8669843EA2D75ED074B91131 /* ExpeditionWindowView.swift */,
+				8EFAE74C5A4D5705FB81D7F4 /* GameStore.swift */,
+				05FC5E2493CA6F5A2189B434 /* RailGameStrip.swift */,
+			);
+			path = Game;
+			sourceTree = "<group>";
+		};
 		A426059FD80B245979239C90 /* DynamicIsland */ = {
 			isa = PBXGroup;
 			children = (
@@ -262,6 +280,7 @@
 				6B748B129F3FA2A2C7B95F84 /* SyncApprovalPanelController.swift */,
 				0B79C01641B9F036D9E3A1A2 /* AgentRPG */,
 				A426059FD80B245979239C90 /* DynamicIsland */,
+				772C2E16A1906CFB3F90A4B9 /* Game */,
 				F23F8E0205D449304D062BF5 /* MenuBar */,
 				724D748C56007BBF85D06E13 /* ProblemReport */,
 				2B0CF18C90777DCE206E054E /* Settings */,
@@ -297,6 +316,7 @@
 				8EBCBDA9DCE3B77AA00EC56A /* AgentAvailability.swift */,
 				A25E840CE058002EEEDF82DA /* ComposerAttachments.swift */,
 				34CDC75E31D5D926F3249B53 /* GitFlowViews.swift */,
+				1EAD0A984A098F76C6D042C8 /* MarkdownHTMLPreview.swift */,
 				6712122435D26B2E54B63ED2 /* NewSessionSheet.swift */,
 				CCB0CBD9D94ADC69A968A020 /* PrismBrowserEngine.swift */,
 				8992E1D1C10EA5BBED6C3C0F /* PrismBrowserPaneView.swift */,
@@ -449,7 +469,9 @@
 				2E0C3459373EF01F21A18F6A /* DaemonManager.swift in Sources */,
 				D01FCED31CD392A68AE16A95 /* DaemonRuntime.swift in Sources */,
 				D9CF872CAB78B4AF9D7D2E12 /* DisplayMapPicker.swift in Sources */,
+				2CCCDC1B40C85C5E87C23D43 /* ExpeditionWindowView.swift in Sources */,
 				F9856275D611EC9FD300670B /* FileDownload.swift in Sources */,
+				D584712B6F794EE895CE2491 /* GameStore.swift in Sources */,
 				7F1A0DD5EC9599986F4C584D /* GitFlowViews.swift in Sources */,
 				5CF281ECBC24026BF24A428C /* GlobalSessionSearchSheet.swift in Sources */,
 				A6407B1050B32003A9EACB26 /* ImportCLISessionsSheet.swift in Sources */,
@@ -464,6 +486,7 @@
 				2DA7D03E3F52328BAA78FE5A /* IslandViews.swift in Sources */,
 				61B394BD6EDA67D5D81F69D2 /* MacSidebarView.swift in Sources */,
 				38E975FA1D7E0C8D9B92E7A9 /* MacWorkbenchView.swift in Sources */,
+				A2E3DDFE1D2880B8604ACDE1 /* MarkdownHTMLPreview.swift in Sources */,
 				903625ACFC070358C073B5CE /* MenuBarPanelViews.swift in Sources */,
 				0B75F77CDF798A622E1F92B3 /* NewSessionSheet.swift in Sources */,
 				6054F04722CD4A7578B03989 /* NewSessionStageView.swift in Sources */,
@@ -476,6 +499,7 @@
 				D266A74415ADB63D29BEBCD1 /* ProblemReportCoordinator.swift in Sources */,
 				0297F6925F4EFC139718B504 /* ProblemReportSheetView.swift in Sources */,
 				E8E925A5A256B6B7B5D97B9D /* QuitCountdown.swift in Sources */,
+				7A268298CAF229BF198B9AD0 /* RailGameStrip.swift in Sources */,
 				D209E04550A00A942EEA3F01 /* RunningSessionsRail.swift in Sources */,
 				32BB0F3CE7E3A1607FD12EE5 /* SartoAppPaths.swift in Sources */,
 				B2FFF932DB8D22DF0BEBD940 /* SartoMacApp.swift in Sources */,

@@ -189,11 +189,12 @@ struct IslandTurnDots: NSViewRepresentable {
     let pattern: Pattern
     var size: CGFloat = 12
     let reduceMotion: Bool
+    var paused: Bool = false
 
     func makeNSView(context: Context) -> IslandDotsNSView { IslandDotsNSView() }
 
     func updateNSView(_ view: IslandDotsNSView, context: Context) {
-        view.configure(pattern: pattern, size: size, reduceMotion: reduceMotion)
+        view.configure(pattern: pattern, size: size, reduceMotion: reduceMotion, paused: paused)
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: IslandDotsNSView, context: Context) -> CGSize? {
@@ -203,6 +204,7 @@ struct IslandTurnDots: NSViewRepresentable {
 
 final class IslandDotsNSView: NSView {
     private var shown: (IslandTurnDots.Pattern, CGFloat, Bool)?
+    private var isPaused = false
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -287,8 +289,12 @@ final class IslandDotsNSView: NSView {
         return keys.values.last ?? 0.22
     }
 
-    func configure(pattern: IslandTurnDots.Pattern, size: CGFloat, reduceMotion: Bool) {
-        if let shown, shown.0 == pattern, shown.1 == size, shown.2 == reduceMotion { return }
+    func configure(pattern: IslandTurnDots.Pattern, size: CGFloat, reduceMotion: Bool, paused: Bool = false) {
+        let needsRebuild = shown.map { $0.0 != pattern || $0.1 != size || $0.2 != reduceMotion } ?? true
+        if !needsRebuild {
+            setPaused(paused)
+            return
+        }
         shown = (pattern, size, reduceMotion)
         for dot in layer?.sublayers ?? [] { dot.removeFromSuperlayer() }
         let unit = size / 12
@@ -330,6 +336,25 @@ final class IslandDotsNSView: NSView {
                 }
             }
             layer?.addSublayer(dot)
+        }
+        isPaused = false
+        setPaused(paused)
+    }
+
+    private func setPaused(_ paused: Bool) {
+        guard isPaused != paused, let rootLayer = layer else { return }
+        isPaused = paused
+        if paused {
+            let pausedTime = rootLayer.convertTime(CACurrentMediaTime(), from: nil)
+            rootLayer.speed = 0
+            rootLayer.timeOffset = pausedTime
+        } else {
+            let pausedTime = rootLayer.timeOffset
+            rootLayer.speed = 1
+            rootLayer.timeOffset = 0
+            rootLayer.beginTime = 0
+            let timeSincePause = rootLayer.convertTime(CACurrentMediaTime(), from: nil) - pausedTime
+            rootLayer.beginTime = timeSincePause
         }
     }
 }
@@ -438,6 +463,7 @@ struct IslandSignalView: View {
     let signal: IslandSignal
     var size: CGFloat = 14
     let reduceMotion: Bool
+    var paused: Bool = false
 
     var body: some View {
         switch signal {
@@ -449,7 +475,7 @@ struct IslandSignalView: View {
                 .foregroundStyle(IslandTheme.danger)
                 .frame(width: size, height: size)
         case .running(let pattern):
-            IslandTurnDots(pattern: pattern, size: 12, reduceMotion: reduceMotion)
+            IslandTurnDots(pattern: pattern, size: 12, reduceMotion: reduceMotion, paused: paused)
                 .frame(width: size, height: size)
         case .stuck:
             Image(systemName: "clock")
@@ -542,12 +568,80 @@ struct IslandPixelCell: Sendable {
     }
 }
 
+struct IslandPixelColorBatch: Sendable {
+    let color: Color
+    /// Pre-merged normalized grid rectangles (`0...gridSize`) sharing the same color.
+    let path: Path
+}
+
 struct IslandPixelSprite: Sendable {
     let gridSize: Int
     let cells: [IslandPixelCell]
     let palette: [Color]
-    /// Indices into `cells` on the right half of the icon used as pixel launch emitters.
+    /// Indices into `cells` on the launch edge of the icon used as pixel emitters.
     let launchIndices: [Int]
+    /// Pre-merged paths grouped by quantized color so each sprite renders in a handful of draw calls.
+    let colorBatches: [IslandPixelColorBatch]
+    /// Single merged silhouette path of all cells for 1-call hit flashes.
+    let silhouettePath: Path
+    /// Per-row merged paths for bottom-up charge overlays (`appSprite` only).
+    let litRowPaths: [Path]
+    let dimRowPaths: [Path]
+
+    static func make(
+        gridSize: Int,
+        cells: [IslandPixelCell],
+        palette: [Color],
+        launchIndices: [Int],
+        includeRowPaths: Bool = false
+    ) -> IslandPixelSprite {
+        var order: [Int] = []
+        var colorsByKey: [Int: Color] = [:]
+        var pathsByKey: [Int: Path] = [:]
+        var silhouette = Path()
+        var litRows = includeRowPaths ? Array(repeating: Path(), count: gridSize) : []
+        var dimRows = includeRowPaths ? Array(repeating: Path(), count: gridSize) : []
+
+        for cell in cells {
+            let rect = CGRect(x: CGFloat(cell.gx) + 0.05, y: CGFloat(cell.gy) + 0.05, width: 0.90, height: 0.90)
+            silhouette.addRect(rect)
+
+            // Quantize to 6-bit RGB buckets so subtle gradients collapse into compact draw batches.
+            let rq = Int((max(0, min(1, cell.r)) * 63).rounded())
+            let gq = Int((max(0, min(1, cell.g)) * 63).rounded())
+            let bq = Int((max(0, min(1, cell.b)) * 63).rounded())
+            let key = (rq << 12) | (gq << 6) | bq
+            if pathsByKey[key] == nil {
+                order.append(key)
+                colorsByKey[key] = cell.color
+                pathsByKey[key] = Path()
+            }
+            pathsByKey[key]?.addRect(rect)
+
+            if includeRowPaths && cell.gy > 0 && cell.gy < gridSize - 1 {
+                if cell.luminance > 0.4 {
+                    litRows[cell.gy].addRect(rect)
+                } else {
+                    dimRows[cell.gy].addRect(rect)
+                }
+            }
+        }
+
+        let batches = order.compactMap { key -> IslandPixelColorBatch? in
+            guard let color = colorsByKey[key], let path = pathsByKey[key] else { return nil }
+            return IslandPixelColorBatch(color: color, path: path)
+        }
+        return IslandPixelSprite(
+            gridSize: gridSize,
+            cells: cells,
+            palette: palette,
+            launchIndices: launchIndices,
+            colorBatches: batches,
+            silhouettePath: silhouette,
+            litRowPaths: litRows,
+            dimRowPaths: dimRows
+        )
+    }
 }
 
 @MainActor
@@ -604,11 +698,12 @@ enum IslandPixelSpriteCache {
             }
         }
         let lit = cells.indices.filter { cells[$0].luminance > 0.4 }
-        return IslandPixelSprite(
+        return IslandPixelSprite.make(
             gridSize: n,
             cells: cells,
             palette: [Color(hex: 0x86C5FF), Color(hex: 0x3B82F6), Color.white],
-            launchIndices: lit
+            launchIndices: lit,
+            includeRowPaths: true
         )
     }()
 
@@ -647,7 +742,7 @@ enum IslandPixelSpriteCache {
         }
         let n = gridSize
         let leftHalf = cells.indices.filter { cells[$0].gx < n / 2 }
-        return IslandPixelSprite(
+        return IslandPixelSprite.make(
             gridSize: n,
             cells: cells,
             palette: palette,
@@ -802,7 +897,7 @@ enum IslandPixelSpriteCache {
             }
         }
         let launch = cells.indices.filter { cells[$0].gx < n / 2 }
-        return IslandPixelSprite(
+        return IslandPixelSprite.make(
             gridSize: n,
             cells: cells,
             palette: [base.color, IslandTheme.prismCobalt, IslandTheme.prismIris],
@@ -1504,15 +1599,19 @@ struct IslandPixelStrikeStage: View {
             let beamAlpha = (normalizedIntensity - 0.60) / 0.40 * 0.22
             let phase = Int(floor(sim.elapsed * 28.0))
             let beamColor = palette.first ?? IslandTheme.prismCobalt
+            var beamPath = Path()
+            let beamY = snap(midY + 3, step: cell)
             var gx = snap(runwayStart + 2, step: cell)
             var stepIndex = 0
             while gx < runwayEnd - 2 {
                 if !isHiddenByNotch(x: gx) && (((stepIndex + phase) % 5 + 5) % 5) < 2 {
-                    let rect = CGRect(x: gx, y: snap(midY + 3, step: cell), width: 1.7, height: 1.7)
-                    context.fill(Path(rect), with: .color(beamColor.opacity(beamAlpha)))
+                    beamPath.addRect(CGRect(x: gx, y: beamY, width: 1.7, height: 1.7))
                 }
                 gx += cell
                 stepIndex += 1
+            }
+            if !beamPath.isEmpty {
+                context.fill(beamPath, with: .color(beamColor.opacity(beamAlpha)))
             }
         }
 
@@ -1524,23 +1623,27 @@ struct IslandPixelStrikeStage: View {
             let arcDepth = arcHalfH * 0.42
             let frontX = appX + wave.dir * (appHalf + 1.5 + p * 18.0)
 
+            var primaryPath = Path()
+            var accentPath = Path()
             var dy = -arcHalfH
             while dy <= arcHalfH {
                 let u = dy / max(1, arcHalfH)
                 let wx = snap(frontX - wave.dir * arcDepth * u * u, step: cell)
                 let wy = snap(midY + dy, step: cell)
                 if !isHiddenByNotch(x: wx) && wx > 0 && wx < size.width - 2 && wy > 1 && wy < size.height - 2 {
-                    let thickness = abs(u) < 0.55 ? 2 : 1
-                    for layer in 0..<thickness {
-                        let px = wx - wave.dir * CGFloat(layer) * cell
-                        let col = layer == 0 ? wave.color : wave.accent
-                        context.fill(
-                            Path(CGRect(x: px, y: wy, width: 1.75, height: 1.75)),
-                            with: .color(col.opacity(fade * (layer == 0 ? 1.0 : 0.65)))
-                        )
+                    primaryPath.addRect(CGRect(x: wx, y: wy, width: 1.75, height: 1.75))
+                    if abs(u) < 0.55 {
+                        let px = wx - wave.dir * cell
+                        accentPath.addRect(CGRect(x: px, y: wy, width: 1.75, height: 1.75))
                     }
                 }
                 dy += cell
+            }
+            if !primaryPath.isEmpty {
+                context.fill(primaryPath, with: .color(wave.color.opacity(fade)))
+            }
+            if !accentPath.isEmpty {
+                context.fill(accentPath, with: .color(wave.accent.opacity(fade * 0.65)))
             }
         }
 
@@ -1582,13 +1685,12 @@ struct IslandPixelStrikeStage: View {
         }
 
         // 6. Active running Agent pixel sprite squad (right: 1 centered, 2-3 staggered)
+        let hasMissing = !sim.missingPixels.isEmpty
         for slot in slots {
             let sprite = sprites[slot.index % sprites.count]
-            let missingSet = Set(
-                sim.missingPixels
-                    .filter { $0.agentIndex == slot.index }
-                    .map(\.cellIndex)
-            )
+            let missingSet: Set<Int> = hasMissing
+                ? Set(sim.missingPixels.lazy.filter { $0.agentIndex == slot.index }.map(\.cellIndex))
+                : []
             let kick = slot.index < sim.agentKick.count ? sim.agentKick[slot.index] : 0
             let squash = slot.index < sim.agentSquash.count ? sim.agentSquash[slot.index] : 0
             let flash = slot.index < sim.agentFlash.count ? sim.agentFlash[slot.index] : 0
@@ -1632,7 +1734,6 @@ struct IslandPixelStrikeStage: View {
     ) {
         let n = CGFloat(sprite.gridSize)
         let step = size / n
-        let gap: CGFloat = step >= 1.6 ? 0.24 : 0.12
         // Command hits from left & return bursts both recoil the right-side Agent subtly rightward
         let impact = max(squash, kick * 0.75)
         let sx = CGFloat(1.0 - 0.13 * impact)
@@ -1642,20 +1743,24 @@ struct IslandPixelStrikeStage: View {
         var localCtx = context
         localCtx.translateBy(x: centerX + recoilX, y: centerY)
         localCtx.scaleBy(x: sx, y: sy)
+        localCtx.translateBy(x: -size * 0.5, y: -size * 0.5)
+        localCtx.scaleBy(x: step, y: step)
 
-        let origin = -size * 0.5
-        for (idx, cell) in sprite.cells.enumerated() {
-            let alpha: Double = missing.contains(idx) ? 0.22 : 1.0
-            let rect = CGRect(
-                x: origin + CGFloat(cell.gx) * step,
-                y: origin + CGFloat(cell.gy) * step,
-                width: max(0.95, step - gap),
-                height: max(0.95, step - gap)
-            )
-            localCtx.fill(Path(rect), with: .color(cell.color.opacity(alpha)))
-            if flash > 0.04 {
-                localCtx.fill(Path(rect), with: .color(Color.white.opacity(0.62 * flash)))
+        for batch in sprite.colorBatches {
+            localCtx.fill(batch.path, with: .color(batch.color))
+        }
+        if !missing.isEmpty {
+            var dimPath = Path()
+            for idx in missing where idx < sprite.cells.count {
+                let cell = sprite.cells[idx]
+                dimPath.addRect(CGRect(x: CGFloat(cell.gx) + 0.05, y: CGFloat(cell.gy) + 0.05, width: 0.90, height: 0.90))
             }
+            if !dimPath.isEmpty {
+                localCtx.fill(dimPath, with: .color(IslandTheme.surface.opacity(0.78)))
+            }
+        }
+        if flash > 0.04 {
+            localCtx.fill(sprite.silhouettePath, with: .color(Color.white.opacity(0.62 * flash)))
         }
     }
 
@@ -1675,7 +1780,6 @@ struct IslandPixelStrikeStage: View {
         let sprite = IslandPixelSpriteCache.appSprite
         let n = sprite.gridSize
         let step = size / CGFloat(n)
-        let gap: CGFloat = step >= 1.6 ? 0.22 : 0.12
 
         // Token hits from right & command recoil both push/squash the left-side App icon slightly left
         let compress = max(squash, kick * 0.45)
@@ -1686,30 +1790,32 @@ struct IslandPixelStrikeStage: View {
         var localCtx = context
         localCtx.translateBy(x: centerX + knockX + jitterX, y: centerY + jitterY)
         localCtx.scaleBy(x: scaleX, y: scaleY)
+        localCtx.translateBy(x: -size * 0.5, y: -size * 0.5)
+        localCtx.scaleBy(x: step, y: step)
 
-        let origin = -size * 0.5
+        for batch in sprite.colorBatches {
+            localCtx.fill(batch.path, with: .color(batch.color))
+        }
+
         // Charge fills the tile from the bottom row up: its lit dots take the colors of the tokens
         // that came back, and the dark tile between them glows faintly.
         let chargedFrom = Double(n - 1) - max(0, min(1, charge)) * Double(n - 2)
-        for cell in sprite.cells {
-            let rect = CGRect(
-                x: origin + CGFloat(cell.gx) * step,
-                y: origin + CGFloat(cell.gy) * step,
-                width: max(0.9, step - gap),
-                height: max(0.9, step - gap)
-            )
-            let charged = Double(cell.gy) >= chargedFrom && cell.gy > 0 && cell.gy < n - 1
-            let rowColor = chargeColors.isEmpty
-                ? IslandTheme.prismCobalt
-                : chargeColors[(n - 1 - cell.gy) % chargeColors.count]
-            localCtx.fill(Path(rect), with: .color(cell.color))
-            if charged {
-                let lit = cell.luminance > 0.4
-                localCtx.fill(Path(rect), with: .color(rowColor.opacity(lit ? 0.78 : 0.26)))
+        let startRow = max(1, Int(ceil(chargedFrom)))
+        if startRow < n - 1 {
+            for gy in startRow..<(n - 1) {
+                let rowColor = chargeColors.isEmpty
+                    ? IslandTheme.prismCobalt
+                    : chargeColors[(n - 1 - gy) % chargeColors.count]
+                if gy < sprite.litRowPaths.count, !sprite.litRowPaths[gy].isEmpty {
+                    localCtx.fill(sprite.litRowPaths[gy], with: .color(rowColor.opacity(0.78)))
+                }
+                if gy < sprite.dimRowPaths.count, !sprite.dimRowPaths[gy].isEmpty {
+                    localCtx.fill(sprite.dimRowPaths[gy], with: .color(rowColor.opacity(0.26)))
+                }
             }
-            if flash > 0.02 {
-                localCtx.fill(Path(rect), with: .color(Color.white.opacity(0.6 * flash)))
-            }
+        }
+        if flash > 0.02 {
+            localCtx.fill(sprite.silhouettePath, with: .color(Color.white.opacity(0.6 * flash)))
         }
     }
 

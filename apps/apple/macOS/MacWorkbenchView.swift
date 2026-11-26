@@ -5437,6 +5437,7 @@ extension MacWorkbenchView {
                     RunningSessionsRail(
                         model: model,
                         rpgStore: host.island.rpgStore,
+                        gameStore: host.island.gameStore,
                         collapsed: runningRailCollapsed || showWorkbenchDrawer,
                         selectedSessionID: state.showStudioHome ? nil : state.selectedSessionSummary?.id,
                         onSelect: { sid in

@@ -94,7 +94,8 @@ final class PrismIslandPanelController {
         screenID: UInt32,
         model: PrismIslandModel,
         usageStore: PrismUsageStore,
-        settingsStore: UsageSettingsStore
+        settingsStore: UsageSettingsStore,
+        gameStore: GameStore
     ) {
         self.screenID = screenID
         self.model = model
@@ -126,6 +127,7 @@ final class PrismIslandPanelController {
                 model: model,
                 usageStore: usageStore,
                 settingsStore: settingsStore,
+                gameStore: gameStore,
                 screenID: screenID,
                 geometryBox: geometryBox
             )
@@ -213,7 +215,10 @@ final class PrismIslandPanelController {
 
     func hitRect() -> NSRect {
         let m = model.effectiveMode(for: screenID)
-        let size = model.frameSize(for: geometryBox.geometry, mode: m)
+        if m == .hidden || (m == .collapsed && model.collapsedQuiet && !geometryBox.geometry.hasNotch) {
+            return .zero
+        }
+        let size = model.frameSize(for: geometryBox.geometry, mode: m, screenID: screenID)
         return NSRect(
             x: topAnchor.x - size.width / 2,
             y: topAnchor.y - size.height,
@@ -223,7 +228,13 @@ final class PrismIslandPanelController {
     }
 
     var topBandMinY: CGFloat {
-        topAnchor.y - max(geometryBox.geometry.notchHeight, 44) - 18
+        let bandHeight: CGFloat
+        if model.effectiveMode(for: screenID) == .collapsed && model.isSessionStackActive {
+            bandHeight = model.frameSize(for: geometryBox.geometry, mode: .collapsed, screenID: screenID).height
+        } else {
+            bandHeight = max(geometryBox.geometry.notchHeight, 44)
+        }
+        return topAnchor.y - bandHeight - 18
     }
 
     func setIgnoresMouseEvents(_ ignore: Bool) {
@@ -353,6 +364,7 @@ final class PrismIslandHub {
     private let model: PrismIslandModel
     private let usageStore: PrismUsageStore
     private let settingsStore: UsageSettingsStore
+    private let gameStore: GameStore
 
     private var enabled = false
     private var desiredChoices: [DisplayChoice] = []
@@ -385,17 +397,23 @@ final class PrismIslandHub {
     init(
         model: PrismIslandModel,
         usageStore: PrismUsageStore,
-        settingsStore: UsageSettingsStore
+        settingsStore: UsageSettingsStore,
+        gameStore: GameStore
     ) {
         self.model = model
         self.usageStore = usageStore
         self.settingsStore = settingsStore
+        self.gameStore = gameStore
 
         model.onModeChange = { [weak self] mode in
             self?.handleModeChange(mode)
         }
         model.onAnnounce = { [weak self] text in
             self?.announce(text)
+        }
+        model.onHitAreaChange = { [weak self] in
+            self?.refreshPreFilter()
+            self?.pointerMoved()
         }
 
         installNotificationObservers()
@@ -477,7 +495,8 @@ final class PrismIslandHub {
                     screenID: sid,
                     model: model,
                     usageStore: usageStore,
-                    settingsStore: settingsStore
+                    settingsStore: settingsStore,
+                    gameStore: gameStore
                 )
                 controllers[sid] = controller
                 controller.handleModeChange(model.mode)
@@ -738,7 +757,7 @@ final class PrismIslandHub {
         guard model.mode == .collapsed || model.mode == .grown else { return }
         if ProcessInfo.processInfo.systemUptime - collapsedAt < Self.hoverCooldown { return }
         model.holdPop(paused: true)
-        model.prepare()
+        model.prepare(onScreen: screenID)
         armHoverTimer(after: Self.dwellDelay, screenID: screenID)
     }
 

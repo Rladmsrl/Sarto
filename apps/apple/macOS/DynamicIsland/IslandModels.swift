@@ -180,6 +180,8 @@ struct IslandRowItem: Equatable, Identifiable, Sendable {
     let isSubagent: Bool
     var hostId: String? = nil
     var hostName: String? = nil
+    /// The turn has ended, but commands or sub-agents it started still run in the background.
+    var background: Bool = false
 }
 
 struct IslandRequestOption: Equatable, Identifiable, Sendable {
@@ -268,8 +270,8 @@ enum IslandCollapsedFact: Equatable, Sendable {
     case failed
     /// Finished sessions the user has not looked at.
     case done(Int)
-    /// Sessions running, and how long the longest turn has run.
-    case running(count: Int, elapsed: String)
+    /// Sessions running, and when the longest turn started (epoch milliseconds).
+    case running(count: Int, since: Double?)
     /// Idle: the scarcest plan window, its agent and when it resets.
     case quota(IslandQuotaWindow, agent: IslandAgentIdentity, reset: String?)
 

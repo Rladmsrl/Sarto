@@ -32,6 +32,8 @@ export class AgentHostLink implements SyncAgentHost {
       /** The agent host's socket once it runs; rejects while it cannot. */
       socket(): Promise<string>
       log: Logger
+      /** The events this port follows; the sync's, the agents' options, by default. */
+      events?: HostEvent['type'][]
     },
   ) {}
 
@@ -98,8 +100,11 @@ export class AgentHostLink implements SyncAgentHost {
       this.port = port
       // The host serves a port as a window's from its first request, and sends it events after.
       // The sync follows the agents' options alone; every other event would cross for nothing.
-      await this.send(port, 'events.select', { types: ['agent.options'] }).catch(() => {})
-      await this.send(port, 'agents.options', undefined).catch(() => {})
+      const types = this.options.events ?? ['agent.options']
+      await this.send(port, 'events.select', { types }).catch(() => {})
+      if (types.includes('agent.options')) {
+        await this.send(port, 'agents.options', undefined).catch(() => {})
+      }
       this.emit(null)
       return port
     })().finally(() => {

@@ -944,6 +944,9 @@ export interface PlanProgress {
   total: number
   /** The step in progress, by its index from 0, and the first line of its text; null for none. */
   current: { index: number; text: string } | null
+  /** The plan entry this counts, and each step's status; absent from older hosts. */
+  ref?: string
+  steps?: ('pending' | 'in_progress' | 'completed')[]
 }
 
 /** What a session made, read from its stored thread for its card in the sidebar. */

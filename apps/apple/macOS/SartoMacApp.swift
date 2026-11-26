@@ -349,6 +349,14 @@ struct SartoMacApp: App {
                     appState.showGlobalSearchSheet = true
                 }
                 .keyboardShortcut("k", modifiers: .command)
+
+                Button(appState.l10n.tr("game.menu.open")) {
+                    wireAppLifecycle()
+                    appDelegate.restoreRegularDockPresence()
+                    openWindow(id: "expedition")
+                    NSApp.activate(ignoringOtherApps: true)
+                }
+                .keyboardShortcut("e", modifiers: [.command, .shift])
             }
             CommandGroup(replacing: .help) {
                 Button(appState.l10n.tr("report.menuItem")) {
@@ -392,6 +400,20 @@ struct SartoMacApp: App {
         .windowStyle(.titleBar)
         .windowToolbarStyle(.unifiedCompact)
         .defaultSize(width: 920, height: 640)
+
+        Window(appState.l10n.tr("game.window.title"), id: "expedition") {
+            ExpeditionWindowView(
+                appState: appState,
+                store: islandCoordinator.gameStore
+            )
+            .focusEffectDisabled()
+            .onAppear {
+                wireAppLifecycle()
+            }
+        }
+        .windowStyle(.titleBar)
+        .windowToolbarStyle(.unifiedCompact)
+        .defaultSize(width: 820, height: 700)
     }
 
     private func wireAppLifecycle() {
@@ -537,6 +559,20 @@ struct SartoMacApp: App {
         appState.applyOtherHosts(daemonManager.otherHosts)
         daemonManager.onOtherHostsUpdated = { [appState] hosts in
             appState.applyOtherHosts(hosts)
+        }
+        daemonManager.onGameEvent = { [islandCoordinator] event in
+            islandCoordinator.gameStore.apply(event)
+        }
+        islandCoordinator.gameStore.onWatchChanged = { [daemonManager] watching in
+            daemonManager.setGameWatching(watching)
+        }
+        islandCoordinator.gameStore.onSendCommand = { [daemonManager] type, args in
+            await daemonManager.sendGameCommand(type: type, args: args)
+        }
+        islandCoordinator.gameStore.onOpenExpedition = { [appDelegate, openWindow] in
+            appDelegate.restoreRegularDockPresence()
+            openWindow(id: "expedition")
+            NSApp.activate(ignoringOtherApps: true)
         }
 
         daemonManager.onAccountStatusUpdated = { [appState, daemonManager, settingsRouter] status in

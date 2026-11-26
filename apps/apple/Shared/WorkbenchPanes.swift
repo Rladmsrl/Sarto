@@ -1984,8 +1984,8 @@ private struct ImageFilePreviewPane: View {
     }
 }
 
-/// Rendered Markdown preview for `.md` files in the Files workbench pane (both project files and
-/// host-authenticated per-session agent files such as Antigravity brain artifacts).
+/// Rendered GitHub-Flavored Markdown + safe HTML preview for `.md` files in the Files workbench
+/// pane (both project files and host-authenticated per-session agent files).
 private struct MarkdownFilePreviewPane: View {
     @Environment(\.prismTokens) private var tokens
     @Environment(\.prismL10n) private var l10n
@@ -1994,8 +1994,8 @@ private struct MarkdownFilePreviewPane: View {
     let filePath: String
     let onPreviewImage: (PrismImagePreviewItem) -> Void
 
-    @State private var blocks: [MarkdownBlock] = []
-    @State private var copiedBlockID: Int? = nil
+    @State private var rendered: GitHubMarkdownHTMLRenderer.Output? = nil
+    @State private var allowRemoteImages: Bool = false
 
     private var allowedImageRoot: String? {
         guard !workspace.isRemoteWorkspace else { return nil }
@@ -2014,601 +2014,87 @@ private struct MarkdownFilePreviewPane: View {
         return full.deletingLastPathComponent().path
     }
 
+    private struct RenderTrigger: Equatable {
+        let revision: UInt64
+        let filePath: String
+        let allowedRoot: String?
+        let allowRemoteImages: Bool
+        let theme: MarkdownPreviewTheme
+    }
+
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 11) {
-                ForEach(blocks) { block in
-                    blockView(block)
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .background(tokens.codeBackground)
-        .environment(\.openURL, OpenURLAction { url in
-            #if os(macOS)
-            if let filePath = ThreadProseTextView.resolveLocalFilePath(url: url, projectPath: baseDirectory ?? workspace.activeProjectPath) {
-                let rel = ThreadTimelineBuilder.relativeDisplayPath(filePath, projectPath: workspace.activeProjectPath)
-                Task { await workspace.openFile(path: rel) }
-                return .handled
-            }
-            #else
-            if url.isFileURL {
-                let rel = ThreadTimelineBuilder.relativeDisplayPath(url.path, projectPath: workspace.activeProjectPath)
-                Task { await workspace.openFile(path: rel) }
-                return .handled
-            }
-            #endif
-            if let scheme = url.scheme?.lowercased(),
-               scheme == "http" || scheme == "https" || scheme == "mailto" {
-                return .systemAction
-            }
-            return .discarded
-        })
-        .task(id: workspace.openFileTextRevision) {
-            let text = workspace.openFileText
-            let parsed = await Task.detached(priority: .userInitiated) {
-                MarkdownBlockParser.parse(text)
-            }.value
-            guard !Task.isCancelled else { return }
-            blocks = parsed
-        }
-    }
+        let theme = MarkdownPreviewTheme(tokens: tokens)
+        let trigger = RenderTrigger(
+            revision: workspace.openFileTextRevision,
+            filePath: filePath,
+            allowedRoot: allowedImageRoot,
+            allowRemoteImages: allowRemoteImages,
+            theme: theme
+        )
 
-    @ViewBuilder
-    private func blockView(_ block: MarkdownBlock) -> some View {
-        switch block {
-        case .heading(_, let level, let text):
-            VStack(alignment: .leading, spacing: 5) {
-                inlineText(text)
-                    .font(.system(size: level == 1 ? 18 : (level == 2 ? 15.5 : (level == 3 ? 13.5 : 12.5)), weight: .semibold))
-                    .foregroundStyle(tokens.foreground)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-                if level == 1 {
-                    Rectangle().fill(tokens.borderEtched).frame(height: 1)
-                }
-            }
-            .padding(.top, level <= 2 ? 6 : 3)
-
-        case .paragraph(_, let text):
-            bodyText(text)
-
-        case .bulletList(_, let items):
-            VStack(alignment: .leading, spacing: 5) {
-                ForEach(Array(items.enumerated()), id: \.offset) { _, item in
-                    HStack(alignment: .firstTextBaseline, spacing: 7) {
-                        Circle()
-                            .fill(tokens.mutedForeground.opacity(0.75))
-                            .frame(width: 4.5, height: 4.5)
-                            .alignmentGuide(.firstTextBaseline) { $0[.bottom] + 3.8 }
-                        bodyText(item)
-                    }
-                }
-            }
-            .padding(.leading, 4)
-
-        case .orderedList(_, let items):
-            VStack(alignment: .leading, spacing: 5) {
-                ForEach(Array(items.enumerated()), id: \.offset) { _, item in
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text("\(item.number).")
-                            .font(.system(size: 12, weight: .medium, design: .monospaced))
-                            .foregroundStyle(tokens.mutedForeground)
-                            .frame(minWidth: 18, alignment: .trailing)
-                        bodyText(item.text)
-                    }
-                }
-            }
-
-        case .blockquote(_, let text):
-            inlineText(text)
-                .font(.system(size: 12.5))
-                .lineSpacing(4)
-                .foregroundStyle(tokens.secondaryForeground)
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.leading, 10)
-                .padding(.vertical, 2)
-                .overlay(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 1)
-                        .fill(tokens.prismCobalt.opacity(0.55))
-                        .frame(width: 2.5)
-                }
-
-        case .alert(_, let kind, let text):
-            GitHubAlertCardView(kind: kind, text: text)
-
-        case .table(_, let headers, let rows):
-            tableView(headers: headers, rows: rows)
-
-        case .codeBlock(let blockID, let language, let filename, let code, _):
-            if language?.lowercased() == "carousel" {
-                MarkdownCarouselCardView(
-                    source: code,
-                    allowedImageRoot: allowedImageRoot,
-                    baseDirectory: baseDirectory,
-                    onPreviewImage: onPreviewImage
-                )
-            } else {
-                codeBlockView(id: blockID, language: language, filename: filename, code: code)
-            }
-
-        case .mermaid(_, let source):
-            OfflineDiagramCardView(kind: .mermaid(source))
-
-        case .svg(_, let source):
-            OfflineDiagramCardView(kind: .svg(source))
-
-        case .mathBlock(_, let latex):
-            OfflineDiagramCardView(kind: .math(latex))
-
-        case .image(_, let alt, let url):
-            MarkdownFileImageView(
-                alt: alt,
-                url: url,
-                allowedRoot: allowedImageRoot,
-                baseDirectory: baseDirectory,
-                onPreview: onPreviewImage
-            )
-
-        case .divider:
-            Rectangle()
-                .fill(tokens.borderEtched)
-                .frame(height: 1)
-                .padding(.vertical, 4)
-        }
-    }
-
-    private func bodyText(_ raw: String) -> some View {
-        inlineText(raw)
-            .font(.system(size: 13))
-            .lineSpacing(4.5)
-            .foregroundStyle(tokens.foreground.opacity(0.92))
-            .textSelection(.enabled)
-            .fixedSize(horizontal: false, vertical: true)
-    }
-
-    private func inlineText(_ raw: String) -> Text {
-        if let attr = InlineMarkdownEngine.render(raw, isDark: tokens.palette.isDark) {
-            return Text(attr)
-        }
-        return Text(raw)
-    }
-
-    private func codeBlockView(id: Int, language: String?, filename: String?, code: String) -> some View {
-        let label = filename ?? language ?? ""
-        let isCopied = copiedBlockID == id
-        return VStack(alignment: .leading, spacing: 0) {
-            if !label.isEmpty || !code.isEmpty {
-                HStack(spacing: 6) {
-                    if !label.isEmpty {
-                        Text(label)
-                            .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(tokens.mutedForeground)
-                            .lineLimit(1)
-                    }
+        VStack(spacing: 0) {
+            if let out = rendered, out.gatedRemoteImageCount > 0 && !allowRemoteImages {
+                HStack(spacing: 8) {
+                    Image(systemName: "photo.on.rectangle")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(tokens.mutedForeground)
+                    Text("\(out.gatedRemoteImageCount)")
+                        .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(tokens.secondaryForeground)
                     Spacer()
-                    #if os(macOS)
-                    Button {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(code, forType: .string)
-                        copiedBlockID = id
-                        Task { @MainActor in
-                            try? await Task.sleep(for: .seconds(1.4))
-                            if copiedBlockID == id { copiedBlockID = nil }
-                        }
-                    } label: {
-                        HStack(spacing: 3) {
-                            Image(systemName: isCopied ? "checkmark" : "doc.on.doc")
-                                .font(.system(size: 9.5, weight: .medium))
-                            Text(l10n.tr(isCopied ? "thread.copied" : "thread.copy"))
-                                .font(.system(size: 10, weight: .medium))
-                        }
-                        .foregroundStyle(isCopied ? tokens.success : tokens.mutedForeground)
+                    Button(l10n.tr("thread.image.loadRemote")) {
+                        allowRemoteImages = true
                     }
                     .buttonStyle(.plain)
-                    #endif
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(tokens.primary)
                 }
-                .padding(.horizontal, 10)
+                .padding(.horizontal, 12)
                 .padding(.vertical, 5)
-                .background(tokens.codeHeaderBackground)
+                .background(tokens.surface1)
                 Rectangle().fill(tokens.borderEtched).frame(height: 1)
             }
-            ScrollView(.horizontal, showsIndicators: false) {
-                Text(code)
-                    .font(.system(size: 11.5, design: .monospaced))
-                    .foregroundStyle(tokens.foreground.opacity(0.9))
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: true, vertical: true)
-                    .padding(10)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(tokens.surface1)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: tokens.rSM, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: tokens.rSM, style: .continuous)
-                .strokeBorder(tokens.borderEtched, lineWidth: 1)
-        )
-    }
 
-    private func tableView(headers: [String], rows: [[String]]) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            Grid(alignment: .leading, horizontalSpacing: 0, verticalSpacing: 0) {
-                GridRow {
-                    ForEach(Array(headers.enumerated()), id: \.offset) { _, header in
-                        inlineText(header)
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(tokens.foreground)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .frame(maxWidth: 260, alignment: .leading)
+            #if os(macOS)
+            if let out = rendered {
+                MarkdownDocumentWebView(
+                    html: out.html,
+                    isDark: tokens.palette.isDark,
+                    onOpenLocalFile: { fullPath in
+                        let rel = ThreadTimelineBuilder.relativeDisplayPath(fullPath, projectPath: workspace.activeProjectPath)
+                        Task { await workspace.openFile(path: rel) }
+                    },
+                    onPreviewLocalImage: { index in
+                        guard index >= 0 && index < out.localImages.count else { return }
+                        let asset = out.localImages[index]
+                        onPreviewImage(PrismImagePreviewItem(title: asset.title, data: asset.data))
                     }
-                }
-                .background(tokens.codeHeaderBackground)
-
-                ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
-                    Rectangle()
-                        .fill(tokens.borderEtched)
-                        .frame(height: 1)
-                        .gridCellUnsizedAxes(.horizontal)
-                    GridRow {
-                        ForEach(Array(row.enumerated()), id: \.offset) { _, cell in
-                            inlineText(cell)
-                                .font(.system(size: 12))
-                                .lineSpacing(3)
-                                .foregroundStyle(tokens.foreground.opacity(0.9))
-                                .textSelection(.enabled)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .frame(maxWidth: 260, alignment: .leading)
-                        }
-                    }
-                }
-            }
-        }
-        .background(tokens.surface1)
-        .clipShape(RoundedRectangle(cornerRadius: tokens.rSM, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: tokens.rSM, style: .continuous)
-                .strokeBorder(tokens.borderEtched, lineWidth: 1)
-        )
-    }
-}
-
-/// Interactive slide gallery for Antigravity ```` ```carousel ```` blocks separated by `<!-- slide -->`.
-private struct MarkdownCarouselCardView: View {
-    @Environment(\.prismTokens) private var tokens
-    @Environment(\.prismL10n) private var l10n
-
-    let source: String
-    let allowedImageRoot: String?
-    let baseDirectory: String?
-    let onPreviewImage: (PrismImagePreviewItem) -> Void
-
-    @State private var currentIndex: Int = 0
-
-    private var slides: [[MarkdownBlock]] {
-        source
-            .components(separatedBy: "<!-- slide -->")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-            .map { MarkdownBlockParser.parse($0) }
-    }
-
-    var body: some View {
-        let allSlides = slides
-        let safeIndex = min(max(0, currentIndex), max(0, allSlides.count - 1))
-
-        VStack(alignment: .leading, spacing: 8) {
-            if !allSlides.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(allSlides[safeIndex]) { block in
-                        slideBlockView(block)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(10)
-
-                if allSlides.count > 1 {
-                    Rectangle().fill(tokens.borderEtched).frame(height: 1)
-                    HStack(spacing: 8) {
-                        Button {
-                            currentIndex = (safeIndex - 1 + allSlides.count) % allSlides.count
-                        } label: {
-                            Image(systemName: "chevron.left")
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundStyle(tokens.secondaryForeground)
-                                .frame(width: 24, height: 22)
-                                .background(RoundedRectangle(cornerRadius: tokens.rXS).fill(tokens.hoverWash))
-                        }
-                        .buttonStyle(.plain)
-                        .help(l10n.tr("workbench.carousel.prev"))
-
-                        HStack(spacing: 5) {
-                            ForEach(0..<allSlides.count, id: \.self) { idx in
-                                Button {
-                                    currentIndex = idx
-                                } label: {
-                                    Capsule()
-                                        .fill(idx == safeIndex ? tokens.primary : tokens.borderStrong)
-                                        .frame(width: idx == safeIndex ? 16 : 6, height: 5)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-
-                        Spacer()
-
-                        Text("\(safeIndex + 1) / \(allSlides.count)")
-                            .font(.system(size: 10.5, weight: .medium, design: .monospaced))
-                            .foregroundStyle(tokens.mutedForeground)
-
-                        Button {
-                            currentIndex = (safeIndex + 1) % allSlides.count
-                        } label: {
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundStyle(tokens.secondaryForeground)
-                                .frame(width: 24, height: 22)
-                                .background(RoundedRectangle(cornerRadius: tokens.rXS).fill(tokens.hoverWash))
-                        }
-                        .buttonStyle(.plain)
-                        .help(l10n.tr("workbench.carousel.next"))
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.bottom, 8)
-                }
-            }
-        }
-        .background(tokens.surface1)
-        .clipShape(RoundedRectangle(cornerRadius: tokens.rSM, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: tokens.rSM, style: .continuous)
-                .strokeBorder(tokens.borderEtched, lineWidth: 1)
-        )
-    }
-
-    @ViewBuilder
-    private func slideBlockView(_ block: MarkdownBlock) -> some View {
-        switch block {
-        case .image(_, let alt, let url):
-            MarkdownFileImageView(
-                alt: alt,
-                url: url,
-                allowedRoot: allowedImageRoot,
-                baseDirectory: baseDirectory,
-                onPreview: onPreviewImage
-            )
-        case .codeBlock(_, _, _, let code, _):
-            ScrollView(.horizontal, showsIndicators: false) {
-                Text(code)
-                    .font(.system(size: 11.5, design: .monospaced))
-                    .foregroundStyle(tokens.foreground.opacity(0.9))
-                    .textSelection(.enabled)
-                    .padding(8)
-            }
-            .background(tokens.codeBackground)
-            .clipShape(RoundedRectangle(cornerRadius: tokens.rXS, style: .continuous))
-        case .paragraph(_, let text):
-            Text(InlineMarkdownEngine.render(text, isDark: tokens.palette.isDark) ?? AttributedString(text))
-                .font(.system(size: 12.5))
-                .foregroundStyle(tokens.foreground.opacity(0.9))
-                .textSelection(.enabled)
-        default:
-            EmptyView()
-        }
-    }
-}
-
-/// Safe local image renderer for Markdown file preview: loads images strictly contained inside the
-/// authenticated root (either `projectPath` or the session's `files.agentFolder`) after symlink
-/// canonicalization, and gates remote URLs behind an explicit click.
-private struct MarkdownFileImageView: View {
-    @Environment(\.prismTokens) private var tokens
-    @Environment(\.prismL10n) private var l10n
-
-    let alt: String
-    let url: String
-    let allowedRoot: String?
-    let baseDirectory: String?
-    let onPreview: (PrismImagePreviewItem) -> Void
-
-    private struct LoadedImage: Sendable {
-        let key: String
-        let data: Data
-        let image: Image
-        let fileName: String
-        let fileURL: URL
-    }
-
-    @State private var loaded: LoadedImage? = nil
-    @State private var remoteApproved: Bool = false
-
-    var body: some View {
-        Group {
-            if let local = loaded {
-                Button {
-                    onPreview(PrismImagePreviewItem(
-                        title: alt.isEmpty ? local.fileName : alt,
-                        data: local.data
-                    ))
-                } label: {
-                    VStack(alignment: .leading, spacing: 5) {
-                        local.image
-                            .resizable()
-                            .scaledToFit()
-                            .frame(maxHeight: 360)
-                            .clipShape(RoundedRectangle(cornerRadius: tokens.rSM, style: .continuous))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: tokens.rSM, style: .continuous)
-                                    .strokeBorder(tokens.borderEtched, lineWidth: 1)
-                            )
-                        if !alt.isEmpty {
-                            Text(alt)
-                                .font(.system(size: 11))
-                                .foregroundStyle(tokens.mutedForeground)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                #if os(macOS)
-                .contextMenu {
-                    Button {
-                        onPreview(PrismImagePreviewItem(
-                            title: alt.isEmpty ? local.fileName : alt,
-                            data: local.data
-                        ))
-                    } label: {
-                        Label(l10n.tr("workbench.preview"), systemImage: "magnifyingglass")
-                    }
-                    Button {
-                        NSWorkspace.shared.activateFileViewerSelecting([local.fileURL])
-                    } label: {
-                        Label(l10n.tr("contextMenu.revealInFinder"), systemImage: "folder")
-                    }
-                }
-                #endif
-            } else if let remote = Self.remoteURL(url) {
-                if remoteApproved {
-                    AsyncImage(url: remote) { phase in
-                        switch phase {
-                        case .success(let img):
-                            img.resizable()
-                                .scaledToFit()
-                                .frame(maxWidth: .infinity, maxHeight: 340, alignment: .leading)
-                                .clipShape(RoundedRectangle(cornerRadius: tokens.rSM, style: .continuous))
-                        default:
-                            fallbackPill(label: alt.isEmpty ? url : alt)
-                        }
-                    }
-                } else {
-                    Button {
-                        remoteApproved = true
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "photo")
-                                .font(.system(size: 11))
-                                .foregroundStyle(tokens.mutedForeground)
-                            Text(alt.isEmpty ? (remote.host ?? remote.absoluteString) : alt)
-                                .font(.system(size: 11.5))
-                                .foregroundStyle(tokens.secondaryForeground)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                            Text(l10n.tr("thread.image.loadRemote"))
-                                .font(.system(size: 10.5, weight: .medium))
-                                .foregroundStyle(tokens.primary)
-                        }
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(RoundedRectangle(cornerRadius: tokens.rXS).fill(tokens.surface2))
-                    }
-                    .buttonStyle(.plain)
-                }
+                )
             } else {
-                fallbackPill(label: alt.isEmpty ? url : alt)
+                Color.clear
             }
+            #endif
         }
-        .task(id: "\(allowedRoot ?? "")|\(baseDirectory ?? "")|\(url)") {
-            guard let root = allowedRoot else {
-                loaded = nil
-                return
-            }
-            let raw = url
-            let base = baseDirectory
-            let result = await Task.detached(priority: .utility) {
-                Self.loadContainedImage(raw: raw, allowedRoot: root, baseDirectory: base)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(tokens.codeBackground)
+        .onChange(of: filePath) { _, _ in
+            allowRemoteImages = false
+        }
+        .task(id: trigger) {
+            let text = workspace.openFileText
+            let options = GitHubMarkdownHTMLRenderer.Options(
+                allowedRoot: trigger.allowedRoot,
+                baseDirectory: baseDirectory,
+                activeProjectPath: workspace.activeProjectPath,
+                allowRemoteImages: trigger.allowRemoteImages,
+                theme: trigger.theme
+            )
+            let compiled = await Task.detached(priority: .userInitiated) {
+                GitHubMarkdownHTMLRenderer.render(markdown: text, options: options)
             }.value
             guard !Task.isCancelled else { return }
-            loaded = result
+            rendered = compiled
         }
-    }
-
-    private func fallbackPill(label: String) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: "photo")
-                .font(.system(size: 11))
-                .foregroundStyle(tokens.mutedForeground)
-            Text(label)
-                .font(.system(size: 11.5))
-                .foregroundStyle(tokens.secondaryForeground)
-                .lineLimit(1)
-                .truncationMode(.middle)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(RoundedRectangle(cornerRadius: tokens.rXS).fill(tokens.surface2))
-    }
-
-    private static func remoteURL(_ raw: String) -> URL? {
-        guard let remote = URL(string: raw),
-              let scheme = remote.scheme?.lowercased(),
-              scheme == "http" || scheme == "https"
-        else { return nil }
-        return remote
-    }
-
-    private nonisolated static func loadContainedImage(
-        raw: String,
-        allowedRoot: String,
-        baseDirectory: String?
-    ) -> LoadedImage? {
-        guard let safeURL = containedImageURL(raw: raw, allowedRoot: allowedRoot, baseDirectory: baseDirectory) else {
-            return nil
-        }
-        let modified = (try? FileManager.default.attributesOfItem(atPath: safeURL.path))?[.modificationDate] as? Date
-        let key = "\(safeURL.path)|\(modified?.timeIntervalSince1970 ?? 0)"
-        guard let data = try? Data(contentsOf: safeURL),
-              data.count <= 20 * 1024 * 1024,
-              let img = PrismImageDecoder.swiftUIImage(from: data, cacheKey: "md-preview-img:\(key)")
-        else { return nil }
-        return LoadedImage(key: key, data: data, image: img, fileName: safeURL.lastPathComponent, fileURL: safeURL)
-    }
-
-    /// Resolves `raw` only when its symlink-canonicalized path lies strictly inside `allowedRoot`.
-    private nonisolated static func containedImageURL(
-        raw: String,
-        allowedRoot: String,
-        baseDirectory: String?
-    ) -> URL? {
-        guard !allowedRoot.isEmpty, !raw.isEmpty else { return nil }
-        let normalizedRaw: String
-        if let parsed = URL(string: raw), parsed.isFileURL {
-            normalizedRaw = parsed.path
-        } else if raw.contains("://") {
-            return nil
-        } else {
-            normalizedRaw = raw
-        }
-
-        let rootResolved = URL(fileURLWithPath: allowedRoot, isDirectory: true)
-            .resolvingSymlinksInPath()
-            .standardizedFileURL
-        let rootPrefix = rootResolved.path.hasSuffix("/") ? rootResolved.path : (rootResolved.path + "/")
-
-        var candidates: [URL] = []
-        if normalizedRaw.hasPrefix("/") {
-            candidates.append(URL(fileURLWithPath: normalizedRaw))
-        } else {
-            if let baseDirectory, !baseDirectory.isEmpty {
-                candidates.append(URL(fileURLWithPath: baseDirectory, isDirectory: true).appendingPathComponent(normalizedRaw))
-            }
-            candidates.append(rootResolved.appendingPathComponent(normalizedRaw))
-        }
-
-        for candidate in candidates {
-            let resolved = candidate.resolvingSymlinksInPath().standardizedFileURL
-            if resolved.path.hasPrefix(rootPrefix),
-               FileManager.default.fileExists(atPath: resolved.path) {
-                return resolved
-            }
-        }
-        return nil
     }
 }
 

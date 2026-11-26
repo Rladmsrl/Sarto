@@ -54,11 +54,19 @@ it("carries the latest plan's progress in the session's summary", async () => {
     done: 1,
     total: 4,
     current: { index: 1, text: 'Find the second clock read' },
+    ref: expect.any(String),
+    steps: ['completed', 'in_progress', 'pending', 'pending'],
   })
   await window.until(
     () => window.summary(id)?.plan?.done === 4 && window.summary(id)?.status === 'ready',
   )
-  expect(window.summary(id)?.plan).toEqual({ done: 4, total: 4, current: null })
+  expect(window.summary(id)?.plan).toEqual({
+    done: 4,
+    total: 4,
+    current: null,
+    ref: expect.any(String),
+    steps: ['completed', 'completed', 'completed', 'completed'],
+  })
 })
 
 it("carries the running turn's start in the session's summary", async () => {

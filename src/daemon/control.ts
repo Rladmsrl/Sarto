@@ -51,6 +51,20 @@ import {
   type CloudDevice,
 } from './cloud-account'
 import type { HostState } from './forked-host'
+import {
+  GAME_PROTOCOL_VERSION,
+  parseCommand,
+  type CommandResult,
+  type GameStateView,
+  type ServerFrame,
+} from '@sarto/wire/game'
+import type { GameLinkStatus } from './game/link'
+
+/** A player's command for the game service, without the envelope the daemon adds. */
+export interface GameCommandParams {
+  type: string
+  args: Record<string, unknown>
+}
 
 /** A host that takes ports; the remote host takes devices' connections instead. */
 export type HostName = 'agent' | 'terminal'
@@ -187,6 +201,18 @@ export interface ControlCalls {
   /** The status, then `account.updated` whenever it changes, until the connection closes. */
   'account.subscribe': { params: undefined; result: CloudAccountStatus }
   /**
+   * The idle game's link and latest state, then `game.status` and `game.frame` (state, live
+   * battle events, notices) until the connection closes.
+   */
+  'game.subscribe': {
+    params: undefined
+    result: { status: GameLinkStatus; state: GameStateView | null }
+  }
+  /** Marks whether a game surface is visible on this connection, opening the live battle stream. */
+  'game.watch': { params: { watching: boolean }; result: null }
+  /** Sends a player's command to the game service and returns its answer. */
+  'game.command': { params: GameCommandParams; result: CommandResult }
+  /**
    * Starts browser sign-in at the server's sign-in page; the status follows once it comes back. A
    * `serverUrl` other than the current one is taken only while signed out. Pass `openBrowser: false`
    * so a foreground app can open `authUrl` itself instead of the daemon spawning a browser opener.
@@ -314,6 +340,8 @@ export type ControlEvent =
   | { type: 'account.updated'; status: CloudAccountStatus }
   | { type: 'hosts.updated'; hosts: OtherHost[] }
   | { type: 'hosts.pairing'; pairId: number; pairing: HostPairingState }
+  | { type: 'game.status'; status: GameLinkStatus }
+  | { type: 'game.frame'; frame: ServerFrame }
 
 /** One client's connection, as a handler sees it. */
 export interface ControlConnection {
@@ -425,6 +453,27 @@ const validators: { [M in ControlMethod]: (raw: unknown) => Params<M> } = {
   'account.reload': none,
   'account.status': none,
   'account.subscribe': none,
+  'game.subscribe': none,
+  'game.watch': (raw) => {
+    const { watching } = record(raw)
+    if (typeof watching !== 'boolean') {
+      throw new ControlError('invalid_params', 'watching must be a boolean')
+    }
+    return { watching }
+  },
+  'game.command': (raw) => {
+    const { type, args } = record(raw)
+    // The game service checks the command again; this keeps junk off its socket.
+    const parsed = parseCommand({
+      v: GAME_PROTOCOL_VERSION,
+      actionId: 'check',
+      actor: 'player',
+      type,
+      args: args ?? {},
+    })
+    if (typeof parsed === 'string') throw new ControlError('invalid_params', parsed)
+    return { type: parsed.type, args: parsed.args as Record<string, unknown> }
+  },
   'account.signIn': (raw) => {
     const { serverUrl, openBrowser } = raw === undefined || raw === null ? {} : record(raw)
     if (

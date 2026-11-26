@@ -10,6 +10,7 @@ struct RunningSessionsRail: View {
 
     var model: PrismIslandModel
     var rpgStore: AgentRPGStore
+    var gameStore: GameStore? = nil
     let collapsed: Bool
     let selectedSessionID: String?
     let onSelect: (String) -> Void
@@ -26,9 +27,10 @@ struct RunningSessionsRail: View {
         l10n.tr("rail.title") != "Running"
     }
 
-    /// Sessions the rail lists: at work or waiting on the user.
+    /// Sessions the rail lists: at work, waiting on the user, or with work still running in
+    /// the background after their turn ended.
     static func rows(of model: PrismIslandModel) -> [IslandRowItem] {
-        model.rows.filter { ["running", "starting", "waiting", "sign_in"].contains($0.status) }
+        model.rows.filter { $0.background || ["running", "starting", "waiting", "sign_in"].contains($0.status) }
     }
 
     private var groups: [(agent: IslandAgentIdentity, rows: [IslandRowItem])] {
@@ -105,6 +107,10 @@ struct RunningSessionsRail: View {
             .padding(.horizontal, 14)
             .frame(height: 46)
             .overlay(alignment: .bottom) { Rectangle().fill(tokens.borderEtched).frame(height: 1) }
+
+            if let gameStore, gameStore.visible {
+                RailGameStrip(store: gameStore, paused: model.suspended)
+            }
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {

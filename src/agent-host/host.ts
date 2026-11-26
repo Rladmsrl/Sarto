@@ -1104,6 +1104,7 @@ export class AgentHost {
           const facts = this.workFacts.observe(summary)
           if (facts.length > 0) this.hub.broadcast({ type: 'work.facts', facts })
         },
+        turnUsage: (sessionId, models) => this.workFacts.noteUsage(sessionId, models),
         removed: (sessionId, portIds) => {
           if (portIds) {
             this.hub.send(portIds, { type: 'session.removed', sessionId })

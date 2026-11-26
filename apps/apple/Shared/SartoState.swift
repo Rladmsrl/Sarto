@@ -3906,6 +3906,10 @@ public final class SartoState {
         case .workFacts(let facts):
             onWorkFacts?(activeHostID, facts)
 
+        case .gameStatus, .gameFrame:
+            // The game comes from the daemon's control connection, never from a host port.
+            break
+
         case .remoteClaudeActiveChanged(let active):
             if activeHostID == Self.localHostID {
                 remoteClaudeActiveRuns = active

@@ -100,7 +100,8 @@ enum IslandProjector {
         strings: IslandStrings,
         unreadSessionKeys: Set<String>,
         nowMs: Double,
-        sources prebuilt: [LiveHostIslandSource]? = nil
+        sources prebuilt: [LiveHostIslandSource]? = nil,
+        eligibleProviderIds: Set<String>? = nil
     ) -> IslandViewSnapshot {
         let sources = prebuilt ?? state.allLiveHostSourcesForIsland()
         let multiHost = state.hasMultipleHosts
@@ -126,7 +127,8 @@ enum IslandProjector {
                 let scopedKey = "\(source.hostId)::\(summary.id)"
                 if waiting {
                     needsYouList.append(item)
-                } else if summary.status == .running || summary.status == .starting {
+                } else if summary.status == .running || summary.status == .starting
+                            || summary.stillRunning?.hasWork == true {
                     runningList.append(item)
                 } else if summary.status == .failed || summary.attention == "error" || summary.attention == "unread" || unreadSessionKeys.contains(scopedKey) {
                     finishedList.append(item)
@@ -210,7 +212,12 @@ enum IslandProjector {
             today: todayCount
         )
 
-        let notices = buildLimitNotices(agents: state.agents, strings: strings, nowMs: nowMs)
+        let notices = buildLimitNotices(
+            agents: state.agents,
+            strings: strings,
+            nowMs: nowMs,
+            eligibleProviderIds: eligibleProviderIds
+        )
         var quotas: [String: [IslandQuotaWindow]] = [:]
         for agent in state.agents {
             let windows = (agent.limits ?? []).compactMap { limit -> IslandQuotaWindow? in
@@ -309,6 +316,10 @@ enum IslandProjector {
             color: agent?.color
         )
 
+        let backgroundWork: StillRunningInfo? = ["running", "starting", "waiting", "sign_in"].contains(status)
+            ? nil
+            : summary.stillRunning.flatMap { $0.hasWork ? $0 : nil }
+
         let phase = status == "running" ? resolvedPhase(summary) : nil
         let line: String
         switch status {
@@ -323,7 +334,11 @@ enum IslandProjector {
         case "starting":
             line = strings.text("line.starting")
         default:
-            line = endingLine(summary.lastTurn, strings: strings) ?? strings.text("line.\(status)")
+            if let still = backgroundWork, status == "idle" || status == "unread" {
+                line = backgroundLine(still, strings: strings)
+            } else {
+                line = endingLine(summary.lastTurn, strings: strings) ?? strings.text("line.\(status)")
+            }
         }
 
         let cacheInfo = summary.cache ?? replica?.session.usage?.cache
@@ -370,8 +385,24 @@ enum IslandProjector {
             cache: cache,
             isSubagent: summary.parentId != nil,
             hostId: hostId,
-            hostName: hostName
+            hostName: hostName,
+            background: backgroundWork != nil
         )
+    }
+
+    private static func backgroundLine(_ still: StillRunningInfo, strings: IslandStrings) -> String {
+        if still.commands > 0 && still.subagents > 0 {
+            return strings.text("line.backgroundBoth", [
+                "commands": String(still.commands),
+                "subagents": String(still.subagents),
+            ])
+        }
+        if still.commands > 0 {
+            let key = still.commands == 1 ? "line.commands_one" : "line.commands_other"
+            return strings.text(key, ["count": String(still.commands)])
+        }
+        let key = still.subagents == 1 ? "line.subagents_one" : "line.subagents_other"
+        return strings.text(key, ["count": String(still.subagents)])
     }
 
     private static func buildPlanSnapshot(
@@ -610,13 +641,20 @@ enum IslandProjector {
         )
     }
 
+    @MainActor
     private static func buildLimitNotices(
         agents: [AgentStatusInfo],
         strings: IslandStrings,
-        nowMs: Double
+        nowMs: Double,
+        eligibleProviderIds: Set<String>? = nil
     ) -> [IslandNoticeItem] {
         var best: (agent: AgentStatusInfo, limit: PlanLimitInfo, used: Double)?
         for agent in agents {
+            if let eligibleProviderIds {
+                guard let providerId = LiveUsageSources.providerId(forAgentId: agent.id, harnessId: agent.harnessId),
+                      eligibleProviderIds.contains(providerId)
+                else { continue }
+            }
             for limit in agent.limits ?? [] {
                 if let resets = limit.resetsAt, resets <= nowMs { continue }
                 let reached = limit.state == "reached"
@@ -687,6 +725,7 @@ enum IslandProjector {
 
     /// The pop a turn that just ended raises for its ending: an error, the limit that refused it
     /// with its reset, or a turn-ended pop saying why it stopped; nil for a plain end or none.
+    @MainActor
     static func endingPop(_ last: LastTurn?, strings: IslandStrings, nowMs: Double) -> (kind: String, body: String)? {
         guard let last else { return nil }
         switch last.reason {
@@ -816,13 +855,30 @@ enum IslandProjector {
         }
     }
 
+    @MainActor
     private static func formatResetShort(resetsAtMs: Double, nowMs: Double, localeId: String) -> String {
-        let date = Date(timeIntervalSince1970: resetsAtMs / 1000)
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: localeId)
+        IslandDateFormatters.formatResetShort(resetsAtMs: resetsAtMs, nowMs: nowMs, localeId: localeId)
+    }
+}
+
+@MainActor
+private enum IslandDateFormatters {
+    private static var cache: [String: DateFormatter] = [:]
+
+    static func formatResetShort(resetsAtMs: Double, nowMs: Double, localeId: String) -> String {
         let soon = (resetsAtMs - nowMs) < 20 * 3600 * 1000
-        formatter.setLocalizedDateFormatFromTemplate(soon ? "jmm" : "EEE")
-        return formatter.string(from: date)
+        let key = "\(localeId)|\(soon ? 1 : 0)"
+        let formatter: DateFormatter
+        if let existing = cache[key] {
+            formatter = existing
+        } else {
+            let built = DateFormatter()
+            built.locale = Locale(identifier: localeId)
+            built.setLocalizedDateFormatFromTemplate(soon ? "jmm" : "EEE")
+            cache[key] = built
+            formatter = built
+        }
+        return formatter.string(from: Date(timeIntervalSince1970: resetsAtMs / 1000))
     }
 }
 
@@ -884,7 +940,11 @@ final class PrismIslandModel {
     /// The usage store answered once, so `usageQuotas` decides which quotas show.
     var usageReady = false
     var panelHeight: CGFloat = 0
+    private var panelHeightsByScreen: [UInt32: CGFloat] = [:]
     var measuring: Bool = false
+    /// Screen currently measuring the expanded body, so multi-monitor setups never mount duplicate
+    /// hidden measurement trees or clobber another screen's measured height.
+    var measuringScreenID: UInt32? = nil
 
     private(set) var opener: IslandOpener = .hover
     var openedByClick: Bool { opener == .click }
@@ -893,6 +953,7 @@ final class PrismIslandModel {
     weak var actionSink: (any IslandActionSink)?
     var onModeChange: ((IslandMode) -> Void)?
     var onAnnounce: ((String) -> Void)?
+    var onHitAreaChange: (() -> Void)?
 
     private let stuckAfterMs: Double = 5 * 60_000
     private var pops: [IslandPopItem] = []
@@ -938,13 +999,6 @@ final class PrismIslandModel {
             && collapsedSignal == nil
             && cacheLeft(rows.first?.cache)?.ending != true
             && requests.isEmpty
-            && !collapsedShowsQuota
-    }
-
-    /// Idle with a plan window to show: the standard bar carries it instead of the usage strip.
-    var collapsedShowsQuota: Bool {
-        if case .quota? = collapsed?.fact { return true }
-        return false
     }
 
     var effectiveExpandedTab: IslandExpandedTab {
@@ -1139,12 +1193,25 @@ final class PrismIslandModel {
 
     // MARK: Sizing
 
-    func setPanelHeight(_ height: CGFloat) {
+    func panelHeight(for screenID: UInt32?) -> CGFloat {
+        if let screenID, let h = panelHeightsByScreen[screenID] {
+            return h
+        }
+        return panelHeight
+    }
+
+    func setPanelHeight(_ height: CGFloat, for screenID: UInt32? = nil) {
+        if let screenID {
+            let prev = panelHeightsByScreen[screenID] ?? 0
+            if abs(height - prev) > 0.5 {
+                panelHeightsByScreen[screenID] = height
+            }
+        }
         guard abs(height - panelHeight) > 0.5 else { return }
         panelHeight = height
     }
 
-    func frameSize(for g: IslandGeometry, mode targetMode: IslandMode? = nil) -> CGSize {
+    func frameSize(for g: IslandGeometry, mode targetMode: IslandMode? = nil, screenID: UInt32? = nil) -> CGSize {
         let m = targetMode ?? mode
         switch m {
         case .hidden:
@@ -1164,7 +1231,8 @@ final class PrismIslandModel {
                 height: g.notchHeight + IslandMetrics.grownBody
             )
         case .open:
-            let body = min(max(panelHeight, 72), g.maxHeight - g.notchHeight)
+            let measured = panelHeight(for: screenID)
+            let body = min(max(measured, 72), g.maxHeight - g.notchHeight)
             return CGSize(width: openWidth(for: g), height: g.notchHeight + body)
         }
     }
@@ -1243,12 +1311,11 @@ final class PrismIslandModel {
     }
 
     func resetDay(_ ms: Double) -> String {
-        let date = Date(timeIntervalSince1970: ms / 1000)
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: strings.localeIdentifier)
-        let soon = date.timeIntervalSince(now) < 20 * 3600
-        formatter.setLocalizedDateFormatFromTemplate(soon ? "jmm" : "EEE")
-        return formatter.string(from: date)
+        IslandDateFormatters.formatResetShort(
+            resetsAtMs: ms,
+            nowMs: now.timeIntervalSince1970 * 1000,
+            localeId: strings.localeIdentifier
+        )
     }
 
     func cacheLeft(_ cache: IslandCacheWindow?) -> (text: String, ending: Bool)? {
@@ -1326,10 +1393,25 @@ final class PrismIslandModel {
     }
 
     private func recomputeCollapsed(_ rows: [IslandRowItem]) {
+        let prevStackActive = isSessionStackActive
+        let prevStackHeight = prevStackActive ? stackBodyHeight : 0
+        let prevQuiet = collapsedQuiet
+
         let collapsed = computeCollapsed(rows)
         setCollapsed(collapsed.state)
-        let quiet = quietForeground && collapsed.rank > 3
+        // Suppress unread/cache/running (ranks 4..6) while Sarto is in front with its running rail
+        // visible; rank 7 (idle) stays visible because the rail itself hides when no sessions run.
+        let quiet = quietForeground && collapsed.rank > 3 && collapsed.rank < 7
         if collapsedQuiet != quiet { collapsedQuiet = quiet }
+
+        let nextStackActive = isSessionStackActive
+        let nextStackHeight = nextStackActive ? stackBodyHeight : 0
+        if prevStackActive != nextStackActive
+            || abs(prevStackHeight - nextStackHeight) > 0.5
+            || prevQuiet != collapsedQuiet
+        {
+            onHitAreaChange?()
+        }
     }
 
     private func setCollapsed(_ next: IslandCollapsedState) {
@@ -1414,7 +1496,7 @@ final class PrismIslandModel {
         if !running.isEmpty {
             let moving = running.filter { status(of: $0) != "stuck" }
             let longest = running.compactMap { $0.turnStartedAt ?? $0.since }.min()
-            let fact = IslandCollapsedFact.running(count: running.count, elapsed: shortElapsed(since: longest))
+            let fact = IslandCollapsedFact.running(count: running.count, since: longest)
             if moving.isEmpty {
                 return (IslandCollapsedState(
                     agents: uniqueAgents(running),
@@ -1435,18 +1517,20 @@ final class PrismIslandModel {
             ), 6)
         }
 
+        // Idle: hand off to `IslandCompactUsageStrip` (active focused tool dual-window meter).
         return (IslandCollapsedState(
             agents: [],
             signal: nil,
-            fact: idleQuota().map { .quota($0.window, agent: $0.agent, reset: $0.window.resetsAt.map(resetDay)) },
+            fact: nil,
             title: latest.map(title(of:))
         ), 7)
     }
 
     /// Minutes under an hour ("12m"), hours and minutes past it ("1h 5m"), in the island's language.
-    private func shortElapsed(since ms: Double?) -> String {
+    func shortElapsed(since ms: Double?, at referenceDate: Date? = nil) -> String {
         guard let ms else { return "" }
-        let minutes = max(0, Int(now.timeIntervalSince1970 - ms / 1000) / 60)
+        let ref = referenceDate ?? now
+        let minutes = max(0, Int(ref.timeIntervalSince1970 - ms / 1000) / 60)
         if minutes < 60 { return strings.text("fact.minutes", ["m": "\(minutes)"]) }
         return strings.text("fact.hoursMinutes", ["h": "\(minutes / 60)", "m": "\(minutes % 60)"])
     }
@@ -1566,7 +1650,8 @@ final class PrismIslandModel {
 
     // MARK: User Actions
 
-    func prepare() {
+    func prepare(onScreen screenID: UInt32? = nil) {
+        measuringScreenID = screenID ?? activeScreenID ?? Displays.preferredScreen().map(Displays.id(of:))
         if !measuring { measuring = true }
         armMeasureTimeout()
     }
@@ -1577,6 +1662,7 @@ final class PrismIslandModel {
             Task { @MainActor [weak self] in
                 guard let self, self.mode != .open else { return }
                 self.measuring = false
+                self.measuringScreenID = nil
             }
         }
     }
@@ -1587,6 +1673,7 @@ final class PrismIslandModel {
         expandWorkItem?.cancel()
         expandWorkItem = nil
         measuring = false
+        measuringScreenID = nil
     }
 
     func selectTab(_ tab: IslandExpandedTab) {
@@ -1623,6 +1710,7 @@ final class PrismIslandModel {
             return
         }
         if !measuring {
+            measuringScreenID = screenID ?? activeScreenID ?? Displays.preferredScreen().map(Displays.id(of:))
             measuring = true
             armMeasureTimeout()
             expandWorkItem?.cancel()
@@ -1820,6 +1908,7 @@ final class PrismIslandModel {
     private func setMode(_ next: IslandMode) {
         if next == .open || next == .collapsed || next == .hidden {
             measuring = false
+            measuringScreenID = nil
             measureTimeout?.invalidate()
             measureTimeout = nil
         }

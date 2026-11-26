@@ -313,7 +313,7 @@ import {
 import { turnPhase } from '@shared/turn-phase'
 import { originOf, originText, restoredOrigins, type StoredOrigin } from './threads/origins'
 import { ThreadStoreError, type ThreadStore } from './threads/store'
-import type { UsageRow } from './usage/model'
+import { normalizeModel, type UsageRow } from './usage/model'
 import { recordRows } from './usage/record'
 
 export interface SessionTimings {
@@ -385,6 +385,8 @@ export interface SessionEvents {
   /** The session was shown or marked read, so its turn was seen. */
   seen(sessionId: string): void
   busy(counts: BusyCounts): void
+  /** A turn ended with these tokens per model; sent before the summary that shows it ended. */
+  turnUsage?(sessionId: string, models: { model: string; tokens: TokenTotals }[]): void
 }
 
 /** The artifacts service and the Marketplace's servers, as the sessions pass them to their agents. */
@@ -911,6 +913,8 @@ function planProgress({ order, byId }: ThreadState): PlanProgress | null {
       done: items.filter((item) => item.status === 'completed').length,
       total: items.length,
       current: index === -1 ? null : { index, text: firstLine(items[index]!.content) },
+      ref: entry.id,
+      steps: items.map((item) => item.status),
     }
   }
   return null
@@ -7182,6 +7186,7 @@ export class SessionManager {
     live.used = true
     live.userTurn = sarto !== true && from === undefined
     if (live.userTurn) this.deps.options?.used(live.record.agentId, live.thread.session.config)
+    if (live.userTurn && live.record.startedBy !== undefined) live.record.userWrote = true
     const now = this.now()
     const entryId = this.addPrompt(live, content, now, from, device, approval, sarto)
     this.startTurn(live, content, now, entryId, portId)
@@ -8806,6 +8811,16 @@ export class SessionManager {
     tokens: TokenTotals | null,
     models: ModelTokens[] = [],
   ): void {
+    const reported =
+      models.length > 0
+        ? models
+        : tokens
+          ? [{ model: modelOf(live.thread.session.config) ?? '', tokens }]
+          : []
+    this.deps.events.turnUsage?.(
+      live.id,
+      reported.map((m) => ({ model: normalizeModel(m.model), tokens: m.tokens })),
+    )
     // The prompt Send now chose goes next, whether the stop landed or the turn finished first.
     const chosen = live.sendNext && (stopReason === 'cancelled' || stopReason === 'end_turn')
     const turnEntryId = this.finishTurn(live, turn, stopReason)
@@ -8855,7 +8870,9 @@ export class SessionManager {
       git.turnEnded(workDir(live.record), live.id)
       live.record.branch = git.currentBranch(workDir(live.record)) ?? live.record.branch
     }
-    if (this.inFront(live.id)) live.record.lastViewedAt = now
+    // A session an agent started reports to that agent and shows in its thread, so its turns mark
+    // nothing unread until the user writes in it.
+    if (this.inFront(live.id) || startedQuietly(live.record)) live.record.lastViewedAt = now
     else live.unread = true
     this.persist(live)
     this.touch(live.id)
@@ -12150,6 +12167,11 @@ function replacedNotice(
     wanted: nameOf(option, wanted, cached),
     actual: nameOf(now, now.value, cached),
   }
+}
+
+/** Started by another session's agent and not yet written in by the user. */
+function startedQuietly(record: SessionRecord): boolean {
+  return record.startedBy !== undefined && record.userWrote !== true
 }
 
 /** The id of the permission mode option of a Claude Code or Codex agent; null for any other. */

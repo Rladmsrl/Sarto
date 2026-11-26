@@ -1,5 +1,6 @@
 import AppKit
 import PrismDesign
+import SartoProtocol
 import SwiftUI
 
 // MARK: - Continuous-Curvature Concave-Shoulder Island Silhouette
@@ -86,6 +87,7 @@ struct PrismIslandRootView: View {
     var model: PrismIslandModel
     @ObservedObject var usageStore: PrismUsageStore
     @ObservedObject var settingsStore: UsageSettingsStore
+    var gameStore: GameStore
     let screenID: UInt32
     var geometryBox: ScreenGeometryBox
 
@@ -99,7 +101,7 @@ struct PrismIslandRootView: View {
     var body: some View {
         let g = geometryBox.geometry
         let mode = model.effectiveMode(for: screenID)
-        let size = model.frameSize(for: g, mode: mode)
+        let size = model.frameSize(for: g, mode: mode, screenID: screenID)
         let radius = model.radius(for: mode)
         let shoulder = model.shoulderWidth(for: mode)
         let aura = model.auraState
@@ -155,7 +157,9 @@ struct PrismIslandRootView: View {
                             model: model,
                             usageStore: usageStore,
                             settingsStore: settingsStore,
-                            geometry: g
+                            gameStore: gameStore,
+                            geometry: g,
+                            screenID: screenID
                         )
                         .transition(islandSwapTransition(model.reduceMotion))
                     }
@@ -171,19 +175,22 @@ struct PrismIslandRootView: View {
             .animation(model.animation(to: .collapsed), value: model.isIdleForUsage)
             .animation(model.animation(to: .collapsed), value: model.collapsedQuiet)
             .animation(model.animation(to: .collapsed), value: model.isSessionStackActive ? model.stackBodyHeight : -1)
-            .animation(model.animation(to: .open), value: model.panelHeight)
+            .animation(model.animation(to: .open), value: model.panelHeight(for: screenID))
             .animation(model.animation(to: mode), value: mode)
 
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        // Hidden measurement pass so expanding animates directly to final panel height in one spring.
+        // Hidden measurement pass on the active target display only, so multi-monitor setups never
+        // mount duplicate measurement trees or trigger usage fetches on casual edge sweeps.
         .overlay(alignment: .top) {
-            if model.measuring && mode != .open {
+            if model.measuring && mode != .open && model.measuringScreenID == screenID {
                 IslandPanelBody(
                     model: model,
                     usageStore: usageStore,
-                    settingsStore: settingsStore
+                    settingsStore: settingsStore,
+                    gameStore: gameStore,
+                    isMeasuring: true
                 )
                 .padding(.horizontal, 10)
                 .padding(.top, 2)
@@ -193,8 +200,8 @@ struct PrismIslandRootView: View {
                 .background(
                     GeometryReader { proxy in
                         Color.clear
-                            .onAppear { model.setPanelHeight(proxy.size.height) }
-                            .onChange(of: proxy.size.height) { _, h in model.setPanelHeight(h) }
+                            .onAppear { model.setPanelHeight(proxy.size.height, for: screenID) }
+                            .onChange(of: proxy.size.height) { _, h in model.setPanelHeight(h, for: screenID) }
                     }
                 )
                 .hidden()
@@ -317,6 +324,7 @@ private struct IslandFactView: View {
     let fact: IslandCollapsedFact
     var strings = IslandStrings(language: .system)
     var animates = true
+    var paused = false
 
     var body: some View {
         switch fact {
@@ -341,16 +349,18 @@ private struct IslandFactView: View {
                 Image(systemName: "checkmark").font(.system(size: 9, weight: .bold))
                 Text("\(count)").monospacedDigit()
             }
-        case .running(let count, let elapsed):
+        case .running(let count, let since):
             IslandStatePill(tint: IslandTheme.quote, fill: Color.white.opacity(0.08)) {
                 Circle()
                     .fill(IslandTheme.running)
                     .frame(width: 6, height: 6)
-                    .modifier(IslandBreathing(active: animates))
+                    .modifier(IslandBreathing(active: animates && !paused))
                 if count > 1 {
                     Text("\(count) ·").monospacedDigit()
                 }
-                Text(elapsed).monospacedDigit()
+                if let since {
+                    IslandRunningElapsedLabel(sinceMs: since, strings: strings, paused: paused)
+                }
             }
         case .quota(let window, let agent, let reset):
             HStack(spacing: 5) {
@@ -518,12 +528,12 @@ private struct IslandCollapsedContent: View {
                 Group {
                     if g.hasNotch {
                         ClampedWidthLayout(maxWidth: max(44, wing - 44)) {
-                            IslandFactView(fact: fact, strings: model.strings, animates: model.animatesStrikes)
+                            IslandFactView(fact: fact, strings: model.strings, animates: model.animatesStrikes, paused: paused)
                                 .monospacedDigit()
                                 .lineLimit(1)
                         }
                     } else {
-                        IslandFactView(fact: fact, strings: model.strings, animates: model.animatesStrikes)
+                        IslandFactView(fact: fact, strings: model.strings, animates: model.animatesStrikes, paused: paused)
                             .monospacedDigit()
                             .lineLimit(1)
                             .fixedSize()
@@ -599,10 +609,10 @@ private struct IslandCollapsedContent: View {
                 } else {
                     HStack(spacing: 6) {
                         if let signal = c?.signal, c?.fact?.isPill != true {
-                            IslandSignalView(signal: signal, reduceMotion: model.reduceMotion)
+                            IslandSignalView(signal: signal, reduceMotion: model.reduceMotion, paused: model.suspended)
                         }
                         if let fact = c?.fact {
-                            IslandFactView(fact: fact, strings: model.strings, animates: model.animatesStrikes)
+                            IslandFactView(fact: fact, strings: model.strings, animates: model.animatesStrikes, paused: model.suspended)
                                 .monospacedDigit()
                                 .lineLimit(1)
                         }
@@ -634,10 +644,10 @@ private struct IslandCollapsedContent: View {
             if (c?.signal != nil && c?.fact?.isPill != true) || c?.fact != nil {
                 HStack(spacing: 7) {
                     if let signal = c?.signal, c?.fact?.isPill != true {
-                        IslandSignalView(signal: signal, reduceMotion: model.reduceMotion)
+                        IslandSignalView(signal: signal, reduceMotion: model.reduceMotion, paused: model.suspended)
                     }
                     if let fact = c?.fact {
-                        IslandFactView(fact: fact, strings: model.strings, animates: model.animatesStrikes)
+                        IslandFactView(fact: fact, strings: model.strings, animates: model.animatesStrikes, paused: model.suspended)
                             .monospacedDigit()
                             .lineLimit(1)
                     }
@@ -760,7 +770,9 @@ private struct IslandPanelContent: View {
     var model: PrismIslandModel
     @ObservedObject var usageStore: PrismUsageStore
     @ObservedObject var settingsStore: UsageSettingsStore
+    var gameStore: GameStore
     let geometry: IslandGeometry
+    let screenID: UInt32
 
     var body: some View {
         let g = geometry
@@ -787,7 +799,7 @@ private struct IslandPanelContent: View {
                         IslandLeadMarks(collapsed: model.collapsed, aura: model.auraState)
                     }
                     if let signal = model.collapsed?.signal {
-                        IslandSignalView(signal: signal, reduceMotion: model.reduceMotion)
+                        IslandSignalView(signal: signal, reduceMotion: model.reduceMotion, paused: model.suspended)
                     }
                 } else {
                     HStack(spacing: 3) {
@@ -871,7 +883,8 @@ private struct IslandPanelContent: View {
                 IslandPanelBody(
                     model: model,
                     usageStore: usageStore,
-                    settingsStore: settingsStore
+                    settingsStore: settingsStore,
+                    gameStore: gameStore
                 )
                 .padding(.horizontal, 10)
                 .padding(.top, 2)
@@ -879,13 +892,13 @@ private struct IslandPanelContent: View {
                 .background(
                     GeometryReader { proxy in
                         Color.clear
-                            .onAppear { model.setPanelHeight(proxy.size.height) }
-                            .onChange(of: proxy.size.height) { _, h in model.setPanelHeight(h) }
+                            .onAppear { model.setPanelHeight(proxy.size.height, for: screenID) }
+                            .onChange(of: proxy.size.height) { _, h in model.setPanelHeight(h, for: screenID) }
                     }
                 )
             }
             .scrollIndicators(.never)
-            .frame(height: max(0, model.frameSize(for: g, mode: .open).height - g.notchHeight))
+            .frame(height: max(0, model.frameSize(for: g, mode: .open, screenID: screenID).height - g.notchHeight))
         }
     }
 }
@@ -953,6 +966,8 @@ private struct IslandPanelBody: View {
     var model: PrismIslandModel
     @ObservedObject var usageStore: PrismUsageStore
     @ObservedObject var settingsStore: UsageSettingsStore
+    var gameStore: GameStore
+    var isMeasuring: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -964,9 +979,14 @@ private struct IslandPanelBody: View {
                 IslandExpandedUsageTab(
                     model: model,
                     usageStore: usageStore,
-                    settingsStore: settingsStore
+                    settingsStore: settingsStore,
+                    isMeasuring: isMeasuring
                 )
             } else {
+                if gameStore.visible, let gState = gameStore.state {
+                    IslandExpeditionRow(model: model, store: gameStore, state: gState)
+                        .padding(.vertical, 4)
+                }
                 if model.rows.isEmpty {
                     IslandEmptyPanel(model: model)
                 } else {
@@ -1007,6 +1027,54 @@ private struct IslandPanelBody: View {
 }
 
 // MARK: - Prism Telemetry Micro-Strip inside Expanded Panel
+
+private struct IslandExpeditionRow: View {
+    var model: PrismIslandModel
+    var store: GameStore
+    let state: GameStateInfo
+    @State private var hover = false
+
+    var body: some View {
+        Button {
+            model.collapse()
+            store.openExpedition()
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "gamecontroller.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(IslandTheme.prismIris)
+                Text(state.version)
+                    .font(IslandFonts.mono(10.5, .bold))
+                    .foregroundStyle(IslandTheme.prismAmber)
+                Text(state.bossReady ? "Boss" : "\(state.chapter)-\(state.stage) · \(state.kills)/\(state.killsNeeded)")
+                    .font(IslandFonts.mono(10.5, .medium))
+                    .foregroundStyle(IslandTheme.text)
+                    .lineLimit(1)
+                if state.pendingOffers > 0 {
+                    Text("★")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(IslandTheme.prismAmber)
+                }
+                Spacer(minLength: 4)
+                Text("⚡\(state.power)")
+                    .font(IslandFonts.mono(10.5, .semibold))
+                    .foregroundStyle(IslandTheme.secondary)
+                Image(systemName: "arrow.up.right")
+                    .font(.system(size: 9.5, weight: .semibold))
+                    .foregroundStyle(IslandTheme.secondary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(hover ? IslandTheme.cardHover : IslandTheme.card)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
+    }
+}
 
 private struct IslandTelemetryStrip: View {
     let telemetry: IslandLiveTelemetry
@@ -1201,13 +1269,15 @@ private struct IslandSessionRow: View {
             IslandSignalView(
                 signal: model.signal(of: row) ?? .failed,
                 size: 14,
-                reduceMotion: model.reduceMotion
+                reduceMotion: model.reduceMotion,
+                paused: model.suspended
             )
         case "running", "starting":
             IslandTurnDots(
                 pattern: status == "starting" ? .think : IslandTurnDots.Pattern(phase: row.phase),
                 size: 12,
-                reduceMotion: model.reduceMotion
+                reduceMotion: model.reduceMotion,
+                paused: model.suspended
             )
         default:
             if let share = model.cacheEndingShare(row.cache) {
@@ -1880,12 +1950,8 @@ struct IslandStrikeLane: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .contentTransition(.opacity)
-                if showsElapsed, let elapsed = model.duration(since: row.turnStartedAt ?? row.since) {
-                    Text(elapsed)
-                        .font(IslandFonts.mono(10, .medium))
-                        .foregroundStyle(IslandTheme.secondary)
-                        .monospacedDigit()
-                        .fixedSize()
+                if showsElapsed, let since = row.turnStartedAt ?? row.since {
+                    IslandTurnDurationLabel(sinceMs: since, strings: model.strings, paused: paused)
                 }
             }
             .padding(.horizontal, 30)
@@ -1951,6 +2017,70 @@ private struct IslandStackFoldRow: View {
         .foregroundStyle(IslandTheme.secondary)
         .padding(.leading, 4)
         .frame(height: IslandStackMetrics.foldRow)
+    }
+}
+
+/// Self-contained leaf view that ticks collapsed running minutes without a global 1Hz model timer.
+private struct IslandRunningElapsedLabel: View {
+    let sinceMs: Double
+    let strings: IslandStrings
+    let paused: Bool
+
+    var body: some View {
+        if paused {
+            Text(format(at: Date())).monospacedDigit()
+        } else {
+            TimelineView(.periodic(from: .now, by: 15)) { context in
+                Text(format(at: context.date)).monospacedDigit()
+            }
+        }
+    }
+
+    private func format(at now: Date) -> String {
+        let minutes = max(0, Int(now.timeIntervalSince1970 - sinceMs / 1000) / 60)
+        if minutes < 60 { return strings.text("fact.minutes", ["m": "\(minutes)"]) }
+        return strings.text("fact.hoursMinutes", ["h": "\(minutes / 60)", "m": "\(minutes % 60)"])
+    }
+}
+
+/// Self-contained leaf view for `IslandStrikeLane` elapsed duration: 1s ticks under a minute,
+/// then 15s ticks once it displays minutes, paused whenever the lane is suspended or hidden.
+private struct IslandTurnDurationLabel: View {
+    let sinceMs: Double
+    let strings: IslandStrings
+    let paused: Bool
+
+    var body: some View {
+        let underOneMinute = (Date().timeIntervalSince1970 - sinceMs / 1000) < 60
+        if paused {
+            label(at: Date())
+        } else {
+            TimelineView(.periodic(from: .now, by: underOneMinute ? 1 : 15)) { context in
+                label(at: context.date)
+            }
+        }
+    }
+
+    private func label(at date: Date) -> some View {
+        let seconds = max(0, Int(date.timeIntervalSince1970 - sinceMs / 1000))
+        let text: String
+        if seconds < 60 {
+            text = strings.text("duration.seconds", ["s": "\(seconds)"])
+        } else {
+            let minutes = seconds / 60
+            if minutes < 60 {
+                text = strings.text("duration.minutes", ["m": "\(minutes)"])
+            } else if minutes < 24 * 60 {
+                text = strings.text("duration.hoursMinutes", ["h": "\(minutes / 60)", "m": "\(minutes % 60)"])
+            } else {
+                text = strings.text("duration.days", ["d": "\(minutes / (24 * 60))"])
+            }
+        }
+        return Text(text)
+            .font(IslandFonts.mono(10, .medium))
+            .foregroundStyle(IslandTheme.secondary)
+            .monospacedDigit()
+            .fixedSize()
     }
 }
 

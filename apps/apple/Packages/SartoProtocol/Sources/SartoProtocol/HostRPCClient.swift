@@ -2961,6 +2961,27 @@ public actor SartoHostSession {
         try await request("account.subscribe", params: .null, as: CloudAccountStatusInfo.self)
     }
 
+    /// The idle game's link and latest state; `gameStatus` and `gameFrame` events follow while the
+    /// connection stays open.
+    public func daemonGameSubscribe() async throws -> (GameLinkStatusInfo, GameStateInfo?) {
+        HostEvent.gameSubscription(try await request("game.subscribe", params: .null, as: JSONValue.self))
+    }
+
+    /// Tells the daemon whether a game surface is visible on screen, opening or closing the live stream.
+    public func daemonGameWatch(_ watching: Bool) async throws {
+        _ = try await request("game.watch", params: .object(["watching": .bool(watching)]), as: JSONValue.self)
+    }
+
+    /// Sends a player command to the idle game service through the daemon.
+    public func daemonGameCommand(type: String, args: [String: JSONValue] = [:]) async throws -> GameCommandOutcome {
+        let raw = try await request(
+            "game.command",
+            params: .object(["type": .string(type), "args": .object(args)]),
+            as: JSONValue.self
+        )
+        return GameCommandOutcome(raw)
+    }
+
     public func daemonAccountSignIn(
         serverUrl: String? = nil,
         openBrowser: Bool? = nil

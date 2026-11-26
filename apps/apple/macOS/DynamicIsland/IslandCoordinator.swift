@@ -24,6 +24,8 @@ final class PrismDynamicIslandCoordinator: IslandActionSink {
     let usageStore = PrismUsageStore()
     let settingsStore = UsageSettingsStore()
     let rpgStore = AgentRPGStore()
+    /// The idle game the game service runs, as the daemon relays it.
+    let gameStore = GameStore()
     let launchAtLogin = PrismLaunchAtLogin()
     let panelRouter = MenuBarPanelRouter()
     let panelState = MenuBarPanelState()
@@ -103,6 +105,7 @@ final class PrismDynamicIslandCoordinator: IslandActionSink {
     private var themeKey: IslandThemeKey?
     private var statusPanelOpen = false
     private var usageViewerCount = 0
+    private var lastRunningRailShowing: Bool?
     private var cancellables = Set<AnyCancellable>()
 
     init() {
@@ -127,7 +130,8 @@ final class PrismDynamicIslandCoordinator: IslandActionSink {
             islandHub = PrismIslandHub(
                 model: model,
                 usageStore: usageStore,
-                settingsStore: settingsStore
+                settingsStore: settingsStore,
+                gameStore: gameStore
             )
         }
 
@@ -452,6 +456,19 @@ final class PrismDynamicIslandCoordinator: IslandActionSink {
                 }
             }
             .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                let railEnabled = UserDefaults.standard.object(forKey: "sarto.runningRail.enabled") as? Bool ?? true
+                let railCollapsed = UserDefaults.standard.bool(forKey: "sarto.runningRail.collapsed")
+                let showing = railEnabled && !railCollapsed
+                guard showing != self.lastRunningRailShowing else { return }
+                self.lastRunningRailShowing = showing
+                self.scheduleCoalescedSync()
+            }
+            .store(in: &cancellables)
     }
 
     private func applySettings(_ settings: UsageIslandSettings) {
@@ -675,10 +692,13 @@ final class PrismDynamicIslandCoordinator: IslandActionSink {
             model.appUsageFocus = nextAppUsageFocus
         }
 
-        // Sarto in front with its running panel on: the panel says what runs, so the island keeps
-        // quiet about anything that does not need the user.
+        // Sarto in front with its running panel expanded: the panel says what runs, so the island
+        // keeps quiet about non-urgent running/unread/cache states.
         let railOn = UserDefaults.standard.object(forKey: "sarto.runningRail.enabled") as? Bool ?? true
-        let quiet = NSApp.isActive && hasVisibleMainWindow && railOn
+        let railCollapsed = UserDefaults.standard.bool(forKey: "sarto.runningRail.collapsed")
+        let railShowing = railOn && !railCollapsed
+        lastRunningRailShowing = railShowing
+        let quiet = NSApp.isActive && hasVisibleMainWindow && railShowing
         if model.quietForeground != quiet { model.quietForeground = quiet }
 
         // Reconcile foreground session visibility with active and pooled hosts so every host tracks
@@ -814,12 +834,16 @@ final class PrismDynamicIslandCoordinator: IslandActionSink {
         // Prune unread entries that were read on any device, removed, or belong to a non-notifying host.
         unreadSessionKeys.formIntersection(activeUnreadKeys)
 
+        let eligibleProviderIds: Set<String>? = usageStore.ready
+            ? Set(settingsStore.visible(usageStore.providers).filter(\.eligible).map(\.id))
+            : nil
         let snapshot = IslandProjector.buildSnapshot(
             state: state,
             strings: strings,
             unreadSessionKeys: unreadSessionKeys,
             nowMs: nowMs,
-            sources: hostSources
+            sources: hostSources,
+            eligibleProviderIds: eligibleProviderIds
         )
 
         if settingsStore.settings.islandMotion.enablesIdleGame {

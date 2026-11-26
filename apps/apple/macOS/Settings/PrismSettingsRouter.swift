@@ -145,6 +145,12 @@ enum PrismSettingsSearchCatalog {
         .init(id: "isl.show", section: .islandAndMenuBar, rowID: "island.enabled", titleKey: "settings.island.show", subtitleKey: "settings.island.showSub", keywords: "dynamic island notch 灵动岛 刘海"),
         .init(id: "isl.displays", section: .islandAndMenuBar, rowID: "island.displays", titleKey: "settings.island.displays", subtitleKey: "settings.island.displaysSub", keywords: "monitor display screen map 显示器 多屏 位置"),
         .init(id: "isl.subtle", section: .islandAndMenuBar, rowID: "island.subtle", titleKey: "settings.island.subtle", subtitleKey: "settings.island.subtleSub", keywords: "subtle reminder expand 轻提醒 自动展开"),
+        .init(id: "isl.preview", section: .islandAndMenuBar, rowID: "island.preview", titleKey: "settings.island.previewTitle", subtitleKey: "settings.island.previewSub", keywords: "preview test pop approval 预览 测试 弹窗 审批"),
+        .init(id: "isl.rail", section: .islandAndMenuBar, rowID: "island.rail", titleKey: "settings.island.rail", subtitleKey: "settings.island.railSub", keywords: "running rail panel sidebar 右侧 运行中 面板"),
+        .init(id: "isl.stack", section: .islandAndMenuBar, rowID: "island.stack", titleKey: "settings.island.stack", subtitleKey: "settings.island.stackSub", keywords: "session stack rows running 展开 会话 列表"),
+        .init(id: "isl.maxrows", section: .islandAndMenuBar, rowID: "island.maxRows", titleKey: "settings.island.maxRows", subtitleKey: "settings.island.maxRowsSub", keywords: "max rows fold count 最多 行数 折叠"),
+        .init(id: "isl.quota", section: .islandAndMenuBar, rowID: "island.quota", titleKey: "settings.island.quota", subtitleKey: "settings.island.quotaSub", keywords: "quota remaining group stack 显示 额度 分组"),
+        .init(id: "isl.motion", section: .islandAndMenuBar, rowID: "island.motion", titleKey: "settings.island.motion", subtitleKey: "settings.island.motionSub", keywords: "animation arcade lively calm still rpg game 动画 小游戏 灵动 柔和 静止"),
         .init(id: "isl.menubar", section: .islandAndMenuBar, rowID: "menubar.enabled", titleKey: "settings.menubar.show", subtitleKey: "settings.menubar.showSub", keywords: "menu bar status icon vial 菜单栏 状态栏 图标 文字"),
 
         // Usage & Sync

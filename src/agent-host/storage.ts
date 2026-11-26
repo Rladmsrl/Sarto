@@ -312,6 +312,7 @@ export interface SessionRecord {
   /** Archived alone: the sub-sessions it left in the list, which restoring it puts back under it. */
   leftSubSessions?: string[]
   startedBy?: string // the session whose agent started it through start_session
+  userWrote?: true // the user sent a session an agent started a message, which makes it theirs
   configDir?: string // the configuration folder picked for its agent when it was created
   pullRequests?: string[] // the pull requests it opened, oldest first, by their github.com URL
   /** The agents that had the session before its current one took over, oldest first. */
@@ -919,6 +920,7 @@ export function parseSessionsFile(data: Record<string, unknown>): SessionsFile |
       ...(isTime(item.archivedAt) ? { archivedAt: item.archivedAt } : {}),
       ...leftSubSessionsOf(item.leftSubSessions),
       ...(isString(item.startedBy) ? { startedBy: item.startedBy } : {}),
+      ...(item.userWrote === true ? { userWrote: true as const } : {}),
       ...(isString(item.configDir) && item.configDir !== '' ? { configDir: item.configDir } : {}),
       ...pullRequestsOf(item.pullRequests),
       ...earlierOf(item.earlier),

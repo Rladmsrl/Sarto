@@ -196,7 +196,7 @@ struct MenuBarPanelRootView: View {
     }
 }
 
-// MARK: - 1. Main Page (Liquid Tubes + Live Sarto Session Banner + Model Ranking + 30d Card)
+// MARK: - 1. Main Page (Liquid Tubes + Model Ranking + 30d Card)
 
 private struct MenuBarMainPage: View {
     @Bindable var appState: SartoState
@@ -209,8 +209,8 @@ private struct MenuBarMainPage: View {
 
     private static let tubesPerRow = 5
 
-    private var urgentSessions: [SessionSummary] {
-        appState.sessions.filter {
+    private var hasUrgentSession: Bool {
+        appState.sessions.contains {
             $0.archivedAt == nil && ($0.status == .awaitingPermission || $0.permissionCount > 0 || $0.status == .running || $0.status == .starting)
         }
     }
@@ -219,7 +219,7 @@ private struct MenuBarMainPage: View {
         PanelPage(onNaturalHeight: { panel.contentHeight = $0 }) {
             HStack(spacing: 0) {
                 HStack(spacing: 6) {
-                    SartoEmblem(size: 14, active: !urgentSessions.isEmpty)
+                    SartoEmblem(size: 14, active: hasUrgentSession)
                     Text(SartoBrand.name)
                         .font(.system(size: 13, weight: .bold))
                     Circle()
@@ -305,11 +305,6 @@ private struct MenuBarMainPage: View {
         let privacy = settingsStore.settings.privacy
 
         return VStack(alignment: .leading, spacing: 0) {
-            if let lead = urgentSessions.first {
-                liveSessionBanner(lead: lead, total: urgentSessions.count)
-                    .padding(EdgeInsets(top: 6, leading: 12, bottom: 2, trailing: 12))
-            }
-
             Headline(
                 primary: !store.ready
                     ? appState.l10n.tr(store.connection == .offline ? "usage.daemonOffline" : "usage.loading")
@@ -354,37 +349,6 @@ private struct MenuBarMainPage: View {
                 .padding(EdgeInsets(top: 8, leading: 12, bottom: 12, trailing: 12))
         }
         .frame(width: panel.width, alignment: .leading)
-    }
-
-    private func liveSessionBanner(lead: SessionSummary, total: Int) -> some View {
-        let isWaiting = lead.status == .awaitingPermission || lead.permissionCount > 0
-        let accent = isWaiting ? Palette.warn : Palette.focus
-        return Button {
-            actions.openMainWindow(lead.id)
-        } label: {
-            HStack(spacing: 8) {
-                BreathingDot(animate: true, color: accent, size: 6)
-                Text(lead.title ?? appState.l10n.tr("menuBar.activeSession"))
-                    .font(.system(size: 11.5, weight: .semibold))
-                    .foregroundStyle(Palette.ink)
-                    .lineLimit(1)
-                Spacer(minLength: 4)
-                Text(isWaiting
-                    ? appState.l10n.tr("menuBar.session.waiting")
-                    : (total > 1 ? appState.l10n.tr("menuBar.session.runningCount", total) : appState.l10n.tr("menuBar.session.running")))
-                    .font(.system(size: 10.5, weight: .medium))
-                    .foregroundStyle(accent)
-                Image(systemName: "arrow.up.right")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(Palette.ink3)
-            }
-            .padding(.horizontal, 11)
-            .padding(.vertical, 7)
-            .background(RoundedRectangle(cornerRadius: 11, style: .circular).fill(accent.opacity(0.11)))
-            .overlay(RoundedRectangle(cornerRadius: 11, style: .circular).strokeBorder(accent.opacity(0.28), lineWidth: 0.75))
-            .contentShape(RoundedRectangle(cornerRadius: 11, style: .circular))
-        }
-        .buttonStyle(PressScaleStyle())
     }
 
     private var headlineSecondary: String {

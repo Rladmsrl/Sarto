@@ -3444,6 +3444,10 @@ public enum HostEvent: Sendable, Equatable {
     case hostLoad(HostLoad)
     /// What the host's own sessions' work came to, for the Agent RPG (`work.facts`).
     case workFacts([WorkFact])
+    /// The daemon's idle game link changed: whether it runs, reaches its service, and what it holds back.
+    case gameStatus(GameLinkStatusInfo)
+    /// A frame from the game service, as the daemon passed it on: state, live battle events or a notice.
+    case gameFrame(GameFrame)
     /// Active remote Claude Code runs hosted by this computer changed (`remoteClaude.activeChanged`).
     case remoteClaudeActiveChanged([RemoteClaudeActiveRun])
     case resync
@@ -3661,6 +3665,10 @@ public enum HostEvent: Sendable, Equatable {
             if let facts = (try? JSONValue(jsonData: data))?.objectValue?["event"]?.objectValue?["facts"] {
                 return .workFacts(WorkFact.decodeList(facts))
             }
+        case "game.status", "game.frame":
+            if let obj = (try? JSONValue(jsonData: data))?.objectValue?["event"]?.objectValue {
+                return Self.gameEvent(type: eventType, obj)
+            }
         case "market.connectionChanged":
             if let env = try? decoder.decode(TypedEnvelope<MarketConnectionChangedEnvelope>.self, from: data) {
                 return .marketConnectionChanged(
@@ -3801,6 +3809,8 @@ public enum HostEvent: Sendable, Equatable {
             if let facts = obj["facts"] {
                 return .workFacts(WorkFact.decodeList(facts))
             }
+        case "game.status", "game.frame":
+            return Self.gameEvent(type: type, obj)
         case "market.connectionChanged":
             if let sid = obj["serverId"]?.stringValue,
                let connVal = obj["connection"],

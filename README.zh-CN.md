@@ -1,26 +1,82 @@
 <div align="center">
 
-<img src="./docs/sarto-brand-kit/svg/sarto-symbol-color.svg" alt="Sarto" width="112">
+<img src="./docs/sarto-brand-kit/svg/sarto-symbol-color.svg" alt="Sarto — 原生 macOS 多 Agent 智能体开发环境（ADE）" width="112">
 
 <h1>Sarto</h1>
 
-**原生、美观、私密的 macOS 编程 Agent 工作台。**
+**原生、多 Agent、自带挂机 RPG 的 macOS 智能体开发环境（ADE）——边 Coding 边挂机。**
 
-_Sarto_ 在意大利语里是「裁缝」：把各家工具的长处裁剪缝合，做成一件合身的工作台。
+_Sarto_ 在意大利语里是「裁缝」：用纯正 SwiftUI 与 Metal，把 46 个编程 Agent、Git Worktree、终端、浏览器与像素挂机游戏裁剪缝合成一件私密、趁手的原生 ADE。
 
-[![macOS 15+](https://img.shields.io/badge/macOS-15%2B-111111?logo=apple&logoColor=white)](#安装)
+[![ADE](https://img.shields.io/badge/ADE-Agentic%20Dev%20Environment-0F172A)](#为什么是-ade)
+[![macOS 15+](https://img.shields.io/badge/macOS-15%2B%20Native-111111?logo=apple&logoColor=white)](#生于-mac)
 [![Apple silicon](https://img.shields.io/badge/Apple%20silicon-arm64-444444)](#安装)
-[![Version](https://img.shields.io/badge/version-0.3.2-7C5CFF)](https://sarto.1o.ink/releases/latest)
 [![Agents](https://img.shields.io/badge/agents-46-2F80ED)](#支持的-agent)
+[![Idle RPG](https://img.shields.io/badge/idle%20RPG-边%20coding%20边挂机-D97706)](#边-coding-边挂机)
 [![Telemetry](https://img.shields.io/badge/telemetry-none-2EA043)](./PRIVACY.zh-CN.md)
+[![Version](https://img.shields.io/badge/version-0.3.2-7C5CFF)](https://sarto.1o.ink/releases/latest)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](./LICENSE)
 
-[下载](https://sarto.1o.ink/releases/latest) · [安全](./SECURITY.zh-CN.md) · [隐私](./PRIVACY.zh-CN.md) · [English](./README.md)
+[下载](https://sarto.1o.ink/releases/latest) · [为什么是 ADE](#为什么是-ade) · [边 Coding 边挂机](#边-coding-边挂机) · [支持的 Agent](#支持的-agent) · [安全](./SECURITY.zh-CN.md) · [隐私](./PRIVACY.zh-CN.md) · [English](./README.md)
 
 </div>
 
 > [!NOTE]
 > Sarto 处于早期快速开发阶段：当前版本 v0.3.2，支持 Apple 芯片、macOS 15 及以上。
+
+## 为什么是 ADE
+
+传统 IDE 围绕「手写单个文件」设计；纯命令行 CLI 又让你在十几个终端标签页之间来回切换，缺少直观的 Diff、预览与审批流。**Sarto 是一个智能体开发环境（ADE，Agentic Development Environment）**——专为同时指挥多个 AI 编程 Agent、审阅代码改动，并在等待间隙轻松挂机而生的原生桌面工作台。
+
+- **纯原生 macOS，告别 Electron。** 基于 Swift 6、SwiftUI、AppKit 与 Metal 构建，零第三方 Swift 依赖；启动迅速，集成 MacBook 刘海灵动岛与菜单栏额度监控，感知低电量与发热。
+- **一个图形界面，编排 46 个编程 Agent。** 同时驱动 **Claude Code**、**OpenAI Codex**、**Gemini CLI**、**Cursor**、**GitHub Copilot**、**Google Antigravity**、**OpenCode**、**Cline**、**DeepSeek Harness**、**Pi** 等 46 个原生与 **ACP（Agent Client Protocol）** Agent，直接复用你本机的安装、API Key 与订阅，支持跨 Git Worktree 与跨 Mac 并行开发。
+- **边 Coding 边挂机。** 等待 Agent 思考、跑测试或执行长计划时，不必干瞪着加载动画。真实的编码回合与计划推进会直接驱动内置像素风 **Agent 挂机 RPG**：Agent 在右侧栏一边写代码交付需求，一边组队闯关、掉落装备、升级养成。
+- **本地优先，端到端加密。** 零遥测、账号可选、服务端不存代码；凡是离开本机的数据均经 `Noise_IK` 与 `AES-256-GCM` 端到端加密。
+
+## 亮点
+
+<table>
+<tr>
+<td width="33%" valign="top">
+
+**原生 macOS ADE**<br/>
+SwiftUI、AppKit 与 Metal 打造，零 Electron、零第三方 Swift 依赖；菜单栏常驻、`⌘` 快捷键，感知低电量与发热。
+
+</td>
+<td width="33%" valign="top">
+
+**46 个 Agent，一个工作台**<br/>
+Claude Code、Codex、Gemini CLI、Cursor、Copilot、Antigravity、OpenCode、Cline 等 46 个，用的都是你自己的安装与账号。
+
+</td>
+<td width="33%" valign="top">
+
+**边 Coding 边挂机**<br/>
+内置像素风挂机 RPG：Agent 一边干活写代码，一边组队打穿 Todo、释放技能、刷装备升级。_开发中。_
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+**美观**<br/>
+四套 Metal 光学主题与实时切换的配套 Dock 图标、克制的动效，以及从刘海里长出来的灵动岛。
+
+</td>
+<td valign="top">
+
+**远程 Claude Code**<br/>
+让 Claude Code 的模型跑在你的另一台 Mac 上，文件、命令与权限留在眼前这台。
+
+</td>
+<td valign="top">
+
+**博采众长**<br/>
+把开发者已经爱用的工具的好点子，原生地裁剪缝合成一个风格统一的 ADE 工作台。
+
+</td>
+</tr>
+</table>
 
 ## 隐私为本，人人可验证
 
@@ -40,67 +96,7 @@ flowchart LR
 
 [SECURITY.zh-CN.md](./SECURITY.zh-CN.md) 与 [PRIVACY.zh-CN.md](./PRIVACY.zh-CN.md) 列出了 Sarto 发出的每一个请求、服务端能看到与看不到的内容，以及校验安装包的命令。
 
-## 亮点
-
-<table>
-<tr>
-<td width="33%" valign="top">
-
-**美观**<br/>
-四套 Metal 光学主题与配套 Dock 图标、克制的动效，以及从刘海里长出来的灵动岛。
-
-</td>
-<td width="33%" valign="top">
-
-**原生**<br/>
-SwiftUI、AppKit 与 Metal，零第三方 Swift 依赖；菜单栏常驻、`⌘` 快捷键，感知低电量与发热。
-
-</td>
-<td width="33%" valign="top">
-
-**46 个 Agent，一个界面**<br/>
-Claude Code、Codex、Gemini CLI、Cursor、Copilot、Antigravity 等 46 个，用的都是你自己的安装与账号。
-
-</td>
-</tr>
-<tr>
-<td valign="top">
-
-**博采众长**<br/>
-把开发者已经爱用的工具的好点子，缝合成一个风格统一的工作台。
-
-</td>
-<td valign="top">
-
-**远程 Claude Code**<br/>
-让 Claude Code 的模型跑在你的另一台 Mac 上，文件、命令与权限留在眼前这台。
-
-</td>
-<td valign="top">
-
-**Agent 挂机小游戏**<br/>
-Agent 一边干活一边打通待办、升级成长。_开发中。_
-
-</td>
-</tr>
-</table>
-
-## 美观
-
-- **Prism 视觉系统**：`Obsidian Dark`、`Warm Charcoal`、`Daylight Crystal`、`Warm Alabaster` 四套 Metal 绘制的光学主题，各配一枚可实时切换的 Dock 图标；预设强调色与 HSB 色轮，跟随系统、深色或浅色外观，可调对话字号、阅读宽度与终端字体。
-- **默认安静**：动效从「关闭」到「极致」分级，遵循「减弱动态效果」；所有动画画布在静止、低电量模式与发热时都会自动降帧。
-- **一眼看清的对话流**：连续多步工具调用折叠为单行摘要，可在时间轴上展开；改动以统一 Diff 块呈现；权限、计划与提问卡片永不折叠。
-- **富文本回复**：语法高亮与长代码块折叠、GFM 表格、提示框、SVG 与 Mermaid 图表（流程图、时序图、状态图）以及数学公式。
-- **完整双语**：每个界面都有英文与简体中文。
-
-## 生于 Mac
-
-- **灵动岛**：凹肩造型，贴合 MacBook 刘海或任意显示器顶部，可在显示器分布图上选一块或多块屏幕。实时显示计划进度，可在任意一台 Mac 上直接处理权限、提问与计划审批，并有会话堆叠、用量页与九点活动指示。
-- **菜单栏用量面板**：液态额度柱、套餐圆环、实时会话横幅、今日模型排行，以及跨 Agent、跨 Mac 的 7 / 30 / 90 天堆叠用量图。关闭窗口后 Sarto 与 Agent 仍在菜单栏后台运行；`⌘Q` 需按两次才会关闭窗口。
-- **签名自动更新**：正式版与测试版通道、二进制增量更新、SHA-512 与代码签名校验，在退出或离开时安装；仅更新应用时 daemon 与运行中的会话不受影响。
-- **独立 daemon**：在无界面的 Mac 上用 `sarto` 命令行运行 daemon（`sarto login`、`status`、`update`、`logs`、`devices`、`terminal`、`service`）。
-
-## 所有 Agent，一个界面
+## 多 Agent 协同
 
 - **6 个原生驱动 + 40 个 ACP Agent**：为 **Claude Code**、**Codex**、**OpenCode**、**Pi**、**DeepSeek Harness** 与 **Cline** 提供专门的 SDK、Server 与 RPC 驱动（OpenCode 与 Cline 可回退到 ACP），另以 Agent Client Protocol 接入 40 个 Agent，包括 **Google Antigravity**、**Gemini CLI**、**Cursor**、**GitHub Copilot**、**Qwen Code** 与 **Kimi Code**。Sarto 自身不实现任何 Agent，驱动的是你自己的安装、账号与配置。
 - **深度支持 Antigravity**：上下文明细、逐请求遥测、计划模式、子 Agent、插话、提问表单、插件与套餐额度。
@@ -108,6 +104,18 @@ Agent 一边干活一边打通待办、升级成长。_开发中。_
 - **会话中途换 Agent**：两轮之间把会话交给另一个 Agent，携带上下文，也可先做摘要。
 - **带上你的历史**：导入你在 Claude Code、Codex、Pi 或任何可列出会话的 ACP Agent 中开始的会话。
 - **额度一目了然**：读取各已登录 Agent 在厂商处的套餐额度与余额，并按 API 标价从本地记录统计 Token 与花费。
+
+## 边 Coding 边挂机
+
+> [!NOTE]
+> 开发中：玩法、数值与美术仍在调整。
+
+用多 Agent 写代码时，总会有模型思考、运行测试与推进多步计划的等待间隙。Sarto 在可折叠的右侧栏里内置了一款不打扰心流的 **Agent 挂机 RPG**，让你真正实现**边写代码边挂机**：
+
+- **像素风协作 Todo 战斗**：当会话带有执行计划时，Sarto 会与你的编程 Agent 在像素战斗舞台组队出击——真实编码回合会持续发射攻击与自动技能，每完成一步计划就打出一记终结伤害。
+- **专属 Agent 角色卡与养成**：每个编程 Agent 都有独立的挂机 RPG 档案——段位头衔、战力评分（`PWR`）、预估秒伤（`DPS`）、武器装备、勋章与指挥官羁绊等级，无需枯燥手点，全靠日常 Vibe Coding、重构与修 Bug 自然养成。
+- **安静克制，省电不抢戏**：提供四级能耗与动效档位，可从完整的 **街机（Arcade）** 战斗（武器特效、自动技能与像素跳字）平滑降级到 **安静**、**静止** 或 **关闭**，并在窗口静止、低电量模式与机身发热时自动降帧。
+- **挂机也私密**：游戏进度仅基于脱敏的工作事实（回合耗时与步骤计数）结算——源代码、Prompt 与文件路径永不离开你的 Mac。
 
 ## 围绕对话的工作台
 
@@ -119,6 +127,21 @@ Agent 一边干活一边打通待办、升级成长。_开发中。_
 - **Git**：相对 `HEAD` 的 Diff 与按文件选择提交、分支与 Worktree 隔离会话、AI 起草提交说明与 Pull Request，以及处理冲突、失败检查、Review、发布与在 GitHub 合并的下一步面板。
 - **文件与终端**：项目文件树与编辑器（检测保存冲突、恢复草稿），以及可从 Agent 手中接管再交还的 PTY 终端；终端要求输入密码时，Sarto 会暂停 Agent 输入。
 - **预览**：Agent 可检查、可操作（你也可接管）的内置浏览器、iOS 模拟器，以及 Android 模拟器与真机，并排预览。
+
+## 生于 Mac
+
+- **灵动岛**：凹肩造型，贴合 MacBook 刘海或任意显示器顶部，可在显示器分布图上选一块或多块屏幕。实时显示计划进度，可在任意一台 Mac 上直接处理权限、提问与计划审批，并有会话堆叠、用量页与九点活动指示。
+- **菜单栏用量面板**：液态额度柱、套餐圆环、实时会话横幅、今日模型排行，以及跨 Agent、跨 Mac 的 7 / 30 / 90 天堆叠用量图。关闭窗口后 Sarto 与 Agent 仍在菜单栏后台运行；`⌘Q` 需按两次才会关闭窗口。
+- **签名自动更新**：正式版与测试版通道、二进制增量更新、SHA-512 与代码签名校验，在退出或离开时安装；仅更新应用时 daemon 与运行中的会话不受影响。
+- **独立 daemon**：在无界面的 Mac 上用 `sarto` 命令行运行 daemon（`sarto login`、`status`、`update`、`logs`、`devices`、`terminal`、`service`）。
+
+## 美观
+
+- **Prism 视觉系统**：`Obsidian Dark`、`Warm Charcoal`、`Daylight Crystal`、`Warm Alabaster` 四套 Metal 绘制的光学主题，各配一枚可实时切换的 Dock 图标；预设强调色与 HSB 色轮，跟随系统、深色或浅色外观，可调对话字号、阅读宽度与终端字体。
+- **默认安静**：动效从「关闭」到「极致」分级，遵循「减弱动态效果」；所有动画画布在静止、低电量模式与发热时都会自动降帧。
+- **一眼看清的对话流**：连续多步工具调用折叠为单行摘要，可在时间轴上展开；改动以统一 Diff 块呈现；权限、计划与提问卡片永不折叠。
+- **富文本回复**：语法高亮与长代码块折叠、GFM 表格、提示框、SVG 与 Mermaid 图表（流程图、时序图、状态图）以及数学公式。
+- **完整双语**：每个界面都有英文与简体中文。
 
 ## 远程 Claude Code
 
@@ -142,13 +165,6 @@ Agent 一边干活一边打通待办、升级成长。_开发中。_
 - **Agent 插件**：管理 Claude Code 与 Codex 的插件与插件市场，以及 Antigravity 的插件。
 - **记忆**：跨 Agent 共享的全局与项目级记忆。Agent 提议的全局记忆由你审批，你也可以编辑、移动与导入记忆，包括 Claude Code 自己的项目记忆。
 - **给 Agent 的 Sarto 工具**：Agent 可通过 MCP 使用 Sarto 的会话、终端、浏览器、设备、记忆与设置。
-
-## Agent RPG
-
-> [!NOTE]
-> 开发中：玩法、数值与美术仍在调整。
-
-Agent 工作时，可折叠的右侧栏按 Agent 汇总运行中与待处理的会话，并显示实时额度。当会话有执行计划时，Sarto 与你的 Agent 会组队进入像素风的 **协作 Todo 战斗**：每完成一步就打出一击，Agent 在挂机 RPG 档案里获得经验、装备、勋章与羁绊等级。为了省电，它会从完整动画逐级降到平静与静止。
 
 ## 博采众长
 
@@ -211,6 +227,10 @@ open apps/apple/Sarto.xcodeproj
 | [Poolside](https://poolside.ai)                                     | [Stakpak](https://stakpak.dev)                                                      |                                                          |                                                                             |
 
 </details>
+
+## 搜索标签
+
+`ade` · `agentic-development-environment` · `agent-development-environment` · `智能体开发环境` · `Agent 开发环境` · `原生 macOS` · `SwiftUI` · `Metal` · `多 Agent 协同` · `多智能体并行开发` · `边 coding 边挂机` · `边写代码边挂机` · `编程挂机游戏` · `内置挂机 RPG` · `Vibe Coding` · `Claude Code 客户端` · `Claude Code GUI` · `Codex 桌面端` · `Gemini CLI` · `Cursor` · `GitHub Copilot` · `OpenCode` · `Cline` · `Antigravity` · `ACP 协议` · `MCP` · `Git Worktree` · `Mac 灵动岛` · `AI 用量监控` · `端到端加密`
 
 ## 反馈
 

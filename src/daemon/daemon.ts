@@ -9,7 +9,7 @@ import {
   ReportShelf,
 } from '@shared/log/report-bundle'
 import { constants } from 'node:fs'
-import { chmod, copyFile, rm } from 'node:fs/promises'
+import { chmod, copyFile, readFile, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { DEBUG_PORTS_FILE } from '@shared/debug'
@@ -81,7 +81,9 @@ import { CloudThemeSync } from './cloud-theme'
 import { PriceUpdates } from './prices'
 import { applyUsageDefault, claimUsageDefault } from './usage-default'
 import { AgentHostLink } from './sync/agent-host-link'
+import { GameLink } from './game/link'
 import { SartoSyncService } from './sync/service'
+import bundledPrices from '../agent-host/usage/prices.json'
 
 const log = createLogger('daemon')
 
@@ -193,6 +195,9 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   let cloudTheme: CloudThemeSync | null = null
   let relayToken: RelayToken | null = null
   const accountConnections = new Set<ControlConnection>()
+  const gameConnections = new Set<ControlConnection>()
+  const watchingGameConnections = new Set<ControlConnection>()
+  let gameLink: GameLink | null = null
   const hostPairOwners = new Map<number, ControlConnection>()
   const reportShelf = new ReportShelf(reportsFolder(options.dataPath))
   /** Sends `hosts.pairing` events to `connection`, and ends the pairing once it closes. */
@@ -418,6 +423,34 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       accountConnections.add(connection)
       connection.onClose(() => accountConnections.delete(connection))
       return holder.status()
+    },
+    'game.subscribe': async (_, connection) => {
+      if (!gameLink) throw new ControlError('unavailable', 'The game has not started')
+      const link = gameLink
+      gameConnections.add(connection)
+      connection.onClose(() => {
+        gameConnections.delete(connection)
+        if (watchingGameConnections.delete(connection)) link.watch(-1)
+      })
+      return { status: link.status(), state: link.latestState() }
+    },
+    'game.watch': async ({ watching }, connection) => {
+      if (!gameLink) throw new ControlError('unavailable', 'The game has not started')
+      const link = gameLink
+      if (watching && !watchingGameConnections.has(connection)) {
+        watchingGameConnections.add(connection)
+        link.watch(1)
+        connection.onClose(() => {
+          if (watchingGameConnections.delete(connection)) link.watch(-1)
+        })
+      } else if (!watching && watchingGameConnections.delete(connection)) {
+        link.watch(-1)
+      }
+      return null
+    },
+    'game.command': async (command) => {
+      if (!gameLink) throw new ControlError('unavailable', 'The game has not started')
+      return gameLink.command(command as never)
     },
     'account.signIn': async ({ serverUrl, openBrowser }) => {
       try {
@@ -692,6 +725,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       log.warn(`The sync could not follow the account: ${(error as Error).message}`)
     })
     for (const conn of accountConnections) conn.notify({ type: 'account.updated', status })
+    gameLink?.accountChanged()
   })
   const rawRelayUrl = options.env[RELAY_URL_ENV]?.trim() ?? ''
   let relayUrl = signedInCloud.origin()
@@ -861,6 +895,9 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     fetch: proxiedFetch(() => settings.get().proxy, options.env),
     file: path.join(options.dataPath, 'state', 'prices-server.json'),
     log: createLogger('prices'),
+    onUpdated: () => {
+      void gameLink?.refreshModels()
+    },
   })
   const agentHostLink = new AgentHostLink({
     socket: async () => {
@@ -868,6 +905,39 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       return running.socket('agent')
     },
     log: createLogger('sarto-sync'),
+  })
+  // The idle game reads this computer's work facts on a port of its own.
+  const gameHostLink = new AgentHostLink({
+    socket: async () => {
+      await started
+      return running.socket('agent')
+    },
+    log: createLogger('game'),
+    events: ['work.facts'],
+  })
+  gameLink = new GameLink({
+    dataPath: options.dataPath,
+    env: options.env,
+    account: () => signedInCloud.account().signedIn(),
+    onHostEvent: (listener) => gameHostLink.onEvent(listener),
+    knownModels: async () => {
+      const models = new Set<string>(Object.keys(bundledPrices.models ?? {}))
+      try {
+        const file = path.join(options.dataPath, 'state', 'prices-server.json')
+        const snapshot = JSON.parse(await readFile(file, 'utf8')) as { models?: object }
+        for (const key of Object.keys(snapshot.models ?? {})) models.add(key)
+      } catch {
+        // Bundled snapshot covers known models until the daily snapshot arrives.
+      }
+      return models
+    },
+    log: createLogger('game'),
+    onFrame: (frame) => {
+      for (const conn of gameConnections) conn.notify({ type: 'game.frame', frame })
+    },
+    onStatus: (status) => {
+      for (const conn of gameConnections) conn.notify({ type: 'game.status', status })
+    },
   })
   const usageDefault = await claimUsageDefault(options.dataPath).catch((error: unknown) => {
     log.warn(`Could not record the usage default: ${(error as Error).message}`)
@@ -997,6 +1067,10 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   running.start()
   hostsStarted()
   agentHostLink.start()
+  gameHostLink.start()
+  void gameLink.start().catch((error: unknown) => {
+    log.warn(`The game could not start: ${(error as Error).message}`)
+  })
   priceUpdates.start()
   relayToken?.update()
   const buildDetails = formatDaemonBuildDetails(daemonMetadata)
@@ -1057,6 +1131,8 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
         cloudTheme?.stop()
         cloud?.stop()
         agentHostLink.stop()
+        gameLink?.stop()
+        gameHostLink.stop()
         priceUpdates.stop()
         await syncService?.stop()
         await running.stop()

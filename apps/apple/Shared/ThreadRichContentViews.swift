@@ -1288,8 +1288,8 @@ public enum OfflineMermaidCompiler {
         func registerNode(_ rawToken: String) -> String {
             let trimmed = rawToken.trimmingCharacters(in: .whitespaces)
             let patterns: [(open: String, close: String, shape: String)] = [
-                ("([", "])", "round"), ("((", "))", "circle"),
-                ("{", "}", "diamond"), ("(", ")", "round"), ("[", "]", "rect"),
+                ("[(", ")]", "round"), ("([", "])", "round"), ("((", "))", "circle"),
+                ("[[", "]]", "rect"), ("{", "}", "diamond"), ("[", "]", "rect"), ("(", ")", "round"),
             ]
             for p in patterns {
                 if let o = trimmed.range(of: p.open), let c = trimmed.range(of: p.close, options: .backwards), o.upperBound <= c.lowerBound {
@@ -1315,30 +1315,54 @@ public enum OfflineMermaidCompiler {
             return clean
         }
 
-        let arrowTokens = ["-.->", "==>", "-->", "->", "---"]
-        for line in lines {
-            if line.hasPrefix("subgraph") || line == "end" || line.hasPrefix("style ") || line.hasPrefix("classDef") || line.hasPrefix("class ") {
-                continue
+        func splitInlineLabeledEdge(_ line: String) -> (left: String, right: String, label: String?, dashed: Bool)? {
+            let inlineSpecs: [(mid: String, end: String, dashed: Bool)] = [
+                (" -. ", " .-> ", true),
+                (" -.", ".-> ", true),
+                (" -- ", " --> ", false),
+                (" == ", " ==> ", false),
+                (" -- ", " --- ", false),
+            ]
+            for spec in inlineSpecs {
+                if let mRange = line.range(of: spec.mid),
+                   let eRange = line.range(of: spec.end, range: mRange.upperBound..<line.endIndex) {
+                    let left = String(line[..<mRange.lowerBound]).trimmingCharacters(in: .whitespaces)
+                    let rawLbl = String(line[mRange.upperBound..<eRange.lowerBound])
+                        .trimmingCharacters(in: CharacterSet(charactersIn: "\"' "))
+                    let right = String(line[eRange.upperBound...]).trimmingCharacters(in: .whitespaces)
+                    if !left.isEmpty && !right.isEmpty {
+                        return (left, right, rawLbl.isEmpty ? nil : rawLbl, spec.dashed)
+                    }
+                }
             }
-            var matched = false
+            let arrowTokens = ["-.->", "==>", "-->", "->", "---"]
             for arrow in arrowTokens {
                 if let r = line.range(of: arrow) {
                     let left = String(line[..<r.lowerBound]).trimmingCharacters(in: .whitespaces)
                     var right = String(line[r.upperBound...]).trimmingCharacters(in: .whitespaces)
                     var edgeLabel: String? = nil
                     if right.hasPrefix("|"), let endPipe = right.dropFirst().firstIndex(of: "|") {
-                        edgeLabel = String(right[right.index(after: right.startIndex)..<endPipe]).trimmingCharacters(in: .whitespaces)
+                        edgeLabel = String(right[right.index(after: right.startIndex)..<endPipe])
+                            .trimmingCharacters(in: CharacterSet(charactersIn: "\"' "))
                         right = String(right[right.index(after: endPipe)...]).trimmingCharacters(in: .whitespaces)
                     }
-                    guard !left.isEmpty, !right.isEmpty else { continue }
-                    let fromID = registerNode(left)
-                    let toID = registerNode(right)
-                    edges.append(FlowEdge(from: fromID, to: toID, label: edgeLabel, dashed: arrow.contains(".")))
-                    matched = true
-                    break
+                    if !left.isEmpty && !right.isEmpty {
+                        return (left, right, edgeLabel, arrow.contains("."))
+                    }
                 }
             }
-            if !matched && (line.contains("[") || line.contains("(") || line.contains("{")) {
+            return nil
+        }
+
+        for line in lines {
+            if line.hasPrefix("subgraph") || line == "end" || line.hasPrefix("style ") || line.hasPrefix("classDef") || line.hasPrefix("class ") {
+                continue
+            }
+            if let parsed = splitInlineLabeledEdge(line) {
+                let fromID = registerNode(parsed.left)
+                let toID = registerNode(parsed.right)
+                edges.append(FlowEdge(from: fromID, to: toID, label: parsed.label, dashed: parsed.dashed))
+            } else if line.contains("[") || line.contains("(") || line.contains("{") {
                 _ = registerNode(line)
             }
         }
@@ -1360,13 +1384,31 @@ public enum OfflineMermaidCompiler {
             if !changed { break }
         }
 
+        func splitLabelLines(_ raw: String) -> [String] {
+            raw.replacingOccurrences(of: "<br/>", with: "\n", options: .caseInsensitive)
+                .replacingOccurrences(of: "<br />", with: "\n", options: .caseInsensitive)
+                .replacingOccurrences(of: "<br>", with: "\n", options: .caseInsensitive)
+                .split(separator: "\n", omittingEmptySubsequences: true)
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+        }
+
+        func approxTextWidth(_ s: String, fontSize: Double) -> Double {
+            var units = 0.0
+            for sc in s.unicodeScalars {
+                units += sc.value > 0x2E7F ? 1.05 : 0.58
+            }
+            return units * fontSize
+        }
+
         var buckets: [Int: [String]] = [:]
         for id in order { buckets[layer[id] ?? 0, default: []].append(id) }
         let maxLayer = buckets.keys.max() ?? 0
 
-        let nodeW: Double = 148
-        let nodeH: Double = 40
-        let gapPrimary: Double = 64
+        let maxLabelLines = order.compactMap { nodes[$0] }.map { max(1, splitLabelLines($0.label).count) }.max() ?? 1
+        let nodeW: Double = 176
+        let nodeH: Double = max(42, Double(maxLabelLines) * 16 + 18)
+        let hasEdgeLabels = edges.contains { ($0.label?.isEmpty == false) }
+        let gapPrimary: Double = hasEdgeLabels ? 116 : 64
         let gapCross: Double = 28
         let pad: Double = 24
 
@@ -1420,9 +1462,10 @@ public enum OfflineMermaidCompiler {
             let dash = e.dashed ? " stroke-dasharray=\"5,4\"" : ""
             svg += "<path d=\"M \(x1) \(y1) Q \(mx) \(horizontal ? y1 : my) \(x2) \(y2)\" fill=\"none\" stroke=\"\(edgeStroke)\" stroke-width=\"1.5\"\(dash) marker-end=\"url(#pk-arrow)\"/>"
             if let lbl = e.label, !lbl.isEmpty {
-                let lw = max(36, Double(lbl.count) * 7.2 + 12)
+                let cleanLbl = splitLabelLines(lbl).joined(separator: " ")
+                let lw = max(40, approxTextWidth(cleanLbl, fontSize: 10.5) + 14)
                 svg += "<rect x=\"\(mx - lw / 2)\" y=\"\(my - 10)\" width=\"\(lw)\" height=\"18\" rx=\"4\" fill=\"\(labelBg)\"/>"
-                svg += "<text x=\"\(mx)\" y=\"\(my + 3)\" text-anchor=\"middle\" font-size=\"10.5\" fill=\"\(edgeStroke)\">\(esc(lbl))</text>"
+                svg += "<text x=\"\(mx)\" y=\"\(my + 3.5)\" text-anchor=\"middle\" font-size=\"10.5\" fill=\"\(edgeStroke)\">\(esc(cleanLbl))</text>"
             }
         }
 
@@ -1436,8 +1479,18 @@ public enum OfflineMermaidCompiler {
             } else {
                 svg += "<rect x=\"\(p.x)\" y=\"\(p.y)\" width=\"\(nodeW)\" height=\"\(nodeH)\" rx=\"\(rx)\" fill=\"\(fill)\" stroke=\"\(stroke)\" stroke-width=\"1.4\"/>"
             }
-            let clipped = node.label.count > 22 ? String(node.label.prefix(21)) + "…" : node.label
-            svg += "<text x=\"\(p.x + nodeW / 2)\" y=\"\(p.y + nodeH / 2 + 4)\" text-anchor=\"middle\" font-size=\"12\" font-weight=\"500\" fill=\"\(textCol)\">\(esc(clipped))</text>"
+            let rawLines = splitLabelLines(node.label)
+            let shownLines = (rawLines.isEmpty ? [node.label] : Array(rawLines.prefix(3))).map { ln in
+                ln.count > 26 ? String(ln.prefix(25)) + "…" : ln
+            }
+            let lineH = 15.0
+            let firstY = p.y + nodeH / 2 + 4 - Double(shownLines.count - 1) * lineH / 2
+            for (li, ln) in shownLines.enumerated() {
+                let weight = li == 0 ? "600" : "400"
+                let size = li == 0 ? "11.5" : "10.5"
+                let col = li == 0 ? textCol : edgeStroke
+                svg += "<text x=\"\(p.x + nodeW / 2)\" y=\"\(firstY + Double(li) * lineH)\" text-anchor=\"middle\" font-size=\"\(size)\" font-weight=\"\(weight)\" fill=\"\(col)\">\(esc(ln))</text>"
+            }
         }
 
         svg += "</svg>"

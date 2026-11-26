@@ -34,6 +34,9 @@ public final class LocalDaemonManager {
     /// The other hosts the daemon connects to as a device (docs/sarto-remote-design.md).
     public private(set) var otherHosts: [OtherHostStatus] = []
     @ObservationIgnored public var onOtherHostsUpdated: (([OtherHostStatus]) -> Void)? = nil
+    /// The idle game's link status and the frames the game service sends, as the daemon relays them.
+    @ObservationIgnored public var onGameEvent: ((HostEvent) -> Void)? = nil
+    private var gameWatching = false
 
     private var process: Process?
     /// The runtime folder the connected daemon runs from; nil when unknown, as for a daemon an
@@ -173,6 +176,7 @@ public final class LocalDaemonManager {
         let accountSubscribed = await subscribeAccount(on: session)
         let syncSubscribed = await subscribeSync(on: session)
         let hostsSubscribed = await subscribeOtherHosts(on: session)
+        let gameSubscribed = await subscribeGame(on: session)
         guard gen == syncStartGeneration, self.syncSession === session else { return }
         syncTask = Task { [weak self] in
             for await event in session.events {
@@ -199,6 +203,8 @@ public final class LocalDaemonManager {
                     self.onSyncUsageUpdated?(snap)
                 case .otherHostsUpdated(let hosts):
                     self.setOtherHosts(hosts)
+                case .gameStatus, .gameFrame:
+                    self.onGameEvent?(event)
                 default:
                     break
                 }
@@ -221,18 +227,20 @@ public final class LocalDaemonManager {
                 }
             }
         }
-        guard !accountSubscribed || !syncSubscribed || !hostsSubscribed else { return }
+        guard !accountSubscribed || !syncSubscribed || !hostsSubscribed || !gameSubscribed else { return }
         subscribeRetryTask = Task { [weak self] in
             var needAccount = !accountSubscribed
             var needSync = !syncSubscribed
             var needHosts = !hostsSubscribed
+            var needGame = !gameSubscribed
             var delay: Duration = .milliseconds(500)
-            for _ in 0..<40 where needAccount || needSync || needHosts {
+            for _ in 0..<40 where needAccount || needSync || needHosts || needGame {
                 try? await Task.sleep(for: delay)
                 guard let self, !Task.isCancelled, self.syncSession === session else { return }
                 if needAccount { needAccount = !(await self.subscribeAccount(on: session)) }
                 if needSync { needSync = !(await self.subscribeSync(on: session)) }
                 if needHosts { needHosts = !(await self.subscribeOtherHosts(on: session)) }
+                if needGame { needGame = !(await self.subscribeGame(on: session)) }
                 delay = min(delay * 2, .seconds(10))
             }
         }
@@ -272,6 +280,40 @@ public final class LocalDaemonManager {
             return true
         } catch {
             return false
+        }
+    }
+
+    /// Subscribes `session` to the idle game; false while the daemon's game link is starting. A
+    /// daemon from before the game answers `unknown_method`, which ends the asking.
+    private func subscribeGame(on session: SartoHostSession) async -> Bool {
+        do {
+            let (status, state) = try await session.daemonGameSubscribe()
+            guard syncSession === session else { return true }
+            if gameWatching { try? await session.daemonGameWatch(true) }
+            onGameEvent?(.gameStatus(status))
+            if let state { onGameEvent?(.gameFrame(.state(state))) }
+            return true
+        } catch let error as PortRPCError where error.code == "unknown_method" {
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    public func setGameWatching(_ watching: Bool) {
+        gameWatching = watching
+        guard let session = syncSession else { return }
+        Task { try? await session.daemonGameWatch(watching) }
+    }
+
+    public func sendGameCommand(type: String, args: [String: JSONValue] = [:]) async -> GameCommandOutcome {
+        guard let session = syncSession else {
+            return GameCommandOutcome(.object(["ok": .bool(false), "error": .string("daemon disconnected")]))
+        }
+        do {
+            return try await session.daemonGameCommand(type: type, args: args)
+        } catch {
+            return GameCommandOutcome(.object(["ok": .bool(false), "error": .string(error.localizedDescription)]))
         }
     }
 

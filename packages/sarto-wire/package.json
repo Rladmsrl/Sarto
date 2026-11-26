@@ -11,6 +11,7 @@
     "./push": "./src/push.ts",
     "./prices": "./src/prices.ts",
     "./sync": "./src/sync.ts",
-    "./reports": "./src/reports.ts"
+    "./reports": "./src/reports.ts",
+    "./game": "./src/game.ts"
   }
 }

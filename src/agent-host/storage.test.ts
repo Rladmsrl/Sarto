@@ -446,6 +446,17 @@ describe('the host files', () => {
     }
   })
 
+  it('keeps that the user wrote in a session an agent started', () => {
+    const started = { ...session, startedBy: 'parent' }
+    expect(parseSessionsFile({ sessions: [started] })).toEqual({ version: 1, sessions: [started] })
+    const written = { ...started, userWrote: true as const }
+    expect(parseSessionsFile({ sessions: [written] })).toEqual({ version: 1, sessions: [written] })
+    expect(parseSessionsFile({ sessions: [{ ...started, userWrote: 'yes' }] })).toEqual({
+      version: 1,
+      sessions: [started],
+    })
+  })
+
   it('keeps the worktree an agent made for a subagent and drops one that does not read', () => {
     const agentWorktree = { path: '/repo/.claude/worktrees/a', branch: 'worktree-a' }
     expect(parseSessionsFile({ sessions: [{ ...session, agentWorktree }] })).toEqual({

@@ -21,6 +21,7 @@ export interface PriceUpdatesOptions {
   /** `<data>/state/prices-server.json`. */
   file: string
   log: Logger
+  onUpdated?: () => void
   intervalMs?: number
   firstDelayMs?: number
 }
@@ -78,6 +79,7 @@ export class PriceUpdates {
       ...(etag ? { etag } : {}),
     }
     await writeFileAtomic(this.options.file, JSON.stringify(next), 0o600)
+    this.options.onUpdated?.()
     return 'updated'
   }
 
