@@ -737,9 +737,6 @@ public extension SartoState {
         case .hostLoad(let load):
             hostLoadsByHostID[hostId] = load
 
-        case .workFacts(let facts):
-            onWorkFacts?(hostId, facts)
-
         case .gameStatus, .gameFrame:
             // The game comes from the daemon's control connection, never from a host port.
             break
@@ -974,7 +971,7 @@ public extension SartoState {
             }
             return projects.first(where: { !$0.isMissing })?.path
                 ?? projects.first?.path
-                ?? Self.defaultWorkspacePath
+                ?? ""
         }()
 
         workspace.attach(

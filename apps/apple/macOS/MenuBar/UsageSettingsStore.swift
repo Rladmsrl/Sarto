@@ -5,10 +5,13 @@ import PrismDesign
 import ServiceManagement
 import SwiftUI
 
-/// A display the Dynamic Island is switched on for. Keeping `name` lets the selection survive display ID changes.
+/// A display the Dynamic Island is switched on for. `uuid` is the display's own identity, which
+/// survives display ID changes and tells two monitors of the same model apart; choices saved
+/// before it existed fall back to `id`, then `name`.
 struct DisplayChoice: Codable, Equatable, Hashable, Sendable {
     var id: UInt32
     var name: String
+    var uuid: String? = nil
 }
 
 enum StatusTextMode: String, Codable, CaseIterable, Sendable {
@@ -48,12 +51,7 @@ struct UsageIslandSettings: Codable, Equatable, Sendable {
     var lowAlert = true
     var lowThreshold = 30
     var privacy = false
-    /// While sessions run, one animated row per session under the notch. Off by default: the
-    /// window's running sessions rail shows them, and the island keeps to its notch-high bar.
-    var islandSessionStack = false
-    var islandMaxRows = 5
-    var islandShowQuota = true
-    var islandMotion: IslandMotionStyle = .arcade
+    var islandMotion: IslandMotionStyle = .lively
 
     static let lowThresholds = [10, 20, 30, 50]
 
@@ -73,18 +71,34 @@ struct UsageIslandSettings: Codable, Equatable, Sendable {
         lowAlert = (try? c.decode(Bool.self, forKey: .lowAlert)) ?? d.lowAlert
         lowThreshold = (try? c.decode(Int.self, forKey: .lowThreshold)).flatMap { Self.lowThresholds.contains($0) ? $0 : nil } ?? d.lowThreshold
         privacy = (try? c.decode(Bool.self, forKey: .privacy)) ?? d.privacy
-        islandSessionStack = (try? c.decode(Bool.self, forKey: .islandSessionStack)) ?? d.islandSessionStack
-        islandMaxRows = (try? c.decode(Int.self, forKey: .islandMaxRows))
-            .flatMap { IslandStackOptions.rowChoices.contains($0) ? $0 : nil } ?? d.islandMaxRows
-        islandShowQuota = (try? c.decode(Bool.self, forKey: .islandShowQuota)) ?? d.islandShowQuota
         islandMotion = (try? c.decode(IslandMotionStyle.self, forKey: .islandMotion)) ?? d.islandMotion
+    }
+}
+
+/// How a plan window running low is told: a pop that opens the island, only the low-quota
+/// marks on the island and the menu bar item, or not at all. Stored as `lowAlert` and
+/// `subtleReminders`, which other Macs sync.
+enum LowQuotaAlertMode: String, CaseIterable, Identifiable, Sendable {
+    case pop
+    case badge
+    case off
+
+    var id: String { rawValue }
+}
+
+extension UsageIslandSettings {
+    var lowQuotaAlert: LowQuotaAlertMode {
+        get { !lowAlert ? .off : (subtleReminders ? .badge : .pop) }
+        set {
+            lowAlert = newValue != .off
+            subtleReminders = newValue == .badge
+        }
     }
 }
 
 @MainActor
 final class UsageSettingsStore: ObservableObject {
     private static let key = "dev.sarto.usage-island.settings"
-    private static let arcadeDefaultAdoptedKey = "dev.sarto.usage-island.arcadeDefaultAdopted.v1"
 
     @Published var settings: UsageIslandSettings {
         didSet {
@@ -96,28 +110,17 @@ final class UsageSettingsStore: ObservableObject {
             }
         }
     }
-    @Published var shakeIsland = 0
-    @Published var shakeMenubar = 0
-    @Published var shakeSource: String?
     var onLocalMutation: ((UsageIslandSettings) -> Void)?
     private var isApplyingSyncedSettings = false
 
     init() {
-        var loaded: UsageIslandSettings
         if let data = UserDefaults.standard.data(forKey: Self.key),
            let decoded = try? JSONDecoder().decode(UsageIslandSettings.self, from: data)
         {
-            loaded = decoded
+            settings = decoded
         } else {
-            loaded = UsageIslandSettings()
+            settings = UsageIslandSettings()
         }
-        if !UserDefaults.standard.bool(forKey: Self.arcadeDefaultAdoptedKey) {
-            UserDefaults.standard.set(true, forKey: Self.arcadeDefaultAdoptedKey)
-            if loaded.islandMotion == .lively {
-                loaded.islandMotion = .arcade
-            }
-        }
-        settings = loaded
     }
 
     private func save() {
@@ -142,23 +145,22 @@ final class UsageSettingsStore: ObservableObject {
     }
 
     func toggleIslandDisplay(_ display: DisplayInfo) {
-        let showing = Displays.screens(for: settings.islandDisplays).map { screen in
-            DisplayChoice(id: Displays.id(of: screen), name: screen.localizedName)
-        }
-        let connected = Set(NSScreen.screens.map(Displays.id(of:)))
-        let away = settings.islandDisplays.filter { choice in
-            !connected.contains(choice.id) && !showing.contains { $0.name == choice.name }
-        }
+        let showing = Displays.screens(for: settings.islandDisplays).map(Displays.choice(for:))
+        let away = Displays.awayChoices(settings.islandDisplays)
         if showing.contains(where: { $0.id == display.id }) {
-            guard showing.count > 1 else {
-                setIslandEnabled(false)
-                return
-            }
+            // The last display stays: hiding the island is the island switch's job alone.
+            guard showing.count > 1 else { return }
             settings.islandDisplays = showing.filter { $0.id != display.id } + away
         } else {
-            settings.islandDisplays = showing + [DisplayChoice(id: display.id, name: display.name)] + away
+            let added = DisplayChoice(id: display.id, name: display.name, uuid: Displays.uuid(of: display.id))
+            settings.islandDisplays = showing + [added] + away
             if !settings.islandEnabled { settings.islandEnabled = true }
         }
+    }
+
+    /// Back to choosing the display automatically (the main display, or the one with the notch).
+    func useAutomaticIslandDisplays() {
+        settings.islandDisplays = []
     }
 
     func ordered(_ providers: [ProviderUsage]) -> [ProviderUsage] {
@@ -184,13 +186,8 @@ final class UsageSettingsStore: ObservableObject {
         if settings.hidden.contains(id) {
             settings.hidden.removeAll { $0 == id }
         } else {
-            if all.filter({ !settings.hidden.contains($0.id) }).count <= 1 {
-                shakeSource = id
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-                    self?.shakeSource = nil
-                }
-                return
-            }
+            // The last visible source stays; its switch is disabled in Settings.
+            if all.filter({ !settings.hidden.contains($0.id) }).count <= 1 { return }
             settings.hidden.append(id)
         }
     }
@@ -307,13 +304,67 @@ enum Displays {
             ?? NSScreen.screens.first
     }
 
+    /// Each choice takes its own display: by `uuid`, or for a choice saved without one by `id`,
+    /// then by `name`. Exact matches go first, so a choice found only by name never takes a
+    /// display another choice names exactly, and two monitors of one model stay two.
     static func screens(for choices: [DisplayChoice]) -> [NSScreen] {
-        var picked: [NSScreen] = []
-        for choice in choices {
-            let match = screen(id: choice.id) ?? NSScreen.screens.first { $0.localizedName == choice.name }
-            if let match, !picked.contains(match) { picked.append(match) }
+        let connected = NSScreen.screens
+        var picked = [NSScreen?](repeating: nil, count: choices.count)
+        var taken = Set<UInt32>()
+        for (index, choice) in choices.enumerated() {
+            let free = connected.filter { screen in
+                let sid = id(of: screen)
+                guard !taken.contains(sid) else { return false }
+                if let uuid = choice.uuid { return self.uuid(of: sid) == uuid }
+                return sid == choice.id
+            }
+            // Monitors whose EDID carries no serial can share a UUID; the saved ID tells them apart.
+            if let match = free.first(where: { id(of: $0) == choice.id }) ?? free.first {
+                picked[index] = match
+                taken.insert(id(of: match))
+            }
         }
-        return picked.isEmpty ? (preferredScreen().map { [$0] } ?? []) : picked
+        for (index, choice) in choices.enumerated() where picked[index] == nil && choice.uuid == nil {
+            if let match = connected.first(where: { $0.localizedName == choice.name && !taken.contains(id(of: $0)) }) {
+                picked[index] = match
+                taken.insert(id(of: match))
+            }
+        }
+        let screens = picked.compactMap { $0 }
+        return screens.isEmpty ? (preferredScreen().map { [$0] } ?? []) : screens
+    }
+
+    /// Chosen displays that no connected display answers to, kept so the island returns to them.
+    static func awayChoices(_ choices: [DisplayChoice]) -> [DisplayChoice] {
+        let connected = NSScreen.screens
+        return choices.filter { choice in
+            !connected.contains { screen in
+                let sid = id(of: screen)
+                if let uuid = choice.uuid { return uuid == self.uuid(of: sid) }
+                return sid == choice.id || screen.localizedName == choice.name
+            }
+        }
+    }
+
+    static func choice(for screen: NSScreen) -> DisplayChoice {
+        let sid = id(of: screen)
+        return DisplayChoice(id: sid, name: screen.localizedName, uuid: uuid(of: sid))
+    }
+
+    private static var uuidCache: (displays: Set<UInt32>, uuids: [UInt32: String]) = ([], [:])
+
+    /// ColorSync's UUID for the display, cached while the same displays stay connected, since
+    /// relocating the island resolves the choices on every Space change.
+    static func uuid(of displayID: UInt32) -> String? {
+        let connected = Set(NSScreen.screens.map(id(of:)))
+        if uuidCache.displays != connected { uuidCache = (connected, [:]) }
+        if let cached = uuidCache.uuids[displayID] { return cached }
+        guard connected.contains(displayID),
+              let uuid = CGDisplayCreateUUIDFromDisplayID(displayID)?.takeRetainedValue(),
+              let text = CFUUIDCreateString(nil, uuid) as String?
+        else { return nil }
+        uuidCache.uuids[displayID] = text
+        return text
     }
 }
 

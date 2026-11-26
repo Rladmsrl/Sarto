@@ -163,6 +163,24 @@ describe("a paired device's requests", () => {
   })
 })
 
+describe('work facts', () => {
+  it('reach only a window port that selected them, never a device that asked', () => {
+    const { hub: h } = hub()
+    const window = new FakePort()
+    const game = new FakePort()
+    const device = new FakePort()
+    h.add(window)
+    h.selectEvents(h.add(game), ['work.facts'])
+    h.selectEvents(h.add(device, DEVICE), ['work.facts', 'session.removed'])
+    h.broadcast({ type: 'work.facts', facts: [] })
+    h.broadcast({ type: 'session.removed', sessionId: 's1' })
+    const removed = { type: 'event', event: { type: 'session.removed', sessionId: 's1' } }
+    expect(game.sent).toEqual([{ type: 'event', event: { type: 'work.facts', facts: [] } }])
+    expect(window.sent).toEqual([removed])
+    expect(device.sent).toEqual([removed])
+  })
+})
+
 describe('AgentHost authorization boundaries', () => {
   const hosts: TestHost[] = []
 

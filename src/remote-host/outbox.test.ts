@@ -12,7 +12,7 @@ const patches = (sessionId: string, seq: number) =>
     type: 'session.patches',
     batch: { sessionId, seq, patches: [{ op: 'entry.appendText', id: 'e', text: `${seq}` }] },
   })
-const facts = () => event({ type: 'work.facts', facts: [] })
+const removed = (sessionId: string) => event({ type: 'session.removed', sessionId })
 
 /** What a sent message was, as `summary:<id>:<n>`, `patches:<id>:<from>-<seq>` or its type. */
 function label(message: ChannelMessage): string {
@@ -74,7 +74,7 @@ describe('a paced device session', () => {
     void outbox.push(patches('a', 1))
     void outbox.push(summary('a', 2))
     void outbox.push(patches('b', 1))
-    void outbox.push(facts())
+    void outbox.push(removed('c'))
     void outbox.push(patches('a', 2))
     void outbox.push(summary('a', 3))
     expect(sent).toEqual(['summary:a:1'])
@@ -86,7 +86,7 @@ describe('a paced device session', () => {
       'summary:a:1',
       'patches:a:1-1',
       'patches:b:1-1',
-      'work.facts',
+      'session.removed',
       'patches:a:2-2',
       'summary:a:3',
     ])

@@ -546,15 +546,20 @@ export class AgentHost {
           : null,
       log: (level, message) => writeLog(level, 'host', message),
     })
+    const filesHomeDir = options.homeDir ?? os.homedir()
     this.files = new FilesService({
       exec: this.execRunner.exec,
       platform,
+      homeDir: filesHomeDir,
+      ignorePaths: [options.userDataPath],
       media: (real, info) => this.media.grantFile(real, info, null, true),
       describeMedia: (real, info) => this.media.describe(real, info, true),
       trash: (paths) => this.trash(paths),
     })
     this.fileWatches = new FilesWatches({
       platform,
+      homeDir: filesHomeDir,
+      ignorePaths: [options.userDataPath],
       changed: (portId, projectPath) =>
         this.hub.send([portId], { type: 'files.changed', projectPath }),
       log: (level, message) => writeLog(level, 'host', message),
@@ -1101,6 +1106,7 @@ export class AgentHost {
           }
           this.hub.broadcast({ type: 'session.summary', summary })
           if (summary.scratch || summary.worktree) this.sendFoldersSoon()
+          // Only the daemon's game link takes these: a port must select them, and no device may.
           const facts = this.workFacts.observe(summary)
           if (facts.length > 0) this.hub.broadcast({ type: 'work.facts', facts })
         },

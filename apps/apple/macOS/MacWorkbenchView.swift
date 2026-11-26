@@ -1046,7 +1046,7 @@ struct MacWorkbenchView: View {
                     .background(Capsule().fill(tokens.surface1.opacity(0.75)))
                     .overlay(Capsule().strokeBorder(tokens.borderEtched, lineWidth: 1))
 
-                if let modelHost = summary.modelHost, !state.isViewingRemoteHost {
+                if summary.agentId == "claude-code", let modelHost = summary.modelHost, !state.isViewingRemoteHost {
                     topBarRemoteModelPill(modelHost: modelHost, tokens: tokens, l10n: l10n)
                 }
 
@@ -2725,9 +2725,35 @@ struct MacWorkbenchView: View {
             }
         }
 
+        let cacheKey = WorkbenchUIModel.MentionCompletionCacheKey(
+            isNewSessionStage: isNewSessionStage,
+            projectPath: projectPath,
+            activeWorkspacePath: state.workspace.activeProjectPath,
+            projectGeneration: state.workspace.projectGeneration,
+            fileTreeRevision: state.workspace.fileTreeRevision,
+            query: mention.query,
+            selectedSessionID: state.selectedSessionID,
+            replicaSeq: state.activeReplica?.seq ?? -1,
+            sessionsCount: state.sessions.count
+        )
+        if let cached = ui.mentionCompletionCache, cached.key == cacheKey {
+            return RichCompletionContext(
+                mode: .mention(
+                    files: cached.files,
+                    sessions: cached.sessions,
+                    totalPoolCount: cached.totalPoolCount,
+                    hasQuery: !mention.query.isEmpty,
+                    noProject: false
+                ),
+                slashToken: nil,
+                mentionToken: mention,
+                anchorX: anchorX
+            )
+        }
+
         let rawFiles = state.workspace.activeProjectPath == projectPath ? state.workspace.filePaths : []
         let projectSets = ui.cachedProjectSets(for: rawFiles)
-        let orderedFiles: [String]
+        let fileRows: [ComposerMentionRow]
         if mention.query.isEmpty, !isNewSessionStage, let entries = state.activeReplica?.entries, !rawFiles.isEmpty {
             let used = ComposerPathMatcher.usedFiles(
                 from: entries,
@@ -2736,28 +2762,45 @@ struct MacWorkbenchView: View {
                 limit: 20
             )
             if used.isEmpty {
-                orderedFiles = rawFiles
+                fileRows = ComposerPathMatcher.matchMentions(
+                    query: "",
+                    files: rawFiles,
+                    folders: projectSets.folderArray,
+                    limit: 30
+                )
             } else {
-                let usedSet = Set(used)
-                orderedFiles = used + rawFiles.filter { !usedSet.contains($0) }
+                let usedRows = used.map { ComposerMentionRow(path: $0, isFolder: false, positions: []) }
+                let remainingLimit = max(0, 30 - usedRows.count)
+                if remainingLimit == 0 {
+                    fileRows = Array(usedRows.prefix(30))
+                } else {
+                    let usedSet = Set(used)
+                    let extra = ComposerPathMatcher.matchMentions(
+                        query: "",
+                        files: rawFiles,
+                        folders: projectSets.folderArray,
+                        limit: 30 + used.count
+                    ).filter { $0.isFolder || !usedSet.contains($0.path) }
+                    fileRows = usedRows + Array(extra.prefix(remainingLimit))
+                }
             }
         } else {
-            orderedFiles = rawFiles
+            fileRows = ComposerPathMatcher.matchMentions(
+                query: mention.query,
+                files: rawFiles,
+                folders: projectSets.folderArray,
+                limit: 30
+            )
         }
-
-        let fileRows = ComposerPathMatcher.matchMentions(
-            query: mention.query,
-            files: orderedFiles,
-            folders: projectSets.folderArray,
-            limit: 30
-        )
         let candidates = state.sameProjectReferenceableSessions(isNewSessionStage: isNewSessionStage)
         let sessionRows = ComposerSessionMatcher.matchSessions(query: mention.query, candidates: candidates, limit: 20)
+        let totalPoolCount = rawFiles.count + candidates.count
+        ui.mentionCompletionCache = (cacheKey, fileRows, sessionRows, totalPoolCount)
         return RichCompletionContext(
             mode: .mention(
                 files: fileRows,
                 sessions: sessionRows,
-                totalPoolCount: rawFiles.count + candidates.count,
+                totalPoolCount: totalPoolCount,
                 hasQuery: !mention.query.isEmpty,
                 noProject: false
             ),
@@ -3182,13 +3225,13 @@ struct MacWorkbenchView: View {
         let projectPath = state.activeTrayProjectPath ?? state.workspace.activeProjectPath
         guard !projectPath.isEmpty else { return nil }
         let cacheKey = "\(projectPath)::\(relativePath)"
-        if let cached = ui.filePreviewCache[cacheKey] {
+        if let cached = ui.cachedFilePreview(for: cacheKey) {
             return cached
         }
         guard let text = await state.readProjectFileText(projectPath: projectPath, relativePath: relativePath)
         else { return nil }
         let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-        ui.filePreviewCache[cacheKey] = lines
+        ui.storeFilePreview(lines, for: cacheKey)
         return lines
     }
 
@@ -3845,7 +3888,7 @@ struct MacWorkbenchView: View {
         AgentSwitcherPopoverView(
             sections: availableAgentMenuSections(tokens: tokens, l10n: l10n, isNewSessionMode: isNewSessionMode),
             activeAgentID: isNewSessionMode
-                ? state.selectedAgentID
+                ? state.selectedRunSetupAgentID
                 : (state.activeModelHostRef != nil ? nil : (state.activeReplica?.session.agentId ?? state.selectedSessionSummary?.agentId)),
             pendingAgentID: isNewSessionMode ? nil : state.pendingSwitchAgentID,
             showBackToModelsTitle: showBackButton ? l10n.tr("composer.backToModels", agentDisplayName(for: state.activeConfigAgentID)) : nil,
@@ -3865,14 +3908,28 @@ struct MacWorkbenchView: View {
             },
             onSelectModel: { agentId, modelId in
                 if isNewSessionMode {
-                    if let opt = state.configOptions(
-                        forAgent: agentId,
-                        overrides: state.newSessionOptionPicks[agentId] ?? [:],
-                        includeStartMode: true
-                    ).first(where: { $0.category == "model" }) {
-                        Task { await state.setActiveConfigOption(optionId: opt.id, value: .string(modelId), forAgent: agentId) }
-                    } else {
+                    if agentId != state.selectedRunSetupAgentID {
                         state.setNewSessionAgent(agentId)
+                    }
+                    let realAgentId: String
+                    let pool: [ConfigOption]
+                    if let hostId = SartoState.remoteClaudeHostID(from: agentId),
+                       let remoteHost = state.remoteClaudeHosts.first(where: { $0.hostId == hostId }) {
+                        realAgentId = "claude-code"
+                        pool = state.remoteClaudeConfigOptions(
+                            for: remoteHost,
+                            overrides: state.newSessionOptionPicks["claude-code"] ?? [:]
+                        )
+                    } else {
+                        realAgentId = agentId
+                        pool = state.configOptions(
+                            forAgent: realAgentId,
+                            overrides: state.newSessionOptionPicks[realAgentId] ?? [:],
+                            includeStartMode: true
+                        )
+                    }
+                    if let opt = pool.first(where: { $0.category == "model" }) {
+                        Task { await state.setActiveConfigOption(optionId: opt.id, value: .string(modelId), forAgent: realAgentId) }
                     }
                 } else {
                     let currentAgent = state.activeReplica?.session.agentId ?? state.selectedSessionSummary?.agentId
@@ -3893,37 +3950,57 @@ struct MacWorkbenchView: View {
                 ui.requestComposerFocus()
             },
             onSelectMode: { agentId, modeId in
+                let realAgentId: String
                 if !isNewSessionMode {
+                    realAgentId = agentId
                     let currentAgent = state.activeReplica?.session.agentId ?? state.selectedSessionSummary?.agentId
                     if agentId != currentAgent || state.activeModelHostRef != nil { state.prepareAgentSwitch(to: agentId) }
-                } else if agentId != state.selectedAgentID {
-                    state.setNewSessionAgent(agentId)
+                } else {
+                    if agentId != state.selectedRunSetupAgentID { state.setNewSessionAgent(agentId) }
+                    realAgentId = SartoState.remoteClaudeHostID(from: agentId) != nil ? "claude-code" : agentId
                 }
-                if let opt = state.configOptions(
-                    forAgent: agentId,
-                    overrides: isNewSessionMode ? (state.newSessionOptionPicks[agentId] ?? [:]) : state.pendingSwitchValues,
-                    includeStartMode: isNewSessionMode
-                ).first(where: { $0.category == "mode" }) ?? state.activeModeConfigOption {
-                    Task { await state.setActiveConfigOption(optionId: opt.id, value: .string(modeId), forAgent: agentId) }
+                let pool: [ConfigOption]
+                if isNewSessionMode,
+                   let hostId = SartoState.remoteClaudeHostID(from: agentId),
+                   let remoteHost = state.remoteClaudeHosts.first(where: { $0.hostId == hostId }) {
+                    pool = state.remoteClaudeConfigOptions(
+                        for: remoteHost,
+                        overrides: state.newSessionOptionPicks["claude-code"] ?? [:]
+                    )
+                } else {
+                    pool = state.configOptions(
+                        forAgent: realAgentId,
+                        overrides: isNewSessionMode ? (state.newSessionOptionPicks[realAgentId] ?? [:]) : state.pendingSwitchValues,
+                        includeStartMode: isNewSessionMode
+                    )
+                }
+                if let opt = pool.first(where: { $0.category == "mode" }) ?? state.activeModeConfigOption {
+                    Task { await state.setActiveConfigOption(optionId: opt.id, value: .string(modeId), forAgent: realAgentId) }
                 }
             },
             onSelectEffort: { agentId, effortVal in
+                let realAgentId: String
                 if !isNewSessionMode {
+                    realAgentId = agentId
                     let currentAgent = state.activeReplica?.session.agentId ?? state.selectedSessionSummary?.agentId
-                    if agentId != currentAgent { state.prepareAgentSwitch(to: agentId) }
-                } else if agentId != state.selectedAgentID {
-                    state.setNewSessionAgent(agentId)
+                    if agentId != currentAgent || state.activeModelHostRef != nil { state.prepareAgentSwitch(to: agentId) }
+                } else {
+                    if agentId != state.selectedRunSetupAgentID { state.setNewSessionAgent(agentId) }
+                    realAgentId = SartoState.remoteClaudeHostID(from: agentId) != nil ? "claude-code" : agentId
                 }
-                Task { await state.selectEffortValue(effortVal, forAgent: agentId) }
+                Task { await state.selectEffortValue(effortVal, forAgent: realAgentId) }
             },
             onToggleOption: { agentId, optionId, nextOn in
+                let realAgentId: String
                 if !isNewSessionMode {
+                    realAgentId = agentId
                     let currentAgent = state.activeReplica?.session.agentId ?? state.selectedSessionSummary?.agentId
-                    if agentId != currentAgent { state.prepareAgentSwitch(to: agentId) }
-                } else if agentId != state.selectedAgentID {
-                    state.setNewSessionAgent(agentId)
+                    if agentId != currentAgent || state.activeModelHostRef != nil { state.prepareAgentSwitch(to: agentId) }
+                } else {
+                    if agentId != state.selectedRunSetupAgentID { state.setNewSessionAgent(agentId) }
+                    realAgentId = SartoState.remoteClaudeHostID(from: agentId) != nil ? "claude-code" : agentId
                 }
-                Task { await state.toggleBooleanOption(optionId, on: nextOn, forAgent: agentId) }
+                Task { await state.toggleBooleanOption(optionId, on: nextOn, forAgent: realAgentId) }
             },
             onBackToModels: showBackButton ? { ui.activePopover = .model } : nil,
             onFixAgent: { agentId in
@@ -3939,6 +4016,7 @@ struct MacWorkbenchView: View {
         tokens: PrismTokens,
         l10n: PrismL10n
     ) -> some View {
+        let hostName = SartoState.cleanHostDisplayName(modelHost.hostName)
         let offline = state.isModelHostOffline(modelHost)
         let accent = offline ? tokens.warning : tokens.prismCobalt
         let fill = offline ? tokens.warningSoft : tokens.prismCobalt.opacity(0.14)
@@ -3947,7 +4025,7 @@ struct MacWorkbenchView: View {
             Circle()
                 .fill(accent)
                 .frame(width: 6, height: 6)
-            Text(l10n.tr("remoteClaude.topbarPill", modelHost.hostName))
+            Text(l10n.tr("remoteClaude.topbarPill", hostName))
                 .font(.system(size: 10.5, weight: .medium))
                 .foregroundStyle(accent)
                 .lineLimit(1)
@@ -3960,7 +4038,7 @@ struct MacWorkbenchView: View {
         .prismHoverTooltip(
             l10n.tr(
                 offline ? "remoteClaude.topbarTooltipOffline" : "remoteClaude.topbarTooltipOnline",
-                modelHost.hostName
+                hostName
             ),
             alignment: .bottomLeading
         )
@@ -3971,10 +4049,11 @@ struct MacWorkbenchView: View {
         tokens: PrismTokens,
         l10n: PrismL10n
     ) -> some View {
-        HStack(spacing: 6) {
+        let hostName = SartoState.cleanHostDisplayName(modelHost.hostName)
+        return HStack(spacing: 6) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 10.5))
-            Text(l10n.tr("remoteClaude.hostOfflineBanner", modelHost.hostName))
+            Text(l10n.tr("remoteClaude.hostOfflineBanner", hostName))
                 .font(.system(size: 11))
                 .lineLimit(2)
             Spacer(minLength: 4)
@@ -3993,17 +4072,22 @@ struct MacWorkbenchView: View {
         modelHost: ModelHostRef,
         tokens: PrismTokens
     ) -> some View {
-        HStack(spacing: 3) {
+        let hostName = SartoState.cleanHostDisplayName(modelHost.hostName)
+        let offline = state.isModelHostOffline(modelHost)
+        let accent = offline ? tokens.warning : tokens.prismCobalt
+        let fill = offline ? tokens.warningSoft : tokens.prismCobalt.opacity(0.14)
+        return HStack(spacing: 3) {
             Image(systemName: "desktopcomputer")
                 .font(.system(size: 9, weight: .semibold))
-            Text(modelHost.hostName)
+            Text(hostName)
                 .font(.system(size: 10, weight: .semibold))
                 .lineLimit(1)
+                .truncationMode(.tail)
         }
-        .foregroundStyle(tokens.prismCobalt)
+        .foregroundStyle(accent)
         .padding(.horizontal, 5.5)
         .padding(.vertical, 1.5)
-        .background(Capsule().fill(tokens.prismCobalt.opacity(0.14)))
+        .background(Capsule().fill(fill))
     }
 
     /// The new session's run setup panel: the agent, its model, and its mode and effort at once.
@@ -4217,8 +4301,8 @@ struct MacWorkbenchView: View {
         } else {
             guard !state.showStudioHome,
                   state.pendingSwitchAgentID == nil,
-                  let summary = state.selectedSessionSummary,
-                  summary.modelHost == nil
+                  state.activeModelHostRef == nil,
+                  let summary = state.selectedSessionSummary
             else { return nil }
             agentId = summary.agentId
             choices = state.agentOptionsById[agentId]?.config.first { $0.category == "model" }?.choices ?? []
@@ -4295,9 +4379,7 @@ struct MacWorkbenchView: View {
         var localSections: [PrismAgentMenuSection] = ordered.map { agent in
             let entry = availability[agent.id]
             let brand = brandColor(for: agent.id, tokens: tokens)
-            let isSelectedLocal = isNewSessionMode
-                ? (agent.id == currentId && state.selectedModelHostID == nil)
-                : (agent.id == currentId && state.activeModelHostRef == nil)
+            let isSelectedLocal = agent.id == currentId && state.activeModelHostRef == nil
             let option = PrismAgentSwitchOption(
                 id: agent.id,
                 name: agentDisplayName(for: agent.id),
@@ -4380,6 +4462,7 @@ struct MacWorkbenchView: View {
             let claudeBrand = brandColor(for: "claude-code", tokens: tokens)
             for host in remoteHosts {
                 let selectionId = SartoState.remoteClaudeSelectionID(for: host.hostId)
+                let hostName = SartoState.cleanHostDisplayName(host.hostName)
                 let status = host.status
                 let tag: PrismAgentTag
                 let problemText: String?
@@ -4387,16 +4470,16 @@ struct MacWorkbenchView: View {
                     tag = PrismAgentTag(
                         text: l10n.tr("remoteClaude.tagAuthRequired"),
                         tone: .attention,
-                        title: l10n.tr("remoteClaude.tagAuthRequiredTitle", host.hostName)
+                        title: l10n.tr("remoteClaude.tagAuthRequiredTitle", hostName)
                     )
-                    problemText = l10n.tr("remoteClaude.tagAuthRequiredTitle", host.hostName)
+                    problemText = l10n.tr("remoteClaude.tagAuthRequiredTitle", hostName)
                 } else if status.isBusy {
                     tag = PrismAgentTag(
                         text: l10n.tr("remoteClaude.tagBusy", status.activeRuns, status.maxConcurrent),
                         tone: .attention,
-                        title: l10n.tr("remoteClaude.tagBusyTitle", host.hostName, status.activeRuns, status.maxConcurrent)
+                        title: l10n.tr("remoteClaude.tagBusyTitle", hostName, status.activeRuns, status.maxConcurrent)
                     )
-                    problemText = l10n.tr("remoteClaude.tagBusyTitle", host.hostName, status.activeRuns, status.maxConcurrent)
+                    problemText = l10n.tr("remoteClaude.tagBusyTitle", hostName, status.activeRuns, status.maxConcurrent)
                 } else if !status.ready {
                     tag = PrismAgentTag(
                         text: l10n.tr("remoteClaude.tagUnavailable"),
@@ -4408,20 +4491,20 @@ struct MacWorkbenchView: View {
                     tag = PrismAgentTag(
                         text: l10n.tr("remoteClaude.tagRemote"),
                         tone: .muted,
-                        title: l10n.tr("remoteClaude.tagRemoteTitle", host.hostName)
+                        title: l10n.tr("remoteClaude.tagRemoteTitle", hostName)
                     )
                     problemText = nil
                 }
 
                 let option = PrismAgentSwitchOption(
                     id: selectionId,
-                    name: l10n.tr("remoteClaude.sectionAgentName", host.hostName),
+                    name: l10n.tr("remoteClaude.sectionAgentName", hostName),
                     brandColor: claudeBrand,
                     isCurrent: state.selectedRunSetupAgentID == selectionId,
                     isAvailable: status.isSelectable,
                     statusText: status.isSelectable ? "ready" : "unavailable",
                     version: nil,
-                    accountSummary: l10n.tr("remoteClaude.footerNote", host.hostName),
+                    accountSummary: l10n.tr("remoteClaude.footerNote", hostName),
                     quotaLeftPercent: nil,
                     tag: tag,
                     problemText: problemText,
@@ -4657,13 +4740,50 @@ fileprivate final class WorkbenchUIModel {
     // registered last may be the one leaving.
     private let windowProbes = NSHashTable<NSView>.weakObjects()
     private let composerProbes = NSHashTable<NSView>.weakObjects()
+    struct MentionCompletionCacheKey: Equatable {
+        let isNewSessionStage: Bool
+        let projectPath: String
+        let activeWorkspacePath: String
+        let projectGeneration: UInt64
+        let fileTreeRevision: UInt64
+        let query: String
+        let selectedSessionID: String?
+        let replicaSeq: Int
+        let sessionsCount: Int
+    }
+
     private let findBarProbes = NSHashTable<NSView>.weakObjects()
     @ObservationIgnored private var findCache: (key: FindCacheKey, matches: [String])?
     @ObservationIgnored private var modelListsCache: [String: (key: ModelListsKey, lists: ModelMenuLists)] = [:]
-    @ObservationIgnored var filePreviewCache: [String: [String]] = [:]
+    @ObservationIgnored private var filePreviewCache: [String: [String]] = [:]
+    @ObservationIgnored private var filePreviewCacheOrder: [String] = []
+    private static let maxFilePreviewCacheEntries = 64
+    @ObservationIgnored var mentionCompletionCache: (
+        key: MentionCompletionCacheKey,
+        files: [ComposerMentionRow],
+        sessions: [ComposerSessionMentionRow],
+        totalPoolCount: Int
+    )? = nil
     @ObservationIgnored var deletedProjectMentions: [String: (path: String, isFolder: Bool)] = [:]
     @ObservationIgnored var attemptedFilesLoadProject: String? = nil
     @ObservationIgnored private var projectSetsCache: (count: Int, first: String?, last: String?, files: Set<String>, folders: Set<String>, folderArray: [String])?
+
+    func cachedFilePreview(for key: String) -> [String]? {
+        guard let lines = filePreviewCache[key] else { return nil }
+        filePreviewCacheOrder.removeAll { $0 == key }
+        filePreviewCacheOrder.append(key)
+        return lines
+    }
+
+    func storeFilePreview(_ lines: [String], for key: String) {
+        filePreviewCache[key] = lines
+        filePreviewCacheOrder.removeAll { $0 == key }
+        filePreviewCacheOrder.append(key)
+        while filePreviewCacheOrder.count > Self.maxFilePreviewCacheEntries {
+            let evicted = filePreviewCacheOrder.removeFirst()
+            filePreviewCache.removeValue(forKey: evicted)
+        }
+    }
 
     var composerFocused: Bool { editorController.isFocused }
 
@@ -5436,7 +5556,6 @@ extension MacWorkbenchView {
                 if hasRows {
                     RunningSessionsRail(
                         model: model,
-                        rpgStore: host.island.rpgStore,
                         gameStore: host.island.gameStore,
                         collapsed: runningRailCollapsed || showWorkbenchDrawer,
                         selectedSessionID: state.showStudioHome ? nil : state.selectedSessionSummary?.id,

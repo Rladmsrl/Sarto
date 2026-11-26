@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Observation
 import PrismDesign
@@ -5,27 +6,41 @@ import SartoProtocol
 import SwiftUI
 
 /// The idle game as the daemon relays it. The game service computes every number and every hit;
-/// this keeps the latest state, plays battle events 350 ms behind game time to absorb 100-200 ms
-/// network RTT and jitter smoothly, and dispatches player commands with immediate busy feedback.
+/// this keeps the latest state, plays battle events a little behind game time so they come out
+/// evenly, and dispatches player commands with immediate busy feedback.
 @MainActor
 @Observable
 final class GameStore {
     private(set) var status: GameLinkStatusInfo?
     private(set) var state: GameStateInfo?
     private(set) var busy = false
+    /// The last command's error, as the daemon or the game service named it.
     private(set) var lastCommandError: String?
     private(set) var lastClaimedReport: GameReportInfo?
-    private(set) var liveUlt: Int = 0
+    /// The owner is turning the game on or off and the daemon has not answered yet.
+    private(set) var switching = false
 
     @ObservationIgnored var onWatchChanged: ((Bool) -> Void)?
     @ObservationIgnored var onSendCommand: ((String, [String: JSONValue]) async -> GameCommandOutcome)?
     @ObservationIgnored var onOpenExpedition: (() -> Void)?
+    /// Asks the daemon to turn the game on or off; its new status, or nil when it could not be asked.
+    @ObservationIgnored var onSetEnabled: ((Bool) async -> GameLinkStatusInfo?)?
 
-    /// Shown once the daemon reaches a game service for a signed-in account and a state came.
-    var visible: Bool { status?.enabled == true && state != nil }
+    /// The owner turned the game on for this Mac, and the daemon reaches a game service for a
+    /// signed-in account. Nothing of the game shows otherwise.
+    var isOn: Bool { status?.optedIn == true && status?.enabled == true }
+
+    /// Shown once the game is on and a state came.
+    var visible: Bool { isOn && state != nil }
 
     struct Popup {
-        var text: String
+        enum Label {
+            case damage(Int)
+            case tool(Int)
+            case miss
+        }
+
+        var label: Label
         var crit: Bool
         var big: Bool
         var born: Date
@@ -36,23 +51,42 @@ final class GameStore {
         var born: Date
     }
 
+    struct Banner {
+        enum Kind {
+            /// A Boss phase's name, as the game service sends it.
+            case phase(String)
+            case ult(perfect: Bool)
+            case stageClear(String)
+        }
+
+        var kind: Kind
+        var born: Date
+    }
+
     struct Display {
         var target: GameTarget?
         var popups: [Popup] = []
         var shots: [Shot] = []
         var kills = 0
-        var banner: (text: String, born: Date)?
+        var banner: Banner?
         var lastHit: Date?
+        /// The ultimate's charge as of the events played so far.
+        var ult: Int?
     }
 
     /// Game time minus local time, in ms, from the latest state.
     @ObservationIgnored private var clockOffset: Double = 0
     @ObservationIgnored private var pending: [GameBattleEvent] = []
     @ObservationIgnored private var displays: [String: Display] = [:]
-    @ObservationIgnored private var activeSurfaces = 0
+    /// The surfaces on screen; the daemon follows the battle while there is any.
+    @ObservationIgnored private var shownSurfaces: Set<ObjectIdentifier> = []
 
-    /// 200 ms server tick + 150 ms jitter buffer keeps 100-200 ms cloud links smooth without stutter.
-    private static let delayMs: Double = 350
+    /// The server steps every 200 ms and sends what a step computed at its end, so an event can be
+    /// a whole step old when it leaves. Playing the step plus the design's 150 ms jitter buffer
+    /// behind game time keeps every event on time; 150 ms alone would bunch a quarter of them.
+    private static let stepMs: Double = 200
+    private static let jitterMs: Double = 150
+    private static let delayMs: Double = stepMs + jitterMs
     private static let staleMs: Double = 2500
     private static let popupLife: TimeInterval = 0.85
     private static let shotLife: TimeInterval = 0.22
@@ -60,6 +94,20 @@ final class GameStore {
 
     func openExpedition() {
         onOpenExpedition?()
+    }
+
+    /// Turns the game on or off for this Mac; false when it did not change. Off deletes the facts
+    /// not sent yet. While the game is locked, it can only be turned off.
+    @discardableResult
+    func setEnabled(_ enabled: Bool) async -> Bool {
+        if enabled && GameFeature.locked { return false }
+        guard !switching, let onSetEnabled else { return false }
+        switching = true
+        let next = await onSetEnabled(enabled)
+        switching = false
+        guard let next else { return false }
+        apply(.gameStatus(next))
+        return next.optedIn == enabled
     }
 
     func clearError() {
@@ -84,35 +132,39 @@ final class GameStore {
             lastClaimedReport = rep
         }
         if !outcome.ok {
-            lastCommandError = outcome.error ?? "Command failed"
+            lastCommandError = outcome.error ?? ""
         }
         return outcome.ok
     }
 
-    func setSurfaceVisible(_ shown: Bool) {
-        let wasWatching = activeSurfaces > 0
-        activeSurfaces = max(0, activeSurfaces + (shown ? 1 : -1))
-        let isWatching = activeSurfaces > 0
-        if isWatching != wasWatching {
-            if !isWatching { pending.removeAll() }
-            onWatchChanged?(isWatching)
+    /// A surface came on screen or left it; `id` tells the surfaces apart.
+    func setSurface(_ id: ObjectIdentifier, shown: Bool) {
+        let wasWatching = !shownSurfaces.isEmpty
+        if shown {
+            shownSurfaces.insert(id)
+        } else {
+            shownSurfaces.remove(id)
         }
+        let isWatching = !shownSurfaces.isEmpty
+        guard isWatching != wasWatching else { return }
+        if !isWatching { pending.removeAll() }
+        onWatchChanged?(isWatching)
     }
 
     func apply(_ event: HostEvent) {
         switch event {
         case .gameStatus(let next):
             if next != status { status = next }
-            if !next.enabled {
+            if !next.enabled || !next.optedIn {
                 state = nil
-                liveUlt = 0
                 pending.removeAll()
                 displays.removeAll()
             }
         case .gameFrame(.state(let next)):
+            guard isOn else { return }
             applyState(next)
         case .gameFrame(.battle(let events)):
-            guard activeSurfaces > 0 else { return }
+            guard !shownSurfaces.isEmpty else { return }
             pending.append(contentsOf: events)
             if pending.count > Self.maxPending { pending.removeFirst(pending.count - Self.maxPending) }
         default:
@@ -123,10 +175,14 @@ final class GameStore {
     private func applyState(_ next: GameStateInfo) {
         clockOffset = next.serverNow - Date().timeIntervalSince1970 * 1000
         if next != state { state = next }
-        liveUlt = next.ult
         var main = displays["main"] ?? Display()
         if !pending.contains(where: { $0.lane == "main" }) || main.target == nil {
             main.target = next.boss ?? next.monster
+        }
+        // The state is ahead of the events still to play; until they have, the gauge follows them,
+        // so it never runs back.
+        if !pending.contains(where: { $0.lane == "main" && $0.ult != nil }) {
+            main.ult = next.ult
         }
         displays["main"] = main
         var run = displays["run"] ?? Display()
@@ -152,7 +208,8 @@ final class GameStore {
         date.timeIntervalSince1970 * 1000 + clockOffset
     }
 
-    /// Plays the events due by `date` and returns what to draw.
+    /// Plays the events due by `date` and returns what to draw. It changes only state no view
+    /// observes, so a surface calls it once per frame, before it draws.
     func frame(at date: Date) -> Display {
         let gameNow = date.timeIntervalSince1970 * 1000 + clockOffset - Self.delayMs
         pending.removeAll { $0.at < gameNow - Self.staleMs }
@@ -174,8 +231,8 @@ final class GameStore {
 
     private func play(_ event: GameBattleEvent, now: Date) {
         var display = displays[event.lane] ?? Display()
-        if let ult = event.ult, event.lane == lane {
-            liveUlt = ult
+        if let ult = event.ult {
+            display.ult = ult
         }
         switch event.kind {
         case "spawn", "bossStart":
@@ -187,7 +244,7 @@ final class GameStore {
             )
         case "bossPhase":
             if let phase = event.text {
-                display.banner = (phase, now)
+                display.banner = Banner(kind: .phase(phase), born: now)
             }
         case "hit", "double", "tool", "ult":
             if let hp = event.hp {
@@ -200,21 +257,21 @@ final class GameStore {
             display.shots.append(Shot(kind: event.kind, born: now))
             if let damage = event.damage {
                 display.popups.append(Popup(
-                    text: event.kind == "tool" ? "MCP \(damage)" : "\(damage)",
+                    label: event.kind == "tool" ? .tool(damage) : .damage(damage),
                     crit: event.crit || event.kind == "ult",
                     big: event.kind == "ult",
                     born: now
                 ))
             }
             display.lastHit = now
-            if event.kind == "ult" { display.banner = (event.perfect ? "Ship it! ×1.5" : "Ship it!", now) }
+            if event.kind == "ult" { display.banner = Banner(kind: .ult(perfect: event.perfect), born: now) }
         case "miss":
-            display.popups.append(Popup(text: "miss", crit: false, big: false, born: now))
+            display.popups.append(Popup(label: .miss, crit: false, big: false, born: now))
         case "kill":
             display.kills += 1
             display.target = nil
         case "stageClear":
-            display.banner = ("\(event.text ?? "") ✓", now)
+            display.banner = Banner(kind: .stageClear(event.text ?? ""), born: now)
         case "bossEnd", "waveEnd":
             display.target = nil
         default:
@@ -223,6 +280,125 @@ final class GameStore {
         if display.popups.count > 8 { display.popups.removeFirst(display.popups.count - 8) }
         if display.shots.count > 6 { display.shots.removeFirst(display.shots.count - 6) }
         displays[event.lane] = display
+    }
+
+    /// The text key for why the daemon's link to the game service last failed.
+    static func linkErrorKey(_ code: String?) -> String {
+        switch code {
+        case "needs_tokens": "game.error.needsTokens"
+        case "unreachable": "game.error.unreachable"
+        case "rejected": "game.error.rejected"
+        default: "game.error.generic"
+        }
+    }
+
+    /// The text key for a command's error, as the daemon, the app or the game service named it.
+    static func commandErrorKey(_ error: String) -> String {
+        switch error {
+        case "unreachable", "link stopped", "account changed", "daemon disconnected":
+            "game.command.unreachable"
+        case "no answer": "game.command.noAnswer"
+        case "not charged": "game.command.notCharged"
+        case "no elite or boss": "game.command.noEliteOrBoss"
+        case "not enough compute": "game.command.notEnoughCompute"
+        case "not enough material": "game.command.notEnoughMaterial"
+        case "stale revision": "game.command.stale"
+        case "slot locked": "game.command.slotLocked"
+        case "boss fight in progress": "game.command.bossInProgress"
+        case "boss not reached": "game.command.bossNotReached"
+        case "need three cards", "cards differ": "game.command.mergeInvalid"
+        default: "game.command.failed"
+        }
+    }
+}
+
+/// Tells a game surface whether it is on screen: its window shown and not covered or minimised
+/// and, with `requiresActiveApp`, the app active too. It counts the surface in the store while it
+/// is, so the daemon follows the battle only while someone can see it.
+struct GameSurfaceProbe: NSViewRepresentable {
+    let store: GameStore
+    var requiresActiveApp: Bool
+    @Binding var onScreen: Bool
+
+    func makeNSView(context: Context) -> ProbeView {
+        let view = ProbeView()
+        update(view)
+        return view
+    }
+
+    func updateNSView(_ view: ProbeView, context: Context) {
+        update(view)
+    }
+
+    static func dismantleNSView(_ view: ProbeView, coordinator: ()) {
+        view.stop()
+    }
+
+    private func update(_ view: ProbeView) {
+        view.store = store
+        view.requiresActiveApp = requiresActiveApp
+        let binding = $onScreen
+        view.report = { binding.wrappedValue = $0 }
+    }
+
+    final class ProbeView: NSView {
+        weak var store: GameStore?
+        var requiresActiveApp = false
+        var report: ((Bool) -> Void)?
+        private var reported = false
+        private var stopped = false
+        private var observers: [NSObjectProtocol] = []
+        private weak var observedWindow: NSWindow?
+
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            observe(window)
+            // AppKit moves the view while SwiftUI updates; report after that pass.
+            Task { @MainActor [weak self] in self?.evaluate() }
+        }
+
+        func stop() {
+            stopped = true
+            for token in observers { NotificationCenter.default.removeObserver(token) }
+            observers.removeAll()
+            observedWindow = nil
+            guard reported else { return }
+            reported = false
+            let id = ObjectIdentifier(self)
+            Task { @MainActor [store] in store?.setSurface(id, shown: false) }
+        }
+
+        private func evaluate() {
+            guard !stopped else { return }
+            let shown: Bool = {
+                guard let window, window.isVisible, window.occlusionState.contains(.visible) else { return false }
+                return !requiresActiveApp || NSApp.isActive
+            }()
+            guard shown != reported else { return }
+            reported = shown
+            store?.setSurface(ObjectIdentifier(self), shown: shown)
+            report?(shown)
+        }
+
+        private func observe(_ next: NSWindow?) {
+            guard next !== observedWindow || observers.isEmpty else { return }
+            for token in observers { NotificationCenter.default.removeObserver(token) }
+            observedWindow = next
+            var sources: [(Notification.Name, AnyObject?)] = [
+                (NSApplication.didBecomeActiveNotification, NSApp),
+                (NSApplication.didResignActiveNotification, NSApp),
+            ]
+            if let next {
+                sources.append((NSWindow.didChangeOcclusionStateNotification, next))
+            }
+            observers = sources.map { name, object in
+                NotificationCenter.default.addObserver(forName: name, object: object, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.evaluate() }
+                }
+            }
+        }
     }
 }
 
@@ -332,7 +508,7 @@ enum GameArenaRenderer {
                 Path(roundedRect: CGRect(x: bar.minX, y: bar.minY, width: bar.width * share, height: bar.height), cornerRadius: 2),
                 with: .color(tokens.danger)
             )
-            let monsterName = l10n.tr("game.monster.\(target.name)")
+            let monsterName = l10n.lookup("game.monster.\(target.name)") ?? target.name
             context.draw(
                 Text(compact ? monsterName : "\(monsterName)  \(target.hp)/\(target.maxHp)")
                     .font(.system(size: compact ? 9 : 10.5, weight: .medium, design: .monospaced))
@@ -366,7 +542,7 @@ enum GameArenaRenderer {
             var ctx = context
             ctx.opacity = max(0, 1 - age / 0.85)
             ctx.draw(
-                Text(popup.text)
+                Text(text(of: popup.label, l10n: l10n))
                     .font(.system(size: (popup.big ? 13 : popup.crit ? 11.5 : 9.5) * (compact ? 1 : 1.15), weight: .bold, design: .monospaced))
                     .foregroundStyle(popup.crit ? tokens.prismAmber : tokens.foreground),
                 at: CGPoint(x: x, y: ground - 24 * scale - rise)
@@ -374,10 +550,8 @@ enum GameArenaRenderer {
         }
 
         if let banner = display.banner {
-            let localized = l10n.tr("game.phase.\(banner.text)")
-            let text = localized.hasPrefix("game.phase.") ? banner.text : localized
             context.draw(
-                Text(text)
+                Text(text(of: banner.kind, l10n: l10n))
                     .font(.system(size: compact ? 11 : 13, weight: .bold))
                     .foregroundStyle(tokens.prismAmber),
                 at: CGPoint(x: size.width / 2, y: compact ? 12 : 18)
@@ -391,6 +565,22 @@ enum GameArenaRenderer {
             at: CGPoint(x: compact ? 8 : 12, y: compact ? 9 : 13),
             anchor: .leading
         )
+    }
+
+    private static func text(of label: GameStore.Popup.Label, l10n: PrismL10n) -> String {
+        switch label {
+        case .damage(let damage): "\(damage)"
+        case .tool(let damage): l10n.tr("game.popup.tool", "\(damage)")
+        case .miss: l10n.tr("game.popup.miss")
+        }
+    }
+
+    private static func text(of banner: GameStore.Banner.Kind, l10n: PrismL10n) -> String {
+        switch banner {
+        case .phase(let phase): l10n.lookup("game.phase.\(phase)") ?? phase
+        case .ult(let perfect): l10n.tr(perfect ? "game.ult.bannerPerfect" : "game.ult.name")
+        case .stageClear(let stage): "\(stage) ✓"
+        }
     }
 
     private static func drawWeapon(

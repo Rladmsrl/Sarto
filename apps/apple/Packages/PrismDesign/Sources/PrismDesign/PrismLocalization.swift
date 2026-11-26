@@ -130,6 +130,11 @@ public struct PrismL10n: Sendable, Equatable {
 
     /// Looks up a localized string for `key` from the resolved `.lproj/Localizable.strings` table.
     public func tr(_ key: String) -> String {
+        lookup(key) ?? key
+    }
+
+    /// The localized string for `key`, falling back to English; nil when no table has the key.
+    public func lookup(_ key: String) -> String? {
         if let hit = Self.cachedTables[resolvedCode]?[key] {
             return hit
         }
@@ -142,10 +147,13 @@ public struct PrismL10n: Sendable, Equatable {
                 return enHit
             }
             if let enBundle = Self.cachedBundles["en"]?.bundle {
-                return enBundle.localizedString(forKey: key, value: key, table: "Localizable")
+                let enValue = enBundle.localizedString(forKey: key, value: nil, table: "Localizable")
+                if enValue != key {
+                    return enValue
+                }
             }
         }
-        return value
+        return nil
     }
 
     /// Formats a localized string using printf-style placeholders (`%@`, `%d`, `%.1f`).

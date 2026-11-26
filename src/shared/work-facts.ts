@@ -1,7 +1,8 @@
-// What an agent's work came to, as the host that ran it saw it: the facts the Agent RPG's rules
-// turn into experience, loot and achievements. Each host tells only of its own sessions, so the
-// same work is never told twice, and a fact carries numbers and ids alone: no titles, plan text or
-// paths, since it is meant to leave the computer for a game service one day.
+// What an agent's work came to, as the host that ran it saw it: the facts the daemon's game link
+// turns into the game service's (`src/daemon/game/facts.ts`). Each host tells only of its own
+// sessions, so the same work is never told twice, and a fact carries numbers and ids alone: no
+// titles, plan text or paths, since the game link sends them off the computer. Only a port that
+// selects `work.facts` takes them, and never a paired device's.
 
 import type { AgentId } from './agents'
 
@@ -18,20 +19,11 @@ export interface WorkFactTokens {
 export type WorkKind = 'think' | 'scan' | 'command' | 'edit'
 
 export type WorkFactBody =
-  /** Seconds of a running turn, all spent on `work`; `child` for a session the user started from another. */
-  | { kind: 'work.active'; seconds: number; work: WorkKind; child: boolean }
-  /** The user answered what the session waited on, and it runs again. */
-  | { kind: 'permission.granted' }
-  /** Steps of the session's plan were done. */
-  | { kind: 'todo.completed'; count: number }
-  /** The session's plan was done, or its turn ended well while a plan was still open. */
-  | { kind: 'plan.completed'; steps: number }
-  /** A turn ended: `ok` unless it failed, a plan limit refused it or the user cancelled it. */
-  | { kind: 'turn.ended'; ok: boolean }
   /**
-   * The same turn's account for the game service: wall times in ms, the seconds it spent on each
-   * kind of work, the stretches it waited for the user, and its tokens per model. `models` is
-   * empty when the agent reported none, as for a failed turn.
+   * A turn ended: its wall times in ms, the seconds it spent on each kind of work, the stretches
+   * it waited for the user, and its tokens per model. `ok` unless it failed, a plan limit refused
+   * it or the user cancelled it; `models` is empty when the agent reported none, as for a failed
+   * turn.
    */
   | {
       kind: 'turn.completed'

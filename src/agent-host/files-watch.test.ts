@@ -131,3 +131,50 @@ describe.each([
     }
   }, 10_000)
 })
+
+describe('FilesWatches broad root and protected path guards', () => {
+  it('never watches the home directory recursively and ignores ~/Library writes', async () => {
+    const home = await realpath(await tempFolder('sarto-watch-home-'))
+    await mkdir(path.join(home, 'Library', 'Caches'), { recursive: true })
+    await mkdir(path.join(home, 'proj'), { recursive: true })
+    const calls: { target: string; recursive?: boolean }[] = []
+    const listeners = new Map<string, (event: string, filename: string | Buffer | null) => void>()
+    const changes: { portId: string; projectPath: string }[] = []
+    const watches = new FilesWatches({
+      platform: 'darwin',
+      homeDir: home,
+      changed: (portId, projectPath) => changes.push({ portId, projectPath }),
+      log: () => {},
+      debounceMs: 20,
+      intervalMs: 40,
+      watch: (target, options, listener) => {
+        calls.push({ target, recursive: options.recursive })
+        listeners.set(target, listener)
+        return {
+          on: () => {},
+          close: () => {},
+        } as unknown as ReturnType<typeof import('node:fs').watch>
+      },
+    })
+
+    watches.add(home, 'port-1', home)
+    watches.listed(home, { paths: ['proj/a.ts'], folders: [], truncated: false })
+
+    // Only a single non-recursive watcher on home itself is created.
+    expect(calls).toEqual([{ target: home, recursive: false }])
+
+    const emit = listeners.get(home)!
+    emit('change', 'Library')
+    emit('change', 'Library/Caches/foo')
+    emit('change', '.Trash/item')
+    emit('change', 'proj/a.ts')
+    await delay(100)
+    expect(changes).toEqual([])
+
+    // Direct top-level user entries still trigger a refresh.
+    emit('rename', 'notes.txt')
+    await until(() => changes.length > 0, 1000)
+    expect(changes).toEqual([{ portId: 'port-1', projectPath: home }])
+    watches.stop()
+  })
+})

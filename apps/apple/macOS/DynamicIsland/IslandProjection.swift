@@ -98,7 +98,6 @@ enum IslandProjector {
     static func buildSnapshot(
         state: SartoState,
         strings: IslandStrings,
-        unreadSessionKeys: Set<String>,
         nowMs: Double,
         sources prebuilt: [LiveHostIslandSource]? = nil,
         eligibleProviderIds: Set<String>? = nil
@@ -124,13 +123,12 @@ enum IslandProjector {
                 let item = TaggedSession(source: source, summary: summary, agentsById: agentsById)
                 allTagged.append(item)
                 let waiting = summary.status == .awaitingPermission || summary.permissionCount > 0 || summary.status == .authRequired
-                let scopedKey = "\(source.hostId)::\(summary.id)"
                 if waiting {
                     needsYouList.append(item)
                 } else if summary.status == .running || summary.status == .starting
                             || summary.stillRunning?.hasWork == true {
                     runningList.append(item)
-                } else if summary.status == .failed || summary.attention == "error" || summary.attention == "unread" || unreadSessionKeys.contains(scopedKey) {
+                } else if summary.status == .failed || summary.attention == "error" || summary.attention == "unread" {
                     finishedList.append(item)
                 } else if summary.parentId == nil && (nowMs - summary.updatedAt) < idleWithinMs {
                     idleList.append(item)
@@ -138,9 +136,19 @@ enum IslandProjector {
             }
         }
 
+        func isFailure(_ summary: SessionSummary) -> Bool {
+            summary.status == .failed || summary.attention == "error"
+        }
         needsYouList.sort { $0.summary.updatedAt > $1.summary.updatedAt }
         runningList.sort { ($0.summary.turnStartedAt ?? $0.summary.updatedAt) > ($1.summary.turnStartedAt ?? $1.summary.updatedAt) }
-        finishedList.sort { $0.summary.updatedAt > $1.summary.updatedAt }
+        // Failures lead the finished group, so newer finished work on a busy host never pushes
+        // one out of the capped list.
+        finishedList.sort { lhs, rhs in
+            let lFailed = isFailure(lhs.summary)
+            let rFailed = isFailure(rhs.summary)
+            if lFailed != rFailed { return lFailed }
+            return lhs.summary.updatedAt > rhs.summary.updatedAt
+        }
         idleList.sort { $0.summary.updatedAt > $1.summary.updatedAt }
 
         let ordered: [(TaggedSession, String)] =
@@ -157,7 +165,10 @@ enum IslandProjector {
             let source = tagged.source
             let agent = tagged.agentsById[summary.agentId]
             let replica = source.replicas[summary.id]
-            let pendingTools = replica?.pendingTools ?? []
+            // Only a session that is waiting can hold a request; reading `pendingTools` walks the
+            // whole thread, so the others skip it.
+            let mayAsk = summary.permissionCount > 0 || summary.status == .awaitingPermission
+            let pendingTools = mayAsk ? (replica?.pendingTools ?? []) : []
             // A session whose model runs on another computer is held by that computer's plan.
             let limit = summary.modelHost != nil ? nil : reachedLimit(
                 agent: agent,
@@ -179,13 +190,13 @@ enum IslandProjector {
                 replica: replica,
                 firstPendingTool: pendingTools.first,
                 limit: limit,
-                isUnread: unreadSessionKeys.contains(scopedKey) || summary.attention == "unread",
+                isUnread: summary.attention == "unread",
                 strings: strings,
                 nowMs: nowMs
             )
             rows.append(row)
 
-            if summary.permissionCount > 0 || !pendingTools.isEmpty {
+            if mayAsk {
                 for tool in pendingTools {
                     if let req = buildRequest(
                         tool: tool,
@@ -205,21 +216,26 @@ enum IslandProjector {
 
         let midnight = Calendar.current.startOfDay(for: Date(timeIntervalSince1970: nowMs / 1000)).timeIntervalSince1970 * 1000
         let todayCount = allTagged.filter { $0.summary.parentId == nil && $0.summary.updatedAt >= midnight }.count
+        let shownFailed = rows.filter { $0.status == "failed" }.count
+        let cappedFailed = finishedList.dropFirst(finishedRowsLimit).filter { isFailure($0.summary) }.count
         let summaryCounts = IslandSummaryCounts(
             running: rows.filter { $0.status == "running" || $0.status == "starting" }.count,
             waiting: rows.filter { $0.status == "waiting" || $0.status == "sign_in" }.count,
-            failed: rows.filter { $0.status == "failed" }.count,
+            failed: shownFailed + cappedFailed,
             today: todayCount
         )
 
+        // Plan windows are this Mac's first, as the usage the island shows is this Mac's; the
+        // active host adds the agents this Mac does not have.
+        let planAgents = limitAgents(state: state, sources: sources)
         let notices = buildLimitNotices(
-            agents: state.agents,
+            agents: planAgents,
             strings: strings,
             nowMs: nowMs,
             eligibleProviderIds: eligibleProviderIds
         )
         var quotas: [String: [IslandQuotaWindow]] = [:]
-        for agent in state.agents {
+        for agent in planAgents {
             let windows = (agent.limits ?? []).compactMap { limit -> IslandQuotaWindow? in
                 if let resets = limit.resetsAt, resets <= nowMs { return nil }
                 let used = limit.state == "reached" ? 100 : (limit.usedPercent ?? 0)
@@ -240,6 +256,15 @@ enum IslandProjector {
             telemetry: buildTelemetry(state: state),
             quotas: quotas
         )
+    }
+
+    @MainActor
+    private static func limitAgents(state: SartoState, sources: [LiveHostIslandSource]) -> [AgentStatusInfo] {
+        guard let local = sources.first(where: \.isLocal), local.hostId != state.activeHostID else {
+            return state.agents
+        }
+        let localIds = Set(local.agents.map(\.id))
+        return local.agents + state.agents.filter { !localIds.contains($0.id) }
     }
 
     /// The selected session's live metrics. Reading them registers the coordinator's telemetry
@@ -358,10 +383,10 @@ enum IslandProjector {
         // Hide completed plans (e.g. 4/4) so the island falls back to live tok/s or elapsed time
         // until a new incomplete plan starts. Include full step items from the cached replica when
         // available so the right-hand running rail can show the complete Todo battle list.
-        let planSnapshot: IslandPlanSnapshot? = Self.buildPlanSnapshot(
-            summaryPlan: summary.plan,
-            replica: replica
-        )
+        let showsPlan = backgroundWork != nil || ["running", "starting", "waiting", "sign_in"].contains(status)
+        let planSnapshot: IslandPlanSnapshot? = showsPlan
+            ? Self.buildPlanSnapshot(summaryPlan: summary.plan, replica: replica)
+            : nil
 
         let since = status == "running" ? (summary.turnStartedAt ?? summary.updatedAt) : summary.updatedAt
 
@@ -409,6 +434,9 @@ enum IslandProjector {
         summaryPlan: PlanProgress?,
         replica: ThreadReplica?
     ) -> IslandPlanSnapshot? {
+        if let summaryPlan, summaryPlan.total == 0 || summaryPlan.done >= summaryPlan.total {
+            return nil
+        }
         var replicaItems: [PlanItem]? = replica?.snapshotPlan
         // The newest plan entry wins; a long thread is read from its end, not walked whole.
         if let replica {
@@ -865,16 +893,18 @@ enum IslandProjector {
 private enum IslandDateFormatters {
     private static var cache: [String: DateFormatter] = [:]
 
+    /// A time within 20 hours, a weekday within six days (never today's), a date beyond.
     static func formatResetShort(resetsAtMs: Double, nowMs: Double, localeId: String) -> String {
-        let soon = (resetsAtMs - nowMs) < 20 * 3600 * 1000
-        let key = "\(localeId)|\(soon ? 1 : 0)"
+        let left = resetsAtMs - nowMs
+        let template = left < 20 * 3600 * 1000 ? "jmm" : (left < 6 * 24 * 3600 * 1000 ? "EEE" : "MMMd")
+        let key = "\(localeId)|\(template)"
         let formatter: DateFormatter
         if let existing = cache[key] {
             formatter = existing
         } else {
             let built = DateFormatter()
             built.locale = Locale(identifier: localeId)
-            built.setLocalizedDateFormatFromTemplate(soon ? "jmm" : "EEE")
+            built.setLocalizedDateFormatFromTemplate(template)
             cache[key] = built
             formatter = built
         }
@@ -897,25 +927,34 @@ final class PrismIslandModel {
     private(set) var collapsedQuiet: Bool = false
     /// Set by the coordinator: Sarto's main window is in front and the running panel is on.
     var quietForeground: Bool = false
-    private(set) var pop: IslandPopItem?
+    private(set) var pop: IslandPopItem? {
+        didSet { updateChassis() }
+    }
     private(set) var queuedPops: Int = 0
     private(set) var note: IslandAnswerNote?
     private(set) var pendingRequestKeys: Set<String> = []
     private(set) var now: Date = Date()
 
-    /// Rows, requests and notices; live telemetry is kept in `telemetry` so token-rate metrics
-    /// never invalidate the views that only read the rows.
-    private(set) var snapshot = IslandViewSnapshot(
-        rows: [],
-        requests: [],
-        notices: [],
-        summary: IslandSummaryCounts(running: 0, waiting: 0, failed: 0, today: 0),
-        telemetry: nil
-    )
+    // The snapshot's parts are observed apart, so a view that reads the counts does not redraw
+    // when a row's text changes. Live telemetry is kept in `telemetry` for the same reason.
+    private(set) var rows: [IslandRowItem] = []
+    private var snapshotRequests: [IslandPendingRequest] = []
+    private(set) var notices: [IslandNoticeItem] = []
+    private(set) var summary = IslandSummaryCounts(running: 0, waiting: 0, failed: 0, today: 0)
+    private(set) var quotas: [String: [IslandQuotaWindow]] = [:]
     private(set) var telemetry: IslandLiveTelemetry? = nil
+
+    // What the chassis shows, kept as stored values so the root view, which every display
+    // renders, does not depend on the rows or on the 1 Hz clock; `updateChassis` refreshes them.
+    private(set) var auraState: IslandAuraState = .calm
+    private(set) var isIdleForUsage = true
+    /// The daemon is not connected, so an empty list says so instead of "no sessions yet".
+    var hostOffline = false
     /// Real-time active channel/model context projected from `SartoState` for usage focus resolution.
     var appUsageFocus: AppUsageFocusContext? = nil
-    var demoRequest: IslandPendingRequest? = nil
+    var demoRequest: IslandPendingRequest? = nil {
+        didSet { updateChassis() }
+    }
 
     private(set) var strings: IslandStrings = IslandStrings(language: .system)
     var geometry = IslandGeometry()
@@ -924,14 +963,18 @@ final class PrismIslandModel {
     /// Displays offered by the island's context menu, refreshed when screens or settings change
     /// so the menu never enumerates screens during a body pass.
     var displayMenuItems: [IslandDisplayMenuItem] = []
+    /// The island picks its display itself (no display chosen in Settings).
+    var displaysAutomatic = true
     var suspended: Bool = false
     var hasLowUsageAlert: Bool = false
     var userPinnedTab: IslandExpandedTab? = nil
     var activeScreenID: UInt32? = nil
     var reduceMotion: Bool = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    /// The app's motion tier, which caps the island's own animation style.
+    var motionTier: PrismMotionTier = .ultra
     var selectedRowKey: String? = nil
-    /// How running sessions show while collapsed; the coordinator copies it from the settings.
-    var stackOptions = IslandStackOptions()
+    /// How the running animations move; the coordinator copies it from the settings.
+    var motionStyle: IslandMotionStyle = .lively
     /// Plan windows the usage store reads (the menu bar's), by its provider id: only the providers
     /// whose quota shows (installed, used within 30 days, measured).
     var usageQuotas: [String: [IslandQuotaWindow]] = [:]
@@ -965,6 +1008,8 @@ final class PrismIslandModel {
     @ObservationIgnored private nonisolated(unsafe) var cacheTimer: Timer?
     @ObservationIgnored private nonisolated(unsafe) var measureTimeout: Timer?
     @ObservationIgnored private nonisolated(unsafe) var expandWorkItem: DispatchWorkItem?
+    @ObservationIgnored private var cacheTickDue: Date?
+    @ObservationIgnored private var stuckCheckDue: Date?
     private var seenDoneKeys: Set<String> = []
 
     deinit {
@@ -979,22 +1024,31 @@ final class PrismIslandModel {
 
     // MARK: Derived Views
 
-    var rows: [IslandRowItem] { snapshot.rows }
+    var snapshot: IslandViewSnapshot {
+        IslandViewSnapshot(
+            rows: rows,
+            requests: snapshotRequests,
+            notices: notices,
+            summary: summary,
+            telemetry: nil,
+            quotas: quotas
+        )
+    }
+
     var listRows: [IslandRowItem] { Array(rows.prefix(IslandMetrics.listRows)) }
-    var notices: [IslandNoticeItem] { snapshot.notices }
 
     var requests: [IslandPendingRequest] {
         if let demo = demoRequest {
-            return [demo] + snapshot.requests
+            return [demo] + snapshotRequests
         }
-        return snapshot.requests
+        return snapshotRequests
     }
 
     var asking: Bool { note != nil || !requests.isEmpty }
 
     /// Calm when no Sarto session is active/waiting/failed/unread and no prompt cache is expiring soon.
     /// In this state the collapsed island seamlessly switches to the live llm-usage-island dual-bar meter.
-    var isIdleForUsage: Bool {
+    private var computedIdleForUsage: Bool {
         !collapsedQuiet
             && collapsedSignal == nil
             && cacheLeft(rows.first?.cache)?.ending != true
@@ -1003,9 +1057,9 @@ final class PrismIslandModel {
 
     var effectiveExpandedTab: IslandExpandedTab {
         if let userPinnedTab { return userPinnedTab }
-        if snapshot.summary.running > 0
-            || snapshot.summary.waiting > 0
-            || snapshot.summary.failed > 0
+        if summary.running > 0
+            || summary.waiting > 0
+            || summary.failed > 0
             || collapsedSignal == .unread
         {
             return .sessions
@@ -1036,72 +1090,23 @@ final class PrismIslandModel {
     /// so the collapsed Dynamic Island displays the Scheme C duplex pulse crossfire (App ⇄ Agents).
     var isRunningStrikeActive: Bool {
         guard !collapsedQuiet,
-              !isIdleForUsage,
+              !computedIdleForUsage,
               let sig = collapsedSignal,
               case .running = sig
         else { return false }
         return true
     }
 
-    // MARK: Running Session Stack
-
-    struct StackGroup: Identifiable, Equatable {
-        var id: String { agent.id }
-        let agent: IslandAgentIdentity
-        let rows: [IslandRowItem]
-    }
-
-    /// Running sessions, one row each, grouped by agent in the order their first session runs.
-    var stackRunningRows: [IslandRowItem] {
-        rows.filter { $0.status == "running" || $0.status == "starting" }
-    }
-
-    /// Shown while sessions run and the stack is on; approvals and failures keep the plain bar.
-    var isSessionStackActive: Bool {
-        stackOptions.enabled && isRunningStrikeActive && !stackRunningRows.isEmpty
-    }
-
-    var stackGroups: [StackGroup] {
-        let shown = stackRunningRows.prefix(max(1, stackOptions.maxRows))
-        var order: [String] = []
-        var byAgent: [String: (IslandAgentIdentity, [IslandRowItem])] = [:]
-        for row in shown {
-            if byAgent[row.agent.id] == nil {
-                order.append(row.agent.id)
-                byAgent[row.agent.id] = (row.agent, [])
-            }
-            byAgent[row.agent.id]?.1.append(row)
-        }
-        return order.compactMap { id in byAgent[id].map { StackGroup(agent: $0.0, rows: $0.1) } }
-    }
-
-    var stackHiddenCount: Int {
-        max(0, stackRunningRows.count - max(1, stackOptions.maxRows))
-    }
-
-    /// The windows a group shows: the menu bar's reading for the agent's tool, as the menu bar
-    /// shows it; before the usage store first answers, what the host reports.
-    func stackQuota(for agent: IslandAgentIdentity) -> [IslandQuotaWindow] {
-        guard stackOptions.showQuota else { return [] }
+    /// Plan windows for an agent, as the window's running rail shows them: the menu bar's reading
+    /// for the agent's tool; before the usage store first answers, what the host reports.
+    func quotaWindows(for agent: IslandAgentIdentity) -> [IslandQuotaWindow] {
         if let provider = LiveUsageSources.providerId(forAgentId: agent.id, harnessId: agent.harness),
            let windows = usageQuotas[provider], !windows.isEmpty
         {
             return Array(windows.prefix(2))
         }
         if usageReady { return [] }
-        return Array((snapshot.quotas[agent.id] ?? []).prefix(2))
-    }
-
-    /// Height below the band, from the layout's fixed metrics, so the chassis grows in the same
-    /// spring as its content instead of after a measuring pass.
-    var stackBodyHeight: CGFloat {
-        let m = IslandStackMetrics.self
-        var height = m.topPadding + m.bottomPadding
-        for group in stackGroups {
-            height += m.groupHeader + CGFloat(group.rows.count) * m.row
-        }
-        if stackHiddenCount > 0 { height += m.foldRow }
-        return height
+        return Array((quotas[agent.id] ?? []).prefix(2))
     }
 
     func collapsedWingWidth(for g: IslandGeometry) -> CGFloat {
@@ -1119,11 +1124,7 @@ final class PrismIslandModel {
         return IslandMetrics.collapsedWidth
     }
 
-    func stackWidth(for g: IslandGeometry) -> CGFloat {
-        max(IslandStackMetrics.width, collapsedWidth(for: g))
-    }
-
-    var auraState: IslandAuraState {
+    private var computedAura: IslandAuraState {
         if mode == .grown, let pop {
             switch pop.kind {
             case "error", "limit-reached": return .failed
@@ -1132,11 +1133,19 @@ final class PrismIslandModel {
             default: break
             }
         }
-        if !requests.isEmpty || snapshot.summary.waiting > 0 { return .waiting }
-        if snapshot.summary.failed > 0 && collapsedSignal == .failed { return .failed }
-        if snapshot.summary.running > 0 { return .running }
+        if !requests.isEmpty || summary.waiting > 0 { return .waiting }
+        if summary.failed > 0 && collapsedSignal == .failed { return .failed }
+        if summary.running > 0 { return .running }
         if collapsedSignal == .unread { return .done }
         return .calm
+    }
+
+    /// Writes the chassis values that changed; called wherever their inputs change.
+    private func updateChassis() {
+        let aura = computedAura
+        if auraState != aura { auraState = aura }
+        let idle = computedIdleForUsage
+        if isIdleForUsage != idle { isIdleForUsage = idle }
     }
 
     func row(for key: String?) -> IslandRowItem? {
@@ -1172,7 +1181,7 @@ final class PrismIslandModel {
     }
 
     var summaryText: String {
-        let s = snapshot.summary
+        let s = summary
         var items: [String] = []
         let waitTotal = max(s.waiting, requests.count)
         if waitTotal > 0 { items.append(strings.text("summary.waiting", ["count": "\(waitTotal)"])) }
@@ -1220,10 +1229,6 @@ final class PrismIslandModel {
             if collapsedQuiet {
                 return CGSize(width: max(g.notchWidth, 1), height: g.notchHeight)
             }
-            if isSessionStackActive {
-                let height = min(g.notchHeight + stackBodyHeight, g.maxHeight)
-                return CGSize(width: stackWidth(for: g), height: height)
-            }
             return CGSize(width: collapsedWidth(for: g), height: g.notchHeight)
         case .grown:
             return CGSize(
@@ -1243,7 +1248,6 @@ final class PrismIslandModel {
 
     func radius(for targetMode: IslandMode? = nil) -> CGFloat {
         switch targetMode ?? mode {
-        case .collapsed where isSessionStackActive: return IslandStackMetrics.radius
         case .hidden, .collapsed: return IslandMetrics.collapsedRadius
         case .grown: return IslandMetrics.grownRadius
         case .open: return IslandMetrics.openRadius
@@ -1252,28 +1256,41 @@ final class PrismIslandModel {
 
     func shoulderWidth(for targetMode: IslandMode? = nil) -> CGFloat {
         switch targetMode ?? mode {
-        case .collapsed where isSessionStackActive: return 9
         case .hidden, .collapsed: return 6
         case .grown: return 9
         case .open: return 12
         }
     }
 
-    /// Reduce motion and the still style ease instead of springing; the lively style gives the
-    /// chassis a slight overshoot as it grows, the calm one settles without one.
-    func animation(to target: IslandMode) -> Animation {
-        if reduceMotion || stackOptions.motion == .still { return .easeInOut(duration: 0.2) }
-        let bounce = (stackOptions.motion == .arcade || stackOptions.motion == .lively) ? 0.86 : 1.0
-        switch target {
-        case .open: return .spring(response: 0.34, dampingFraction: bounce)
-        case .grown: return .spring(response: 0.40, dampingFraction: bounce)
-        case .collapsed, .hidden: return .spring(response: 0.32, dampingFraction: min(1, bounce + 0.06))
-        }
+    /// The island's animation style after the app's motion tier and Reduce Motion cap it.
+    var effectiveMotion: IslandMotionStyle {
+        motionStyle.capped(by: motionTier, reduceMotion: reduceMotion)
     }
 
-    /// Whether the running animations move: off with reduce motion or the still style.
+    /// No animation with Reduce Motion or the motion tier off, an ease for the still style; the
+    /// lively style gives the chassis a slight overshoot as it grows, the calm one settles.
+    func animation(to target: IslandMode) -> Animation? {
+        if reduceMotion || motionTier == .off { return nil }
+        if effectiveMotion == .still { return .easeInOut(duration: 0.2) }
+        let lively = effectiveMotion == .lively
+        let spec: PrismSpringSpec
+        switch target {
+        case .open: spec = lively ? .islandOpenLively : .islandOpenCalm
+        case .grown: spec = lively ? .islandGrowLively : .islandGrowCalm
+        case .collapsed, .hidden: spec = lively ? .islandSettleLively : .islandSettleCalm
+        }
+        return spec.animation(tier: motionTier, reduceMotion: reduceMotion)
+    }
+
+    /// Whether the running animations move: off with Reduce Motion, the motion tier off or the
+    /// still style.
     var animatesStrikes: Bool {
-        !reduceMotion && stackOptions.motion != .still
+        effectiveMotion != .still
+    }
+
+    /// Frame rate the running animations ask for; the energy policy caps it further.
+    var strikeFramesPerSecond: Double {
+        effectiveMotion.framesPerSecond
     }
 
     // MARK: Time & Cache Formatting
@@ -1348,16 +1365,11 @@ final class PrismIslandModel {
     func apply(snapshot next: IslandViewSnapshot, strings nextStrings: IslandStrings, visible: Bool) {
         // Every assignment notifies the observing panels, so only what changed is written.
         if strings != nextStrings { strings = nextStrings }
-        let core = IslandViewSnapshot(
-            rows: next.rows,
-            requests: next.requests,
-            notices: next.notices,
-            summary: next.summary,
-            telemetry: nil,
-            quotas: next.quotas
-        )
-        if snapshot != core { snapshot = core }
-        applyTelemetry(next.telemetry)
+        if rows != next.rows { rows = next.rows }
+        if snapshotRequests != next.requests { snapshotRequests = next.requests }
+        if notices != next.notices { notices = next.notices }
+        if summary != next.summary { summary = next.summary }
+        if quotas != next.quotas { quotas = next.quotas }
         refresh(visible: visible, forceClock: false)
     }
 
@@ -1382,19 +1394,19 @@ final class PrismIslandModel {
 
         if !visible {
             leave()
+            updateChassis()
             return
         }
         if mode == .hidden {
             setMode(.collapsed)
         }
+        updateChassis()
         scheduleStuckCheck(all)
         scheduleCacheTick()
         settleRequest()
     }
 
     private func recomputeCollapsed(_ rows: [IslandRowItem]) {
-        let prevStackActive = isSessionStackActive
-        let prevStackHeight = prevStackActive ? stackBodyHeight : 0
         let prevQuiet = collapsedQuiet
 
         let collapsed = computeCollapsed(rows)
@@ -1404,12 +1416,7 @@ final class PrismIslandModel {
         let quiet = quietForeground && collapsed.rank > 3 && collapsed.rank < 7
         if collapsedQuiet != quiet { collapsedQuiet = quiet }
 
-        let nextStackActive = isSessionStackActive
-        let nextStackHeight = nextStackActive ? stackBodyHeight : 0
-        if prevStackActive != nextStackActive
-            || abs(prevStackHeight - nextStackHeight) > 0.5
-            || prevQuiet != collapsedQuiet
-        {
+        if prevQuiet != collapsedQuiet {
             onHitAreaChange?()
         }
     }
@@ -1419,8 +1426,9 @@ final class PrismIslandModel {
         if collapsedSignal != next.signal { collapsedSignal = next.signal }
     }
 
+    /// Changes when a new turn ends, not when the finished session's summary is touched again.
     private func seenKey(_ row: IslandRowItem) -> String {
-        "\(row.key)@\(row.status)@\(Int(row.since ?? 0))"
+        "\(row.key)@\(row.status)@\(Int(row.turnStartedAt ?? row.since ?? 0))"
     }
 
     private static func marksDone(_ row: IslandRowItem) -> Bool {
@@ -1441,7 +1449,7 @@ final class PrismIslandModel {
         if !waiting.isEmpty || !requests.isEmpty {
             let firstReq = requests.first
             let lead = firstReq.flatMap { row(for: $0.rowKey) } ?? waiting.first
-            let count = max(snapshot.summary.waiting, waiting.count, requests.count, 1)
+            let count = max(summary.waiting, waiting.count, requests.count, 1)
             return (IslandCollapsedState(
                 agents: lead.map { [$0.agent] } ?? [],
                 signal: .waiting,
@@ -1524,35 +1532,6 @@ final class PrismIslandModel {
             fact: nil,
             title: latest.map(title(of:))
         ), 7)
-    }
-
-    /// Minutes under an hour ("12m"), hours and minutes past it ("1h 5m"), in the island's language.
-    func shortElapsed(since ms: Double?, at referenceDate: Date? = nil) -> String {
-        guard let ms else { return "" }
-        let ref = referenceDate ?? now
-        let minutes = max(0, Int(ref.timeIntervalSince1970 - ms / 1000) / 60)
-        if minutes < 60 { return strings.text("fact.minutes", ["m": "\(minutes)"]) }
-        return strings.text("fact.hoursMinutes", ["h": "\(minutes / 60)", "m": "\(minutes % 60)"])
-    }
-
-    /// The plan window with the least left, from the menu bar's reading or the host's.
-    func idleQuota() -> (window: IslandQuotaWindow, agent: IslandAgentIdentity)? {
-        var candidates: [(window: IslandQuotaWindow, agent: IslandAgentIdentity)] = []
-        for (provider, windows) in usageQuotas {
-            let harness = provider == "claude" ? "claude-code" : provider
-            let agent = IslandAgentIdentity(
-                id: harness, name: usageQuotaNames[provider] ?? provider, harness: harness, color: nil
-            )
-            candidates += windows.map { ($0, agent) }
-        }
-        if usageReady { return candidates.min { $0.window.remaining < $1.window.remaining } }
-        let covered = Set(candidates.map(\.agent.id))
-        for (agentId, windows) in snapshot.quotas where !covered.contains(agentId) {
-            let agent = rows.first { $0.agent.id == agentId }?.agent
-                ?? IslandAgentIdentity(id: agentId, name: agentId, harness: agentId, color: nil)
-            candidates += windows.map { ($0, agent) }
-        }
-        return candidates.min { $0.window.remaining < $1.window.remaining }
     }
 
     // MARK: Pops & Notifications
@@ -1650,12 +1629,6 @@ final class PrismIslandModel {
 
     // MARK: User Actions
 
-    func prepare(onScreen screenID: UInt32? = nil) {
-        measuringScreenID = screenID ?? activeScreenID ?? Displays.preferredScreen().map(Displays.id(of:))
-        if !measuring { measuring = true }
-        armMeasureTimeout()
-    }
-
     private func armMeasureTimeout() {
         measureTimeout?.invalidate()
         measureTimeout = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: false) { [weak self] _ in
@@ -1727,7 +1700,8 @@ final class PrismIslandModel {
         }
         cancelMeasurement()
         opener = cause
-        activeScreenID = cause == .request ? nil : screenID
+        // A request opens on the display the user is at, not on every display at once.
+        activeScreenID = screenID ?? (cause == .request ? Displays.preferredScreen().map(Displays.id(of:)) : nil)
         popTimer?.invalidate()
         pops.removeAll()
         pop = nil
@@ -1739,7 +1713,10 @@ final class PrismIslandModel {
         recomputeCollapsed(rows)
         tickTimer?.invalidate()
         tickTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in self?.now = Date() }
+            Task { @MainActor [weak self] in
+                self?.now = Date()
+                self?.updateChassis()
+            }
         }
         setMode(.open)
         actionSink?.islandExpandedDidAppear()
@@ -1871,11 +1848,12 @@ final class PrismIslandModel {
 
     // MARK: On-Demand Timers (0% CPU when idle without warm cache or running tools)
 
+    /// Collapsed, only the first row's cache shows; open, the panel's 1 Hz clock moves the rest.
     private func scheduleCacheTick() {
-        cacheTimer?.invalidate()
         let nowMs = now.timeIntervalSince1970 * 1000
+        let watched = mode == .open ? Array(rows.prefix(IslandMetrics.listRows)) : Array(rows.prefix(1))
         var waitMs: Double?
-        for cache in rows.prefix(IslandMetrics.listRows).compactMap(\.cache) {
+        for cache in watched.compactMap(\.cache) {
             let left = cache.expiresAt - nowMs
             guard left > 0 else { continue }
             let next = left <= cache.endingMs
@@ -1883,14 +1861,11 @@ final class PrismIslandModel {
                 : min(left - cache.endingMs, left.truncatingRemainder(dividingBy: 60_000))
             waitMs = min(waitMs ?? next, max(next, 50))
         }
-        guard let waitMs else { return }
-        cacheTimer = Timer.scheduledTimer(withTimeInterval: waitMs / 1000 + 0.02, repeats: false) { [weak self] _ in
-            Task { @MainActor [weak self] in self?.refresh(visible: self?.mode != .hidden) }
-        }
+        let due = waitMs.map { now.addingTimeInterval($0 / 1000 + 0.02) }
+        rearm(&cacheTimer, due: due, current: &cacheTickDue)
     }
 
     private func scheduleStuckCheck(_ rows: [IslandRowItem]) {
-        stuckTimer?.invalidate()
         let nowMs = now.timeIntervalSince1970 * 1000
         var waitMs: Double?
         for row in rows where row.status == "running" {
@@ -1899,10 +1874,25 @@ final class PrismIslandModel {
             let next = due > nowMs ? due - nowMs : 60_000 - (nowMs - due).truncatingRemainder(dividingBy: 60_000)
             waitMs = min(waitMs ?? next, next)
         }
-        guard let waitMs else { return }
-        stuckTimer = Timer.scheduledTimer(withTimeInterval: max(1, waitMs / 1000), repeats: false) { [weak self] _ in
+        let due = waitMs.map { now.addingTimeInterval(max(1, $0 / 1000)) }
+        rearm(&stuckTimer, due: due, current: &stuckCheckDue)
+    }
+
+    /// Keeps a one-shot refresh timer that already fires at about the same moment, so a sync
+    /// every 80 ms does not tear down and rebuild it each time.
+    private func rearm(_ timer: inout Timer?, due: Date?, current: inout Date?) {
+        if let due, let current, timer?.isValid == true, abs(due.timeIntervalSince(current)) < 0.25 {
+            return
+        }
+        timer?.invalidate()
+        timer = nil
+        current = due
+        guard let due else { return }
+        let fired = Timer(fire: due, interval: 0, repeats: false) { [weak self] _ in
             Task { @MainActor [weak self] in self?.refresh(visible: self?.mode != .hidden) }
         }
+        RunLoop.main.add(fired, forMode: .common)
+        timer = fired
     }
 
     private func setMode(_ next: IslandMode) {
@@ -1914,6 +1904,7 @@ final class PrismIslandModel {
         }
         guard next != mode else { return }
         mode = next
+        updateChassis()
         onModeChange?(next)
     }
 }

@@ -10,7 +10,6 @@ import {
 } from '@shared/log/report-bundle'
 import { constants } from 'node:fs'
 import { chmod, copyFile, readFile, rm } from 'node:fs/promises'
-import os from 'node:os'
 import path from 'node:path'
 import { DEBUG_PORTS_FILE } from '@shared/debug'
 import {
@@ -42,7 +41,7 @@ import { locale as currentLocale, setLocale, t } from '../core/i18n'
 import { createLogger } from '../core/log'
 import { MarketKeys, marketKeysFile } from '../core/market-keys'
 import { RelayFeatures, RelayToken, readRelayFeatures } from '../core/relay-token'
-import { nodeSystemReleaseForRun } from '../core/system-name'
+import { computerName, nodeSystemReleaseForRun } from '../core/system-name'
 import type { RemoteIdentity } from '../core/remote-identity'
 import { SettingsStore } from '../core/settings'
 import { answerSettingsCall } from '../core/settings-call'
@@ -185,7 +184,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     commit: options.buildInfo?.commit,
     origin,
   }
-  await prepareDataFolder(options.dataPath)
+  const [systemHostName] = await Promise.all([computerName(), prepareDataFolder(options.dataPath)])
   let stopping = false
   let hosts: Hosts | null = null
   let syncService: SartoSyncService | null = null
@@ -197,7 +196,17 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   const accountConnections = new Set<ControlConnection>()
   const gameConnections = new Set<ControlConnection>()
   const watchingGameConnections = new Set<ControlConnection>()
+  const gameClosers = new WeakSet<ControlConnection>()
   let gameLink: GameLink | null = null
+  /** Forgets `connection` once it closes; registered once however often it subscribes or watches. */
+  const closeGameWith = (connection: ControlConnection, link: GameLink): void => {
+    if (gameClosers.has(connection)) return
+    gameClosers.add(connection)
+    connection.onClose(() => {
+      gameConnections.delete(connection)
+      if (watchingGameConnections.delete(connection)) link.watch(-1)
+    })
+  }
   const hostPairOwners = new Map<number, ControlConnection>()
   const reportShelf = new ReportShelf(reportsFolder(options.dataPath))
   /** Sends `hosts.pairing` events to `connection`, and ends the pairing once it closes. */
@@ -428,10 +437,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       if (!gameLink) throw new ControlError('unavailable', 'The game has not started')
       const link = gameLink
       gameConnections.add(connection)
-      connection.onClose(() => {
-        gameConnections.delete(connection)
-        if (watchingGameConnections.delete(connection)) link.watch(-1)
-      })
+      closeGameWith(connection, link)
       return { status: link.status(), state: link.latestState() }
     },
     'game.watch': async ({ watching }, connection) => {
@@ -440,9 +446,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       if (watching && !watchingGameConnections.has(connection)) {
         watchingGameConnections.add(connection)
         link.watch(1)
-        connection.onClose(() => {
-          if (watchingGameConnections.delete(connection)) link.watch(-1)
-        })
+        closeGameWith(connection, link)
       } else if (!watching && watchingGameConnections.delete(connection)) {
         link.watch(-1)
       }
@@ -451,6 +455,10 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     'game.command': async (command) => {
       if (!gameLink) throw new ControlError('unavailable', 'The game has not started')
       return gameLink.command(command as never)
+    },
+    'game.setEnabled': async ({ enabled }) => {
+      if (!gameLink) throw new ControlError('unavailable', 'The game has not started')
+      return gameLink.setEnabled(enabled)
     },
     'account.signIn': async ({ serverUrl, openBrowser }) => {
       try {
@@ -564,7 +572,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       if (device) await running.addDevice(device)
       return {
         ...info,
-        name: settings.get().remote.name ?? os.hostname(),
+        name: settings.get().remote.name ?? systemHostName,
         platform: process.platform,
         version: options.version,
       }
@@ -704,7 +712,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     clientInfo: async () =>
       clientInfo({
         kind: 'daemon',
-        name: settings.get().remote.name ?? os.hostname(),
+        name: settings.get().remote.name ?? systemHostName,
         os: await nodeSystemReleaseForRun(),
         arch: process.arch,
         version: options.version,
@@ -805,7 +813,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
           'advanced.data-folder': options.dataPath,
         }),
       }),
-    hostName: os.hostname(),
+    hostName: systemHostName,
     env: hostEnv,
     inspector: (name, url) => debugPorts?.setInspector(name, url),
     timings: options.timings,
@@ -906,20 +914,28 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     },
     log: createLogger('sarto-sync'),
   })
-  // The idle game reads this computer's work facts on a port of its own.
-  const gameHostLink = new AgentHostLink({
-    socket: async () => {
-      await started
-      return running.socket('agent')
-    },
-    log: createLogger('game'),
-    events: ['work.facts'],
-  })
   gameLink = new GameLink({
     dataPath: options.dataPath,
     env: options.env,
     account: () => signedInCloud.account().signedIn(),
-    onHostEvent: (listener) => gameHostLink.onEvent(listener),
+    // The idle game reads this computer's work facts on a port of its own, which it opens only
+    // while the owner has the game on, so the agent host sends them nowhere otherwise.
+    onHostEvent: (listener) => {
+      const gameHostLink = new AgentHostLink({
+        socket: async () => {
+          await started
+          return running.socket('agent')
+        },
+        log: createLogger('game'),
+        events: ['work.facts'],
+      })
+      const unsubscribe = gameHostLink.onEvent(listener)
+      gameHostLink.start()
+      return () => {
+        unsubscribe()
+        gameHostLink.stop()
+      }
+    },
     knownModels: async () => {
       const models = new Set<string>(Object.keys(bundledPrices.models ?? {}))
       try {
@@ -971,7 +987,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     themes: adminHandle.themes,
     relaySeedBase64: relayKey?.privateKey ?? null,
     hostPublicKey: () => running.hostPublicKey(),
-    hostName: () => settings.get().remote.name ?? os.hostname(),
+    hostName: () => settings.get().remote.name ?? systemHostName,
     configureRelay: (cfg) => running.configureRelay(cfg),
     addTrustedDevice: (dev) => running.addDevice(dev),
     meshHosts: (list) => running.setMeshHosts(list),
@@ -1067,7 +1083,6 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   running.start()
   hostsStarted()
   agentHostLink.start()
-  gameHostLink.start()
   void gameLink.start().catch((error: unknown) => {
     log.warn(`The game could not start: ${(error as Error).message}`)
   })
@@ -1131,12 +1146,11 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
         cloudTheme?.stop()
         cloud?.stop()
         agentHostLink.stop()
-        gameLink?.stop()
-        gameHostLink.stop()
+        const gameStopped = gameLink?.stop()
         priceUpdates.stop()
         await syncService?.stop()
         await running.stop()
-        await Promise.all([settings.flush(), marketKeys.flush()])
+        await Promise.all([settings.flush(), marketKeys.flush(), gameStopped])
         // Held until now, so a daemon that starts meanwhile cannot run hosts beside these.
         await release(server, options.controlSocket)
         log.info('Stopped')

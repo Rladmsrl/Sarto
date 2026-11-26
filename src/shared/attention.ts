@@ -1,11 +1,9 @@
-// What a host says needs the user, as a notification shows it: which setting allows it, what it
-// replaces, what a click opens, and its text held to what a notification shows. The desktop app's
-// notifications and the web client's both follow it.
+// What a host says needs the user, as a notification shows it: what it replaces, what a click
+// opens, and its text held to what a notification shows.
 
 import type { HostToMain } from './host-control'
 import type { PlanLimitNoticeLevel } from './plan-limits'
 import type { HostAttention } from './remote/host-admin'
-import type { SettingsFile } from './settings'
 
 /** Commands main sends to the renderer, from the app menu or a notification. */
 export type AppCommand =
@@ -35,17 +33,17 @@ export type AppCommand =
   /** The window hidden on close shows again. */
   | { kind: 'window-shown' }
 
-/** The Settings > Notifications switch for each kind. */
-export const ATTENTION_SETTING = {
-  permission: 'permission',
-  'turn-ended': 'turnEnded',
-  error: 'error',
-  'routine-ended': 'routines',
-  'routine-paused': 'routines',
-  'plan-limit': 'planLimits',
-  'task-needs-you': 'permission',
-  'task-ended': 'turnEnded',
-} as const satisfies Record<HostAttention['kind'], keyof SettingsFile['notifications']>
+/** Every kind of attention message, so one of another kind is refused as malformed. */
+const ATTENTION_KINDS = {
+  permission: true,
+  'turn-ended': true,
+  error: true,
+  'routine-ended': true,
+  'routine-paused': true,
+  'plan-limit': true,
+  'task-needs-you': true,
+  'task-ended': true,
+} as const satisfies Record<HostAttention['kind'], true>
 
 const MAX_TITLE = 120
 const MAX_BODY = 400
@@ -68,7 +66,7 @@ const PLAN_LIMIT_LEVELS: readonly PlanLimitNoticeLevel[] = ['near', 'reached', '
 export function attentionTarget(
   message: HostAttention,
 ): { key: string; command: AppCommand } | null {
-  if (typeof message.kind !== 'string' || !Object.hasOwn(ATTENTION_SETTING, message.kind)) {
+  if (typeof message.kind !== 'string' || !Object.hasOwn(ATTENTION_KINDS, message.kind)) {
     return null
   }
   if (typeof message.title !== 'string' || typeof message.body !== 'string') return null

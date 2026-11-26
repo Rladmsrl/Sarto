@@ -2098,7 +2098,8 @@ export type HostEvent =
   // To a port that watches the session: the others that have it in front, never the port's own
   // computer or device.
   | { type: 'session.viewers'; sessionId: string; viewers: SessionViewer[] }
-  // What the host's own sessions' work came to, for the Agent RPG (`work-facts.ts`).
+  // What the host's own sessions' work came to, for the daemon's game link alone (`work-facts.ts`):
+  // only a port that selects it takes it, and never a paired device's.
   | { type: 'work.facts'; facts: WorkFact[] }
   | { type: 'agent.status'; status: AgentStatus }
   | { type: 'agent.removed'; agentId: AgentId }

@@ -56,6 +56,12 @@ export const DEVICE_RUNNING = 8
 /** Requests one paired device may have waiting; past it a request is refused as busy. */
 export const DEVICE_WAITING = 256
 
+/**
+ * Events for the daemon's own ports alone: a window's port takes one only once it selects it, and
+ * a paired device's never does. The game link reads the work facts; no window or device needs them.
+ */
+const SELECTED_ONLY: ReadonlySet<string> = new Set<HostEvent['type']>(['work.facts'])
+
 /** Reads that tell the host something of the port, which each request must reach. */
 const UNSHARED_READS = new Set(['watch', 'unwatch', 'waiting'])
 
@@ -185,13 +191,20 @@ export class PortHub {
     return this.ports.has(portId)
   }
 
-  /** The events a port takes from now on, as `events.select` asks; every kind until it does. */
+  /**
+   * The events a port takes from now on, as `events.select` asks; until it does, every kind but
+   * those it must select (`SELECTED_ONLY`).
+   */
   selectEvents(portId: string, types: readonly string[]): void {
     if (this.ports.has(portId)) this.eventTypes.set(portId, new Set(types))
   }
 
   private takes(portId: string, event: HostEvent): boolean {
-    return this.eventTypes.get(portId)?.has(event.type) ?? true
+    const selected = this.eventTypes.get(portId)
+    if (SELECTED_ONLY.has(event.type)) {
+      return !this.devices.has(portId) && selected?.has(event.type) === true
+    }
+    return selected?.has(event.type) ?? true
   }
 
   /** The paired device an open port serves; null for a window's and for a closed port. */

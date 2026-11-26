@@ -23,13 +23,7 @@ struct AntigravityMarkShape: View {
         AntigravitySwooshPath()
             .fill(
                 LinearGradient(
-                    colors: [
-                        Color(hex: 0x34A853),
-                        Color(hex: 0x4285F4),
-                        Color(hex: 0x9B72CB),
-                        Color(hex: 0xEA4335),
-                        Color(hex: 0xFBBC05),
-                    ],
+                    colors: PrismProviderBrand.antigravitySwoosh,
                     startPoint: .bottomLeading,
                     endPoint: .topTrailing
                 )
@@ -337,6 +331,12 @@ final class IslandDotsNSView: NSView {
             }
             layer?.addSublayer(dot)
         }
+        // The new dots start on a running clock; a root layer left paused would freeze them.
+        if let rootLayer = layer {
+            rootLayer.speed = 1
+            rootLayer.timeOffset = 0
+            rootLayer.beginTime = 0
+        }
         isPaused = false
         setPaused(paused)
     }
@@ -370,20 +370,13 @@ struct IslandOpticalRim: View {
     let aura: IslandAuraState
     let tokens: PrismTokens
     let isOpen: Bool
-    let paused: Bool
-    let reduceMotion: Bool
 
     var body: some View {
         let shape = IslandShape(radius: radius, shoulders: true, shoulderWidth: shoulderWidth)
         ZStack {
             // Base etched optical bevel synced to active palette warmth
             shape
-                .stroke(
-                    (tokens.palette == .warm || tokens.palette == .alabaster
-                        ? Color(hex: 0xF5F0E6)
-                        : Color.white).opacity(isOpen ? 0.14 : 0.085),
-                    lineWidth: isOpen ? 1.0 : 0.75
-                )
+                .stroke(isOpen ? tokens.island.rimOpen : tokens.island.rim, lineWidth: isOpen ? 1.0 : 0.75)
 
             switch aura {
             case .calm, .running:
@@ -392,8 +385,8 @@ struct IslandOpticalRim: View {
                         .stroke(
                             LinearGradient(
                                 colors: [
-                                    tokens.primary.opacity(0.28),
-                                    tokens.prismIris.opacity(0.20),
+                                    tokens.island.accent.opacity(0.28),
+                                    tokens.island.iris.opacity(0.20),
                                     Color.clear,
                                 ],
                                 startPoint: .bottomLeading,
@@ -449,12 +442,17 @@ struct IslandWaitingDot: View {
 
 struct IslandLimitRing: View {
     var size: CGFloat = 13
+    @Environment(\.prismTokens) private var tokens
 
     var body: some View {
-        ZStack {
-            Circle().fill(IslandTheme.usageRed.opacity(0.22))
-            Circle().stroke(IslandTheme.usageRed, lineWidth: size * 0.17).padding(size * 0.15)
-        }
+        IslandMeterRing(
+            progress: 1,
+            color: tokens.island.danger,
+            lineWidth: size * 0.17,
+            showsTrack: false,
+            discOpacity: 0.22,
+            inset: size * 0.065
+        )
         .frame(width: size, height: size)
     }
 }
@@ -499,50 +497,31 @@ struct IslandPlanRing: View {
     let done: Int
     let total: Int
     var size: CGFloat = 13
+    @Environment(\.prismTokens) private var tokens
 
     var body: some View {
-        let share = total > 0 ? CGFloat(done) / CGFloat(total) : 0
-        ZStack {
-            Circle().stroke(IslandTheme.track, lineWidth: 2.2)
-            Circle()
-                .trim(from: 0, to: share)
-                .stroke(IslandTheme.planDone, style: StrokeStyle(lineWidth: 2.2, lineCap: .round))
-                .rotationEffect(.degrees(-90))
-        }
-        .padding(1.1)
-        .frame(width: size, height: size)
+        IslandMeterRing(progress: total > 0 ? Double(done) / Double(total) : 0, color: tokens.island.planDone)
+            .frame(width: size, height: size)
     }
 }
 
 struct IslandCacheRing: View {
     let share: Double
+    @Environment(\.prismTokens) private var tokens
 
     var body: some View {
-        ZStack {
-            Circle().stroke(IslandTheme.track, lineWidth: 1.6)
-            Circle()
-                .trim(from: 0, to: max(0, min(1, share)))
-                .stroke(IslandTheme.warning, style: StrokeStyle(lineWidth: 1.6, lineCap: .round))
-                .rotationEffect(.degrees(-90))
-        }
-        .frame(width: 11, height: 11)
+        IslandMeterRing(progress: share, color: tokens.island.warning, lineWidth: 1.6)
+            .frame(width: 12.6, height: 12.6)
     }
 }
 
 struct IslandUsageRing: View {
     let percent: Double
+    @Environment(\.prismTokens) private var tokens
 
     var body: some View {
-        let share = min(1, max(0, percent / 100))
-        ZStack {
-            Circle().fill(IslandTheme.usageRed.opacity(0.18))
-            Circle()
-                .trim(from: 0, to: share)
-                .stroke(IslandTheme.usageRed, style: StrokeStyle(lineWidth: 2.2, lineCap: .butt))
-                .rotationEffect(.degrees(-90))
-                .padding(1.1)
-        }
-        .frame(width: 12, height: 12)
+        IslandMeterRing(progress: percent / 100, color: tokens.island.danger, showsTrack: false, discOpacity: 0.18)
+            .frame(width: 12, height: 12)
     }
 }
 
@@ -1397,6 +1376,36 @@ final class IslandStrikeSimulation {
 /// Renders the kinetic Scheme C (Duplex Pulse Crossfire: App ⇄ Agents) arena inside the Dynamic Island.
 /// Supports 1-3 staggered Agent pixel sprites on the right (+ overflow badge for >3) and seamless
 /// tunneling across physical MacBook notches.
+/// Pixel blocks gathered by colour and by a twentieth of opacity, so a frame issues a few dozen
+/// fills instead of one per block; blocks keep the order their colour first appeared in.
+struct IslandInkBatch {
+    private struct Ink: Hashable {
+        let color: Color
+        let alphaStep: Int
+    }
+
+    private var order: [Ink] = []
+    private var paths: [Ink: Path] = [:]
+
+    mutating func add(_ rect: CGRect, color: Color, alpha: Double) {
+        let step = Int((max(0, min(1, alpha)) * 20).rounded())
+        guard step > 0 else { return }
+        let ink = Ink(color: color, alphaStep: step)
+        if paths[ink] == nil {
+            order.append(ink)
+            paths[ink] = Path()
+        }
+        paths[ink]?.addRect(rect)
+    }
+
+    func fill(in context: inout GraphicsContext) {
+        for ink in order {
+            guard let path = paths[ink] else { continue }
+            context.fill(path, with: .color(ink.color.opacity(Double(ink.alphaStep) / 20)))
+        }
+    }
+}
+
 struct IslandPixelStrikeStage: View {
     let agents: [IslandAgentIdentity]
     let tps: Double?
@@ -1665,7 +1674,9 @@ struct IslandPixelStrikeStage: View {
             chargeColors: sim.chargeHistory.isEmpty ? palette : sim.chargeHistory
         )
 
-        // 5. Flying grid-snapped duplex pixel comets (top: command ->, bottom: <- token)
+        // 5. Flying grid-snapped duplex pixel comets (top: command ->, bottom: <- token), one
+        // fill per colour and opacity step instead of one per block.
+        var comets = IslandInkBatch()
         for shot in sim.shots {
             let dir: CGFloat = shot.vx >= 0 ? 1 : -1
             let slope = shot.vy / max(1, abs(shot.vx))
@@ -1675,14 +1686,13 @@ struct IslandPixelStrikeStage: View {
                 guard !isHiddenByNotch(x: sx) else { continue }
                 let a = max(0.18, 1.0 - Double(seg) / Double(shot.tailLength + 1) * 0.78)
                 let side: CGFloat = shot.lane == .command ? 1.65 : 1.80
-                let block = CGRect(x: sx, y: sy, width: side, height: side)
-                context.fill(Path(block), with: .color(shot.color.opacity(a)))
+                comets.add(CGRect(x: sx, y: sy, width: side, height: side), color: shot.color, alpha: a)
                 if shot.thick && seg < 2 {
-                    let block2 = CGRect(x: sx, y: sy + cell, width: side, height: side)
-                    context.fill(Path(block2), with: .color(shot.color.opacity(a * 0.72)))
+                    comets.add(CGRect(x: sx, y: sy + cell, width: side, height: side), color: shot.color, alpha: a * 0.72)
                 }
             }
         }
+        comets.fill(in: &context)
 
         // 6. Active running Agent pixel sprite squad (right: 1 centered, 2-3 staggered)
         let hasMissing = !sim.missingPixels.isEmpty
@@ -1708,17 +1718,16 @@ struct IslandPixelStrikeStage: View {
         }
 
         // 7. Rebounding pixel sparks on top
+        var sparks = IslandInkBatch()
         for spark in sim.sparks {
             let ratio = spark.age / spark.life
             let alpha = max(0, 1.0 - ratio * ratio)
             let px = snap(spark.x, step: cell)
             let py = snap(spark.y, step: cell)
             guard !isHiddenByNotch(x: px), px > 0, px < size.width - 1, py > 0, py < size.height - 1 else { continue }
-            context.fill(
-                Path(CGRect(x: px, y: py, width: spark.size - 0.25, height: spark.size - 0.25)),
-                with: .color(spark.color.opacity(alpha))
-            )
+            sparks.add(CGRect(x: px, y: py, width: spark.size - 0.25, height: spark.size - 0.25), color: spark.color, alpha: alpha)
         }
+        sparks.fill(in: &context)
     }
 
     private func drawAgentSprite(

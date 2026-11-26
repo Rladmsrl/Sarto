@@ -23,10 +23,11 @@ final class PrismDynamicIslandCoordinator: IslandActionSink {
     let model = PrismIslandModel()
     let usageStore = PrismUsageStore()
     let settingsStore = UsageSettingsStore()
-    let rpgStore = AgentRPGStore()
     /// The idle game the game service runs, as the daemon relays it.
     let gameStore = GameStore()
     let launchAtLogin = PrismLaunchAtLogin()
+    /// What the island would show, as macOS notifications while the island is off.
+    let systemAlerts = SystemAlertNotifier()
     let panelRouter = MenuBarPanelRouter()
     let panelState = MenuBarPanelState()
 
@@ -75,20 +76,29 @@ final class PrismDynamicIslandCoordinator: IslandActionSink {
     private var statusPanel: StatusPanelController?
     private weak var appState: SartoState?
 
+    private static let requestForgetAfter: TimeInterval = 15 * 60
+    private static let endedUnreadWindow: TimeInterval = 15
+
     private var previousStatuses: [String: SessionStatus] = [:]
     /// Each session's last turn ending as last seen, so an ending that arrives after its status
     /// change, or a failure a later limit notice turns into a limit, still pops.
     private var previousEndings: [String: LastTurn] = [:]
-    private var previousRequestKeys: Set<String> = []
-    /// Live-transition unread sessions keyed as `hostId::sessionId`, pruned against host-side
-    /// `summary.attention == "unread"` and the current notification host scope.
-    private var unreadSessionKeys: Set<String> = []
-    /// Tracks background sessions for which a permission snapshot fetch has already been requested
-    /// in the current connection cycle, preventing an infinite 12-16Hz RPC loop when a session's
-    /// replica remains nil or has no pending tool entries.
-    private var snapshotRequestedSessionIDs: Set<String> = []
-    /// Tracks running sessions with active plans whose full step list has been requested once.
+    /// Each request's first sighting (epoch ms, which orders the cards) and its last (uptime). A
+    /// request that drops out with its host's link and comes back is not announced again.
+    private var requestSightings: [String: (firstSeenMs: Double, lastSeen: TimeInterval)] = [:]
+    /// Sessions waiting on the user whose replica was asked for, `hostId::sessionId`, with when
+    /// to ask again: a failed fetch or an evicted replica must never leave an approval without
+    /// its card. The wait doubles each time, so the replica caches cannot thrash.
+    private var snapshotRetry: [String: (due: TimeInterval, wait: TimeInterval)] = [:]
+    /// Running sessions with an active plan whose full step list was asked for once.
     private var planSnapshotRequestedSessionIDs: Set<String> = []
+    /// Turns that ended before their host marked them unread, by when; they pop once it does.
+    private var endedAwaitingUnread: [String: TimeInterval] = [:]
+    private var lastDockBadge: String?
+    /// The menu bar item shows while no window is open even when the user hid it, without
+    /// changing the setting.
+    private var menuBarResidentOverride = false
+    private var railShowing = true
     private var previousConnectionMode: ConnectionMode = .disconnected
     private var hasInitializedWorkbenchFocus = false
     private var lastWorkbenchFocusKey: WorkbenchFocusKey?
@@ -105,7 +115,6 @@ final class PrismDynamicIslandCoordinator: IslandActionSink {
     private var themeKey: IslandThemeKey?
     private var statusPanelOpen = false
     private var usageViewerCount = 0
-    private var lastRunningRailShowing: Bool?
     private var cancellables = Set<AnyCancellable>()
 
     init() {
@@ -119,10 +128,15 @@ final class PrismDynamicIslandCoordinator: IslandActionSink {
         guard appState !== state else { return }
         self.appState = state
         self.previousConnectionMode = state.connectionMode
+        self.railShowing = Self.readRunningRailShowing()
 
         NumFont.register()
         Fmt.symbol = "$"
         IslandMarkImageCache.warmUp()
+        systemAlerts.install()
+        systemAlerts.onOpenSession = { [weak self] sessionId in
+            self?.islandOpenApp(sessionId: sessionId)
+        }
 
         syncTheme(from: state)
 
@@ -142,9 +156,6 @@ final class PrismDynamicIslandCoordinator: IslandActionSink {
         applySettings(settingsStore.settings)
         installUsageSubscriptions()
         usageStore.start()
-        state.onWorkFacts = { [weak self] hostId, facts in
-            self?.receiveWorkFacts(facts, fromHost: hostId)
-        }
         startObserving(state)
         syncNow()
     }
@@ -172,18 +183,6 @@ final class PrismDynamicIslandCoordinator: IslandActionSink {
         let s = settings ?? settingsStore.settings
         usageStore.setActive(s.islandEnabled || s.menubarEnabled || statusPanelOpen || usageViewerCount > 0)
         usageStore.setVisible(statusPanelOpen || usageViewerCount > 0)
-    }
-
-    /// Hands the facts hosts tell of their sessions' work to the Agent RPG, while its game is on.
-    private func receiveWorkFacts(_ facts: [WorkFact], fromHost hostId: String) {
-        guard let state = appState,
-              settingsStore.settings.islandMotion.enablesIdleGame,
-              !facts.isEmpty
-        else { return }
-        rpgStore.apply(facts) { agentId in
-            guard let agent = state.agentStatus(agentId, onHost: hostId) else { return nil }
-            return (agent.name, agent.harnessId ?? agentId)
-        }
     }
 
     func toggleIslandExpansion() {
@@ -214,24 +213,9 @@ final class PrismDynamicIslandCoordinator: IslandActionSink {
             toggleIsland: { [weak self] in
                 self?.toggleIslandExpansion()
             },
-            setPinned: { [weak self] pinned in
-                self?.statusPanel?.pinned = pinned
-            },
-            previewPop: { [weak self] in
-                guard let self else { return }
-                if !self.isEnabled { self.isEnabled = true }
-                self.statusPanel?.close()
-                self.islandTriggerDemoPop()
-            },
-            previewApproval: { [weak self] in
-                guard let self else { return }
-                if !self.isEnabled { self.isEnabled = true }
-                self.statusPanel?.close()
-                self.islandTriggerDemoApproval()
-            },
             refresh: { [weak self] in
                 guard let self else { return }
-                self.snapshotRequestedSessionIDs.removeAll()
+                self.snapshotRetry.removeAll()
                 self.usageStore.refresh()
                 Task { [weak self] in
                     await self?.appState?.refreshAgentLimits()
@@ -264,7 +248,6 @@ final class PrismDynamicIslandCoordinator: IslandActionSink {
                     islandModel: self.model,
                     usageStore: self.usageStore,
                     settingsStore: self.settingsStore,
-                    launch: self.launchAtLogin,
                     router: self.panelRouter,
                     panel: self.panelState,
                     actions: actions
@@ -282,7 +265,7 @@ final class PrismDynamicIslandCoordinator: IslandActionSink {
             guard let self, event.modifierFlags.contains(.command) else { return false }
             switch event.charactersIgnoringModifiers?.lowercased() {
             case "r":
-                self.snapshotRequestedSessionIDs.removeAll()
+                self.snapshotRetry.removeAll()
                 self.usageStore.refresh()
                 return true
             case "i":
@@ -332,7 +315,7 @@ final class PrismDynamicIslandCoordinator: IslandActionSink {
             .receive(on: RunLoop.main)
             .sink { [weak self] providers in
                 guard let self else { return }
-                self.model.hasLowUsageAlert = self.usageStore.lowestWindow != nil
+                self.model.hasLowUsageAlert = self.settingsStore.settings.lowAlert && self.usageStore.lowestWindow != nil
                 let now = Date()
                 var quotas: [String: [IslandQuotaWindow]] = [:]
                 var names: [String: String] = [:]
@@ -366,21 +349,31 @@ final class PrismDynamicIslandCoordinator: IslandActionSink {
             .sink { [weak self] event in
                 guard let self else { return }
                 guard self.settingsStore.settings.lowAlert,
-                      !self.settingsStore.settings.subtleReminders,
-                      self.isEnabled
+                      !self.settingsStore.settings.subtleReminders
                 else { return }
                 switch event {
                 case .runningLow(let provider, let label, let remaining, _):
                     let remPct = Int((remaining * 100).rounded())
                     let usedPct = max(0, min(100, (1 - remaining) * 100))
+                    let body = self.currentStrings.text(
+                        "pop.lowUsageBody",
+                        ["window": label, "percent": "\(remPct)"]
+                    )
+                    guard self.isEnabled else {
+                        self.systemAlerts.post([SystemAlertNotifier.Alert(
+                            id: "low:\(provider.id):\(label)",
+                            title: provider.name,
+                            body: body,
+                            sessionId: nil,
+                            sound: self.appState?.notificationPrefs.soundEnabled ?? true
+                        )])
+                        return
+                    }
                     self.model.pushPop(
                         rowKey: nil,
                         kind: "limit-near",
                         title: provider.name,
-                        body: self.currentStrings.text(
-                            "pop.lowUsageBody",
-                            ["window": label, "percent": "\(remPct)"]
-                        ),
+                        body: body,
                         agent: IslandAgentIdentity(
                             id: provider.id,
                             name: provider.name,
@@ -461,24 +454,16 @@ final class PrismDynamicIslandCoordinator: IslandActionSink {
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
                 guard let self else { return }
-                let railEnabled = UserDefaults.standard.object(forKey: "sarto.runningRail.enabled") as? Bool ?? true
-                let railCollapsed = UserDefaults.standard.bool(forKey: "sarto.runningRail.collapsed")
-                let showing = railEnabled && !railCollapsed
-                guard showing != self.lastRunningRailShowing else { return }
-                self.lastRunningRailShowing = showing
+                let showing = Self.readRunningRailShowing()
+                guard showing != self.railShowing else { return }
+                self.railShowing = showing
                 self.scheduleCoalescedSync()
             }
             .store(in: &cancellables)
     }
 
     private func applySettings(_ settings: UsageIslandSettings) {
-        let stack = IslandStackOptions(
-            enabled: settings.islandSessionStack,
-            maxRows: settings.islandMaxRows,
-            showQuota: settings.islandShowQuota,
-            motion: settings.islandMotion
-        )
-        if model.stackOptions != stack { model.stackOptions = stack }
+        if model.motionStyle != settings.islandMotion { model.motionStyle = settings.islandMotion }
         if _islandEnabledMirror != settings.islandEnabled {
             _islandEnabledMirror = settings.islandEnabled
         }
@@ -489,7 +474,9 @@ final class PrismDynamicIslandCoordinator: IslandActionSink {
             islandDisplays = settings.islandDisplays
         }
 
-        statusPanel?.statusItemVisible = settings.menubarEnabled
+        statusPanel?.statusItemVisible = settings.menubarEnabled || menuBarResidentOverride
+        let lowMark = settings.lowAlert && usageStore.lowestWindow != nil
+        if model.hasLowUsageAlert != lowMark { model.hasLowUsageAlert = lowMark }
         updateUsageActivity(settings)
         usageStore.excluded = Set(settings.hidden)
         usageStore.lowThreshold = Double(settings.lowThreshold) / 100
@@ -504,11 +491,28 @@ final class PrismDynamicIslandCoordinator: IslandActionSink {
         syncNow()
     }
 
+    /// While no window is open, the menu bar item is the only way back to Sarto, so it shows
+    /// even if the user hid it; the setting itself stays as the user left it.
+    func setMenuBarResident(_ resident: Bool) {
+        guard menuBarResidentOverride != resident else { return }
+        menuBarResidentOverride = resident
+        statusPanel?.statusItemVisible = settingsStore.settings.menubarEnabled || resident
+    }
+
+    private static func readRunningRailShowing() -> Bool {
+        let railOn = UserDefaults.standard.object(forKey: "sarto.runningRail.enabled") as? Bool ?? true
+        return railOn && !UserDefaults.standard.bool(forKey: "sarto.runningRail.collapsed")
+    }
+
     private func refreshDisplayMenu() {
         let activeIDs = Set(Displays.screens(for: settingsStore.settings.islandDisplays).map(Displays.id(of:)))
         let items = Displays.all().map { IslandDisplayMenuItem(display: $0, isActive: activeIDs.contains($0.id)) }
         if model.displayMenuItems != items {
             model.displayMenuItems = items
+        }
+        let automatic = settingsStore.settings.islandDisplays.isEmpty
+        if model.displaysAutomatic != automatic {
+            model.displaysAutomatic = automatic
         }
     }
 
@@ -591,6 +595,7 @@ final class PrismDynamicIslandCoordinator: IslandActionSink {
             _ = state.palette
             _ = state.accentMode
             _ = state.connectionMode
+            _ = state.motionTier
         } onChange: { [weak self, weak state] in
             Task { @MainActor [weak self, weak state] in
                 guard let self, let state else { return }
@@ -637,15 +642,6 @@ final class PrismDynamicIslandCoordinator: IslandActionSink {
         guard let state = appState else { return }
         let telemetry = IslandProjector.buildTelemetry(state: state)
         model.applyTelemetry(telemetry)
-        if settingsStore.settings.islandMotion.enablesIdleGame,
-           let telemetry,
-           let agentId = state.selectedSessionSummary?.agentId {
-            rpgStore.recordTelemetry(
-                agentId: agentId,
-                tps: telemetry.tps,
-                cacheHit: telemetry.cacheHitPercent
-            )
-        }
     }
 
     private func scheduleCoalescedSync() {
@@ -676,91 +672,49 @@ final class PrismDynamicIslandCoordinator: IslandActionSink {
     func syncNow() {
         lastSyncUptime = ProcessInfo.processInfo.systemUptime
         guard let state = appState else { return }
+        let uptime = lastSyncUptime
         let strings = IslandStrings(language: state.language)
         let nowMs = Date().timeIntervalSince1970 * 1000
 
         if state.connectionMode != previousConnectionMode {
             previousConnectionMode = state.connectionMode
-            snapshotRequestedSessionIDs.removeAll()
+            snapshotRetry.removeAll()
+            planSnapshotRequestedSessionIDs.removeAll()
             hasInitializedWorkbenchFocus = false
             lastWorkbenchFocusKey = nil
             workbenchSelectedAt = nil
         }
+        let offline = !state.connectionMode.isLive
+        if model.hostOffline != offline { model.hostOffline = offline }
+        if model.motionTier != state.motionTier { model.motionTier = state.motionTier }
 
-        let nextAppUsageFocus = buildAppUsageFocus(state: state, now: Date())
+        let mainVisible = hasVisibleMainWindow
+        let mainWindowForeground = NSApp.isActive && mainVisible
+
+        let nextAppUsageFocus = buildAppUsageFocus(state: state, now: Date(), mainVisible: mainVisible)
         if model.appUsageFocus != nextAppUsageFocus {
             model.appUsageFocus = nextAppUsageFocus
         }
 
         // Sarto in front with its running panel expanded: the panel says what runs, so the island
         // keeps quiet about non-urgent running/unread/cache states.
-        let railOn = UserDefaults.standard.object(forKey: "sarto.runningRail.enabled") as? Bool ?? true
-        let railCollapsed = UserDefaults.standard.bool(forKey: "sarto.runningRail.collapsed")
-        let railShowing = railOn && !railCollapsed
-        lastRunningRailShowing = railShowing
-        let quiet = NSApp.isActive && hasVisibleMainWindow && railShowing
+        let quiet = mainWindowForeground && railShowing
         if model.quietForeground != quiet { model.quietForeground = quiet }
 
         // Reconcile foreground session visibility with active and pooled hosts so every host tracks
         // `inFront` and `attention` accurately across synced devices.
-        let appFocused = NSApp.isActive
-        let mainWindowForeground = appFocused && hasVisibleMainWindow
         state.updateForegroundPresence(isInForeground: mainWindowForeground)
 
-        // Clear unread flag once the user views that session in the foreground main window.
-        if mainWindowForeground, !state.showStudioHome, let selected = state.selectedSessionID {
-            unreadSessionKeys.remove("\(state.activeHostID)::\(selected)")
-        }
-
-        // Auto-fetch snapshots across all online hosts (local + pooled remotes) at most once per
-        // awaiting-permission transition so an unloaded replica never triggers a 16Hz RPC loop.
+        // One pass over every online host's sessions: the snapshots an approval or a plan needs,
+        // the transitions that pop, and the Dock badge. Only this Mac and the active host pop or
+        // count in the badge.
         let hostSources = state.allLiveHostSourcesForIsland()
+        var popsToEmit: [(rowKey: String, kind: String, title: String, body: String)] = []
+        var nextStatuses: [String: SessionStatus] = [:]
+        var nextEndings: [String: LastTurn] = [:]
         var awaitingKeys = Set<String>()
         var activePlanKeys = Set<String>()
-        for source in hostSources {
-            for summary in source.sessions where IslandProjector.isListed(summary) {
-                let scopedKey = "\(source.hostId)::\(summary.id)"
-                if summary.permissionCount > 0 || summary.status == .awaitingPermission {
-                    awaitingKeys.insert(scopedKey)
-                }
-                if (summary.status == .running || summary.status == .starting || summary.status == .awaitingPermission)
-                    && (summary.plan.map { $0.total > 0 && $0.done < $0.total } ?? false) {
-                    activePlanKeys.insert(scopedKey)
-                }
-            }
-        }
-        snapshotRequestedSessionIDs.formIntersection(awaitingKeys)
-        planSnapshotRequestedSessionIDs.formIntersection(activePlanKeys)
-
-        for source in hostSources {
-            for summary in source.sessions where IslandProjector.isListed(summary) {
-                let scopedKey = "\(source.hostId)::\(summary.id)"
-                if awaitingKeys.contains(scopedKey) {
-                    let hasPending = (source.replicas[summary.id]?.pendingTools.isEmpty == false)
-                    if !hasPending, snapshotRequestedSessionIDs.insert(scopedKey).inserted {
-                        let sid = summary.id
-                        let hid = source.hostId
-                        Task { [weak state] in
-                            await state?.fetchSessionSnapshotIfNeeded(sid, onHost: hid)
-                        }
-                    }
-                }
-                if activePlanKeys.contains(scopedKey) {
-                    if source.replicas[summary.id] == nil, planSnapshotRequestedSessionIDs.insert(scopedKey).inserted {
-                        let sid = summary.id
-                        let hid = source.hostId
-                        Task { [weak state] in
-                            await state?.fetchSessionSnapshotIfNeeded(sid, onHost: hid)
-                        }
-                    }
-                }
-            }
-        }
-
-        // Detect live status transitions across all online hosts for automatic Pops & permission alerts.
-        // Only this Mac and the currently active remote host emit notifications, pops, or badge counts.
-        var popsToEmit: [(rowKey: String, kind: String, title: String, body: String)] = []
-        var activeUnreadKeys = Set<String>()
+        var badgeCount = 0
         let initialized = !previousStatuses.isEmpty
 
         for source in hostSources {
@@ -768,14 +722,45 @@ final class PrismDynamicIslandCoordinator: IslandActionSink {
             for summary in source.sessions where IslandProjector.isListed(summary) {
                 let trackKey = "\(source.hostId)::\(summary.id)"
                 let rowKey = source.isLocal ? summary.id : trackKey
-                if shouldNotify && summary.attention == "unread" {
-                    activeUnreadKeys.insert(trackKey)
+                let hasReplica = source.replicas[summary.id] != nil
+
+                if summary.permissionCount > 0 || summary.status == .awaitingPermission {
+                    awaitingKeys.insert(trackKey)
+                    if shouldNotify { badgeCount += max(1, summary.permissionCount) }
+                    if !hasReplica, snapshotDue(trackKey, uptime: uptime) {
+                        requestSnapshot(summary.id, onHost: source.hostId, state: state)
+                    }
                 }
+                if (summary.status == .running || summary.status == .starting || summary.status == .awaitingPermission)
+                    && (summary.plan.map { $0.total > 0 && $0.done < $0.total } ?? false) {
+                    activePlanKeys.insert(trackKey)
+                    if !hasReplica, planSnapshotRequestedSessionIDs.insert(trackKey).inserted {
+                        requestSnapshot(summary.id, onHost: source.hostId, state: state)
+                    }
+                }
+                if shouldNotify && summary.attention == "unread" { badgeCount += 1 }
+
                 let prev = previousStatuses[trackKey]
-                previousStatuses[trackKey] = summary.status
+                nextStatuses[trackKey] = summary.status
                 let prevEnding = previousEndings[trackKey]
                 let ending = summary.lastTurn
-                previousEndings[trackKey] = ending
+                if let ending { nextEndings[trackKey] = ending }
+
+                // A turn that ended before its host marked it unread pops once the host does,
+                // unless it was looked at on any device in between.
+                if let endedAt = endedAwaitingUnread[trackKey] {
+                    if summary.status != .ready || uptime - endedAt > Self.endedUnreadWindow {
+                        endedAwaitingUnread.removeValue(forKey: trackKey)
+                    } else if summary.attention == "unread" {
+                        endedAwaitingUnread.removeValue(forKey: trackKey)
+                        if shouldNotify, state.notificationPrefs.turnEnded {
+                            let body = IslandProjector.endingPop(ending, strings: strings, nowMs: nowMs)?.body
+                                ?? strings.text("pop.turnEndedBody")
+                            popsToEmit.append((rowKey, "turn-ended", sessionTitle(summary, source, state, strings), body))
+                        }
+                    }
+                }
+
                 guard initialized, let prev else { continue }
                 let statusChanged = prev != summary.status
                 let errorEndingArrived = ending != prevEnding && ending?.reason.isError == true
@@ -786,10 +771,7 @@ final class PrismDynamicIslandCoordinator: IslandActionSink {
                     && !state.showStudioHome
                     && state.activeHostID == source.hostId
                     && state.selectedSessionID == summary.id
-                let baseTitle = (summary.title?.isEmpty == false ? summary.title! : strings.text("untitled"))
-                let sessionTitle = (state.hasMultipleHosts && !source.isLocal)
-                    ? "\(baseTitle) · \(source.hostName)"
-                    : baseTitle
+                let title = sessionTitle(summary, source, state, strings)
                 let endingPop = IslandProjector.endingPop(ending, strings: strings, nowMs: nowMs)
                 let errorPop = endingPop.flatMap { $0.kind == "turn-ended" ? nil : $0 }
                 let hostHasUnread = summary.attention == "unread"
@@ -798,20 +780,16 @@ final class PrismDynamicIslandCoordinator: IslandActionSink {
                 if statusChanged && (prev == .running || prev == .starting || prev == .awaitingPermission) && summary.status == .ready {
                     if !viewingInFront {
                         if let errorPop {
-                            if hostHasError || hostHasUnread {
-                                if hostHasUnread {
-                                    unreadSessionKeys.insert(trackKey)
-                                }
-                                if state.notificationPrefs.error {
-                                    popsToEmit.append((rowKey, errorPop.kind, sessionTitle, errorPop.body))
-                                }
+                            if hostHasError || hostHasUnread, state.notificationPrefs.error {
+                                popsToEmit.append((rowKey, errorPop.kind, title, errorPop.body))
                             }
                         } else if hostHasUnread {
-                            unreadSessionKeys.insert(trackKey)
                             if state.notificationPrefs.turnEnded {
                                 let body = endingPop?.body ?? strings.text("pop.turnEndedBody")
-                                popsToEmit.append((rowKey, "turn-ended", sessionTitle, body))
+                                popsToEmit.append((rowKey, "turn-ended", title, body))
                             }
+                        } else {
+                            endedAwaitingUnread[trackKey] = uptime
                         }
                     }
                 } else if statusChanged && prev != .failed && summary.status == .failed {
@@ -819,80 +797,106 @@ final class PrismDynamicIslandCoordinator: IslandActionSink {
                         popsToEmit.append((
                             rowKey,
                             errorPop?.kind ?? "error",
-                            sessionTitle,
+                            title,
                             errorPop?.body ?? strings.text("pop.errorBody")
                         ))
                     }
                 } else if errorEndingArrived, summary.status == .ready || summary.status == .failed, let errorPop {
                     if !viewingInFront, (hostHasError || hostHasUnread), state.notificationPrefs.error {
-                        popsToEmit.append((rowKey, errorPop.kind, sessionTitle, errorPop.body))
+                        popsToEmit.append((rowKey, errorPop.kind, title, errorPop.body))
                     }
                 }
             }
         }
 
-        // Prune unread entries that were read on any device, removed, or belong to a non-notifying host.
-        unreadSessionKeys.formIntersection(activeUnreadKeys)
+        // Sessions that left (closed, archived, or their host went offline) are forgotten, so a
+        // host coming back does not pop for what changed while it was away.
+        previousStatuses = nextStatuses
+        previousEndings = nextEndings
+        endedAwaitingUnread = endedAwaitingUnread.filter { nextStatuses[$0.key] != nil }
+        snapshotRetry = snapshotRetry.filter { awaitingKeys.contains($0.key) }
+        planSnapshotRequestedSessionIDs.formIntersection(activePlanKeys)
 
         let eligibleProviderIds: Set<String>? = usageStore.ready
             ? Set(settingsStore.visible(usageStore.providers).filter(\.eligible).map(\.id))
             : nil
-        let snapshot = IslandProjector.buildSnapshot(
+        let built = IslandProjector.buildSnapshot(
             state: state,
             strings: strings,
-            unreadSessionKeys: unreadSessionKeys,
             nowMs: nowMs,
             sources: hostSources,
             eligibleProviderIds: eligibleProviderIds
         )
+        let (requests, newRequestKeys) = stampRequests(built.requests, uptime: uptime, nowMs: nowMs)
+        let snapshot = IslandViewSnapshot(
+            rows: built.rows,
+            requests: requests,
+            notices: built.notices,
+            summary: built.summary,
+            telemetry: built.telemetry,
+            quotas: built.quotas
+        )
 
-        if settingsStore.settings.islandMotion.enablesIdleGame {
-            rpgStore.noteConcurrency(running: snapshot.summary.running)
-        }
-
-        // Update Dock badge count when enabled (local host + currently active remote host only).
-        if state.notificationPrefs.dockBadgeEnabled {
-            let badgeRequestsCount = snapshot.requests.reduce(0) { acc, req in
-                let hostId = req.hostId ?? SartoState.localHostID
-                return acc + (state.shouldNotifyForHost(hostId) ? 1 : 0)
-            }
-            let badgeTotal = badgeRequestsCount + unreadSessionKeys.count
-            NSApp.dockTile.badgeLabel = badgeTotal > 0 ? "\(badgeTotal)" : nil
-        } else if NSApp.dockTile.badgeLabel != nil {
-            NSApp.dockTile.badgeLabel = nil
+        // The Dock badge: approvals waiting and finished sessions unread.
+        let badge: String? = state.notificationPrefs.dockBadgeEnabled && badgeCount > 0 ? "\(badgeCount)" : nil
+        if badge != lastDockBadge {
+            lastDockBadge = badge
+            NSApp.dockTile.badgeLabel = badge
         }
 
         model.apply(snapshot: snapshot, strings: strings, visible: isEnabled)
+        systemAlerts.withdrawRequests(except: Set(snapshot.requests.map(\.key)))
 
-        guard isEnabled else { return }
-
-        // Automatically open the island to the approval card whenever a brand-new pending permission arrives.
-        let nextRequestKeys = Set(snapshot.requests.map(\.key))
-        let newRequests = nextRequestKeys.subtracting(previousRequestKeys)
-        previousRequestKeys = nextRequestKeys
-        var didNotify = false
-        if !newRequests.isEmpty, state.notificationPrefs.permissionNeeded {
-            let firstNew = snapshot.requests.first { req in
-                guard newRequests.contains(req.key) else { return false }
+        // New approvals on a host that notifies, unless the user is looking at that session.
+        var newRequests: [IslandPendingRequest] = []
+        if !newRequestKeys.isEmpty, state.notificationPrefs.permissionNeeded {
+            newRequests = snapshot.requests.filter { req in
+                guard newRequestKeys.contains(req.key) else { return false }
                 let hostId = req.hostId ?? SartoState.localHostID
-                return state.shouldNotifyForHost(hostId)
-            }
-            if let firstNew {
-                let firstHostId = firstNew.hostId ?? SartoState.localHostID
                 let viewingSameInFront = mainWindowForeground
                     && !state.showStudioHome
-                    && firstHostId == state.activeHostID
-                    && firstNew.sessionId == state.selectedSessionID
-                if !viewingSameInFront {
-                    model.pushPop(
-                        rowKey: firstNew.rowKey,
-                        kind: "permission",
-                        title: firstNew.title,
-                        body: firstNew.lines.first ?? ""
-                    )
-                    didNotify = true
-                }
+                    && hostId == state.activeHostID
+                    && req.sessionId == state.selectedSessionID
+                return state.shouldNotifyForHost(hostId) && !viewingSameInFront
             }
+        }
+
+        // With the island off, the same events arrive as macOS notifications instead.
+        guard isEnabled else {
+            let sound = state.notificationPrefs.soundEnabled
+            var alerts = newRequests.map { req in
+                SystemAlertNotifier.Alert(
+                    id: SystemAlertNotifier.requestID(req.key),
+                    title: req.title,
+                    body: req.lines.first ?? "",
+                    sessionId: req.sessionId,
+                    sound: sound
+                )
+            }
+            for pop in popsToEmit {
+                let sessionId = pop.rowKey.components(separatedBy: "::").last
+                alerts.append(SystemAlertNotifier.Alert(
+                    id: "\(pop.kind):\(pop.rowKey)",
+                    title: pop.title,
+                    body: pop.body,
+                    sessionId: sessionId,
+                    sound: sound
+                ))
+            }
+            systemAlerts.post(alerts)
+            return
+        }
+
+        // The island opens to the approval card for the first new request; the card lists the rest.
+        var didNotify = false
+        if let firstNew = newRequests.first {
+            model.pushPop(
+                rowKey: firstNew.rowKey,
+                kind: "permission",
+                title: firstNew.title,
+                body: firstNew.lines.first ?? ""
+            )
+            didNotify = true
         }
 
         for pop in popsToEmit {
@@ -905,12 +909,71 @@ final class PrismDynamicIslandCoordinator: IslandActionSink {
         }
     }
 
+    private func sessionTitle(
+        _ summary: SessionSummary,
+        _ source: LiveHostIslandSource,
+        _ state: SartoState,
+        _ strings: IslandStrings
+    ) -> String {
+        let base = (summary.title?.isEmpty == false ? summary.title! : strings.text("untitled"))
+        return (state.hasMultipleHosts && !source.isLocal) ? "\(base) · \(source.hostName)" : base
+    }
+
+    /// Whether to ask for a waiting session's replica now: first at once, then again after a
+    /// wait that doubles up to a minute while the session still waits without one.
+    private func snapshotDue(_ key: String, uptime: TimeInterval) -> Bool {
+        if let retry = snapshotRetry[key] {
+            guard uptime >= retry.due else { return false }
+            let wait = min(60, retry.wait * 2)
+            snapshotRetry[key] = (uptime + wait, wait)
+        } else {
+            snapshotRetry[key] = (uptime + 3, 3)
+        }
+        return true
+    }
+
+    private func requestSnapshot(_ sessionId: String, onHost hostId: String, state: SartoState) {
+        Task { [weak state] in
+            await state?.fetchSessionSnapshotIfNeeded(sessionId, onHost: hostId)
+        }
+    }
+
+    /// Gives each request the time it was first seen, orders them by it, and returns the keys
+    /// seen for the first time; a request gone for longer than `requestForgetAfter` is forgotten.
+    private func stampRequests(
+        _ requests: [IslandPendingRequest],
+        uptime: TimeInterval,
+        nowMs: Double
+    ) -> (requests: [IslandPendingRequest], newKeys: Set<String>) {
+        var newKeys = Set<String>()
+        var stamped: [IslandPendingRequest] = []
+        stamped.reserveCapacity(requests.count)
+        for var request in requests {
+            if let sighting = requestSightings[request.key] {
+                request.askedAt = sighting.firstSeenMs
+                requestSightings[request.key] = (sighting.firstSeenMs, uptime)
+            } else {
+                let firstSeen = min(request.askedAt ?? nowMs, nowMs)
+                request.askedAt = firstSeen
+                requestSightings[request.key] = (firstSeen, uptime)
+                newKeys.insert(request.key)
+            }
+            stamped.append(request)
+        }
+        requestSightings = requestSightings.filter { uptime - $0.value.lastSeen < Self.requestForgetAfter }
+        stamped.sort { lhs, rhs in
+            let l = lhs.askedAt ?? .infinity
+            let r = rhs.askedAt ?? .infinity
+            return l != r ? l < r : lhs.key < rhs.key
+        }
+        return (stamped, newKeys)
+    }
+
     // MARK: - IslandActionSink
 
     func islandOpenApp(sessionId: String?) {
         let hadVisibleWindow = bringMainWindowToFront()
         guard let sessionId else { return }
-        unreadSessionKeys = unreadSessionKeys.filter { !$0.hasSuffix("::\(sessionId)") }
         Task { @MainActor [weak self] in
             if !hadVisibleWindow {
                 try? await Task.sleep(for: .milliseconds(100))
@@ -933,13 +996,14 @@ final class PrismDynamicIslandCoordinator: IslandActionSink {
         }
     }
 
+    /// Answers on the host that asked, whichever host is active, and reports only that answer's
+    /// own outcome.
     func islandAnswerRequest(_ request: IslandPendingRequest, option: IslandRequestOption) async -> IslandAnswerNote {
-        guard let state = appState, state.connectionMode.isLive else {
-            return IslandAnswerNote(
-                text: model.strings.text("answerFailed", ["message": model.strings.text("offline")]),
-                ok: false
-            )
-        }
+        let offlineNote = IslandAnswerNote(
+            text: model.strings.text("answerFailed", ["message": model.strings.text("offline")]),
+            ok: false
+        )
+        guard let state = appState else { return offlineNote }
         let answers: [QuestionAnswer]? = {
             if let qIdx = option.questionIndex, let cIdx = option.choiceIndex {
                 return [QuestionAnswer(question: qIdx, choices: [cIdx])]
@@ -948,29 +1012,25 @@ final class PrismDynamicIslandCoordinator: IslandActionSink {
         }()
         let optionId = answers == nil ? option.id : nil
 
-        state.connectionError = nil
-        await state.respondPermission(
+        let failure = await state.respondPermission(
             sessionId: request.sessionId,
             requestId: request.requestId,
             optionId: optionId,
             answers: answers,
             onHost: request.hostId
         )
-        let respondError = state.connectionError
-        if let hid = request.hostId {
-            snapshotRequestedSessionIDs.remove("\(hid)::\(request.sessionId)")
-        } else {
-            snapshotRequestedSessionIDs.remove(request.sessionId)
-        }
-        await state.fetchSessionSnapshotIfNeeded(request.sessionId, onHost: request.hostId)
+        let hostId = request.hostId ?? state.activeHostID
+        snapshotRetry.removeValue(forKey: "\(hostId)::\(request.sessionId)")
 
-        if let err = respondError, !err.isEmpty {
-            return IslandAnswerNote(text: model.strings.text("answerFailed", ["message": err]), ok: false)
+        switch failure {
+        case nil:
+            return IslandAnswerNote(text: model.strings.text("answered"), ok: true)
+        case .hostUnavailable?:
+            return offlineNote
+        case .failed(let message)?:
+            let shown = message.isEmpty ? model.strings.text("offline") : message
+            return IslandAnswerNote(text: model.strings.text("answerFailed", ["message": shown]), ok: false)
         }
-        if let fetchErr = state.connectionError, !fetchErr.isEmpty {
-            return IslandAnswerNote(text: model.strings.text("answerFailed", ["message": fetchErr]), ok: false)
-        }
-        return IslandAnswerNote(text: model.strings.text("answered"), ok: true)
     }
 
     func islandExpandedDidAppear() {
@@ -995,6 +1055,10 @@ final class PrismDynamicIslandCoordinator: IslandActionSink {
         settingsStore.toggleIslandDisplay(display)
     }
 
+    func islandUseAutomaticDisplays() {
+        settingsStore.useAutomaticIslandDisplays()
+    }
+
     func islandRequestHide() {
         isEnabled = false
     }
@@ -1002,7 +1066,7 @@ final class PrismDynamicIslandCoordinator: IslandActionSink {
     func islandTriggerDemoPop() {
         guard isEnabled else { return }
         let lead = model.rows.first
-        let title = lead.map { model.title(of: $0) } ?? "Sarto Dynamic Island"
+        let title = lead.map { model.title(of: $0) } ?? model.strings.text("label")
         model.pushPop(
             rowKey: lead?.key,
             kind: "turn-ended",
@@ -1037,13 +1101,12 @@ final class PrismDynamicIslandCoordinator: IslandActionSink {
         model.expand(by: .request)
     }
 
+    /// Settings' previews; they show only while the island is on, and never turn it on.
     func triggerPreviewPop() {
-        if !isEnabled { isEnabled = true }
         islandTriggerDemoPop()
     }
 
     func triggerPreviewApproval() {
-        if !isEnabled { isEnabled = true }
         islandTriggerDemoApproval()
     }
 
@@ -1058,13 +1121,12 @@ final class PrismDynamicIslandCoordinator: IslandActionSink {
         }
     }
 
-    private func buildAppUsageFocus(state: SartoState, now: Date) -> AppUsageFocusContext? {
+    private func buildAppUsageFocus(state: SartoState, now: Date, mainVisible: Bool) -> AppUsageFocusContext? {
         guard state.connectionMode.isLive || !state.sessions.isEmpty || !state.agents.isEmpty else {
             return nil
         }
 
         let agentsById = Dictionary(state.agents.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        let mainVisible = hasVisibleMainWindow
         let appForeground = NSApp.isActive && mainVisible
         let isLocalHost = !state.connectionMode.isRemote
 

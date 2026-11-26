@@ -325,6 +325,7 @@ private struct LaunchAtLoginSettingsRow: View {
 
 struct AppearanceSettingsSectionView: View {
     @Bindable var state: SartoState
+    @AppStorage("sarto.runningRail.enabled") private var runningRailEnabled: Bool = true
     @Bindable var router: PrismSettingsRouter
 
     @AppStorage("prism.threadWideWidth") private var threadWideWidth: Bool = false
@@ -552,6 +553,30 @@ struct AppearanceSettingsSectionView: View {
                     .frame(width: 260)
                 }
             }
+
+            SettingsGroupSection(l10n.tr("settings.appearance.groupLayout")) {
+                SettingsRowView(
+                    id: "appearance.rail",
+                    highlightedID: router.highlightedRowID,
+                    title: l10n.tr("settings.island.rail"),
+                    subtitle: l10n.tr("settings.island.railSub")
+                ) {
+                    Toggle(
+                        "",
+                        isOn: Binding(
+                            get: { runningRailEnabled },
+                            set: { next in
+                                guard runningRailEnabled != next else { return }
+                                runningRailEnabled = next
+                                state.markUiPrefMutated("runningRailEnabled")
+                            }
+                        )
+                    )
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                }
+            }
         }
     }
 }
@@ -685,13 +710,16 @@ struct IslandMenuBarSettingsSectionView: View {
     @Bindable var router: PrismSettingsRouter
 
     var body: some View {
-        IslandMenuBarSettingsBody(
-            state: state,
-            settingsStore: island.settingsStore,
-            usageStore: island.usageStore,
-            island: island,
-            highlightedID: router.highlightedRowID
-        )
+        VStack(alignment: .leading, spacing: 18) {
+            IslandMenuBarSettingsBody(
+                state: state,
+                settingsStore: island.settingsStore,
+                usageStore: island.usageStore,
+                island: island,
+                highlightedID: router.highlightedRowID
+            )
+            GameSettingsSection(state: state, store: island.gameStore)
+        }
         .onAppear { island.setUsageViewerVisible(true) }
         .onDisappear { island.setUsageViewerVisible(false) }
     }
@@ -705,7 +733,6 @@ private struct IslandMenuBarSettingsBody: View {
     let highlightedID: String?
 
     @State private var displays = Displays.all()
-    @AppStorage("sarto.runningRail.enabled") private var runningRailEnabled: Bool = true
     @Environment(\.prismTokens) private var tokens
     @Environment(\.prismL10n) private var l10n
 
@@ -743,9 +770,12 @@ private struct IslandMenuBarSettingsBody: View {
                             .font(.system(size: 11.5))
                             .foregroundStyle(tokens.mutedForeground)
                     }
-                    DisplayMapPicker(chosen: settings.wrappedValue.islandDisplays, displays: displays) { display in
-                        settingsStore.toggleIslandDisplay(display)
-                    }
+                    DisplayMapPicker(
+                        chosen: settings.wrappedValue.islandDisplays,
+                        displays: displays,
+                        toggle: { settingsStore.toggleIslandDisplay($0) },
+                        useAutomatic: { settingsStore.useAutomaticIslandDisplays() }
+                    )
                 }
                 .padding(14)
                 .disabled(!settings.wrappedValue.islandEnabled)
@@ -755,16 +785,20 @@ private struct IslandMenuBarSettingsBody: View {
                 SettingsRowDivider()
 
                 SettingsRowView(
-                    id: "island.subtle",
+                    id: "island.motion",
                     highlightedID: highlightedID,
-                    title: l10n.tr("settings.island.subtle"),
-                    subtitle: l10n.tr("settings.island.subtleSub")
+                    title: l10n.tr("settings.island.motion"),
+                    subtitle: l10n.tr("settings.island.motionSub")
                 ) {
-                    Toggle("", isOn: settings.subtleReminders)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                        .controlSize(.small)
-                        .disabled(!settings.wrappedValue.islandEnabled)
+                    Picker("", selection: settings.islandMotion) {
+                        Text(l10n.tr("settings.island.motionLively")).tag(IslandMotionStyle.lively)
+                        Text(l10n.tr("settings.island.motionCalm")).tag(IslandMotionStyle.calm)
+                        Text(l10n.tr("settings.island.motionStill")).tag(IslandMotionStyle.still)
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                    .frame(width: 268)
+                    .disabled(!settings.wrappedValue.islandEnabled)
                 }
 
                 SettingsRowDivider()
@@ -783,101 +817,8 @@ private struct IslandMenuBarSettingsBody: View {
                             island.triggerPreviewApproval()
                         }
                     }
-                }
-            }
-
-            SettingsGroupSection(l10n.tr("settings.island.groupStack")) {
-                let islandOn = settings.wrappedValue.islandEnabled
-                let stackOn = islandOn && settings.wrappedValue.islandSessionStack
-
-                SettingsRowView(
-                    id: "island.rail",
-                    highlightedID: highlightedID,
-                    title: l10n.tr("settings.island.rail"),
-                    subtitle: l10n.tr("settings.island.railSub")
-                ) {
-                    Toggle(
-                        "",
-                        isOn: Binding(
-                            get: { runningRailEnabled },
-                            set: { next in
-                                guard runningRailEnabled != next else { return }
-                                runningRailEnabled = next
-                                state.markUiPrefMutated("runningRailEnabled")
-                            }
-                        )
-                    )
-                    .labelsHidden()
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
-                }
-
-                SettingsRowDivider()
-
-                SettingsRowView(
-                    id: "island.stack",
-                    highlightedID: highlightedID,
-                    title: l10n.tr("settings.island.stack"),
-                    subtitle: l10n.tr("settings.island.stackSub")
-                ) {
-                    Toggle("", isOn: settings.islandSessionStack)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                        .controlSize(.small)
-                        .disabled(!islandOn)
-                }
-
-                SettingsRowDivider()
-
-                SettingsRowView(
-                    id: "island.maxRows",
-                    highlightedID: highlightedID,
-                    title: l10n.tr("settings.island.maxRows"),
-                    subtitle: l10n.tr("settings.island.maxRowsSub")
-                ) {
-                    Picker("", selection: settings.islandMaxRows) {
-                        ForEach(IslandStackOptions.rowChoices, id: \.self) { value in
-                            Text("\(value)").tag(value)
-                        }
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.segmented)
-                    .frame(width: 150)
-                    .disabled(!stackOn)
-                }
-
-                SettingsRowDivider()
-
-                SettingsRowView(
-                    id: "island.quota",
-                    highlightedID: highlightedID,
-                    title: l10n.tr("settings.island.quota"),
-                    subtitle: l10n.tr("settings.island.quotaSub")
-                ) {
-                    Toggle("", isOn: settings.islandShowQuota)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                        .controlSize(.small)
-                        .disabled(!stackOn)
-                }
-
-                SettingsRowDivider()
-
-                SettingsRowView(
-                    id: "island.motion",
-                    highlightedID: highlightedID,
-                    title: l10n.tr("settings.island.motion"),
-                    subtitle: l10n.tr("settings.island.motionSub")
-                ) {
-                    Picker("", selection: settings.islandMotion) {
-                        Text(l10n.tr("settings.island.motionArcade")).tag(IslandMotionStyle.arcade)
-                        Text(l10n.tr("settings.island.motionLively")).tag(IslandMotionStyle.lively)
-                        Text(l10n.tr("settings.island.motionCalm")).tag(IslandMotionStyle.calm)
-                        Text(l10n.tr("settings.island.motionStill")).tag(IslandMotionStyle.still)
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.segmented)
-                    .frame(width: 268)
+                    .disabled(!settings.wrappedValue.islandEnabled)
+                    .opacity(settings.wrappedValue.islandEnabled ? 1 : 0.45)
                 }
             }
 
@@ -1033,6 +974,8 @@ private struct UsageSyncSettingsBody: View {
                                 .opacity(index == all.count - 1 ? 0.35 : 1)
                             }
 
+                            let lastShown = !hidden
+                                && all.filter { !settingsStore.settings.hidden.contains($0.id) }.count <= 1
                             Toggle(
                                 "",
                                 isOn: Binding(
@@ -1043,6 +986,8 @@ private struct UsageSyncSettingsBody: View {
                             .labelsHidden()
                             .toggleStyle(.switch)
                             .controlSize(.small)
+                            .disabled(lastShown)
+                            .help(lastShown ? l10n.tr("settings.usage.lastSourceHelp") : "")
                         }
                         .padding(.horizontal, 14)
                         .padding(.vertical, 9)
@@ -1051,40 +996,7 @@ private struct UsageSyncSettingsBody: View {
                 .id("usage.sources")
             }
 
-            SettingsGroupSection(l10n.tr("settings.usage.groupAlertsPrivacy")) {
-                SettingsRowView(
-                    id: "usage.lowAlert",
-                    highlightedID: highlightedID,
-                    title: l10n.tr("settings.usage.lowAlert"),
-                    subtitle: l10n.tr("settings.usage.lowAlertSub", settings.wrappedValue.lowThreshold)
-                ) {
-                    Toggle("", isOn: settings.lowAlert)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                        .controlSize(.small)
-                }
-
-                SettingsRowDivider()
-
-                SettingsRowView(
-                    id: "usage.threshold",
-                    highlightedID: highlightedID,
-                    title: l10n.tr("settings.usage.threshold"),
-                    subtitle: nil
-                ) {
-                    Picker("", selection: settings.lowThreshold) {
-                        ForEach(UsageIslandSettings.lowThresholds, id: \.self) { value in
-                            Text("\(value)%").tag(value)
-                        }
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.segmented)
-                    .frame(width: 210)
-                    .disabled(!settings.wrappedValue.lowAlert)
-                }
-
-                SettingsRowDivider()
-
+            SettingsGroupSection(l10n.tr("settings.usage.groupPrivacy")) {
                 SettingsRowView(
                     id: "usage.privacy",
                     highlightedID: highlightedID,
@@ -1103,7 +1015,11 @@ private struct UsageSyncSettingsBody: View {
                     id: "usage.fromComputer",
                     highlightedID: highlightedID,
                     title: l10n.tr("settings.usage.fromComputer"),
-                    subtitle: l10n.tr("settings.usage.fromComputerSub")
+                    // The window may be on another host, whose setting this changes; the menu
+                    // bar and the island always read this Mac's.
+                    subtitle: state.connectionMode.isRemote
+                        ? l10n.tr("settings.usage.fromComputerRemoteSub", state.activeHostSnapshot.name)
+                        : l10n.tr("settings.usage.fromComputerSub")
                 ) {
                     Toggle(
                         "",
@@ -1258,6 +1174,7 @@ private struct NotificationsSettingsBody: View {
     let highlightedID: String?
 
     @Environment(\.prismL10n) private var l10n
+    @Environment(\.prismTokens) private var tokens
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -1308,14 +1225,47 @@ private struct NotificationsSettingsBody: View {
                     id: "notifications.lowQuota",
                     highlightedID: highlightedID,
                     title: l10n.tr("settings.usage.lowAlert"),
-                    subtitle: l10n.tr("settings.usage.lowAlertSub", settingsStore.settings.lowThreshold)
+                    subtitle: l10n.tr("settings.notifications.lowQuotaSub")
                 ) {
-                    Toggle("", isOn: $settingsStore.settings.lowAlert)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                        .controlSize(.small)
+                    Picker("", selection: $settingsStore.settings.lowQuotaAlert) {
+                        Text(l10n.tr("settings.notifications.lowQuota.pop")).tag(LowQuotaAlertMode.pop)
+                        Text(l10n.tr("settings.notifications.lowQuota.badge")).tag(LowQuotaAlertMode.badge)
+                        Text(l10n.tr("settings.notifications.lowQuota.off")).tag(LowQuotaAlertMode.off)
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                    .frame(width: 240)
+                }
+
+                SettingsRowDivider()
+
+                SettingsRowView(
+                    id: "notifications.threshold",
+                    highlightedID: highlightedID,
+                    title: l10n.tr("settings.usage.threshold"),
+                    subtitle: l10n.tr("settings.notifications.thresholdSub")
+                ) {
+                    Picker("", selection: $settingsStore.settings.lowThreshold) {
+                        ForEach(UsageIslandSettings.lowThresholds, id: \.self) { value in
+                            Text("\(value)%").tag(value)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                    .frame(width: 210)
+                    .disabled(!settingsStore.settings.lowAlert)
                 }
             }
+
+            Text(l10n.tr(
+                settingsStore.settings.islandEnabled
+                    ? "settings.notifications.deliveryIsland"
+                    : "settings.notifications.deliverySystem"
+            ))
+            .font(.system(size: 11.5))
+            .foregroundStyle(tokens.mutedForeground)
+            .padding(.horizontal, 4)
+            .fixedSize(horizontal: false, vertical: true)
 
             SettingsGroupSection(l10n.tr("settings.notifications.groupDelivery")) {
                 SettingsRowView(

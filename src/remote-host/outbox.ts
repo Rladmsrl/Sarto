@@ -339,12 +339,8 @@ function entryOf(message: ChannelMessage, size: number): Entry {
   }
 }
 
-/** The events that wait for the pace with the patches: summaries, removals and work facts. */
-const PACED_EVENTS: ReadonlySet<unknown> = new Set([
-  'session.summary',
-  'session.removed',
-  'work.facts',
-])
+/** The events that wait for the pace with the patches: summaries and removals. */
+const PACED_EVENTS: ReadonlySet<unknown> = new Set(['session.summary', 'session.removed'])
 
 function pacedEvent(message: ChannelMessage): boolean {
   if (message.kind !== 'json') return false

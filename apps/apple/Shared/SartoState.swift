@@ -294,7 +294,14 @@ public final class SartoState {
     }
 
     public var showStudioHome: Bool = true
-    public var selectedAgentID: String = "antigravity"
+    public var selectedAgentID: String = "antigravity" {
+        didSet {
+            // Only Claude Code supports remote model hosts; switching to another agent clears it.
+            if selectedAgentID != "claude-code", selectedModelHostID != nil {
+                selectedModelHostID = nil
+            }
+        }
+    }
 
     // Optical feedback pulses & strictly real measured telemetry (nil until observed)
     public var liftoffToken: Int = 0
@@ -382,8 +389,6 @@ public final class SartoState {
     /// show (a tool request, the plan, the session's own fields), and never by streamed text, so
     /// they follow `replicas` without redrawing for every token.
     public var islandReplicaRevision: Int = 0
-    /// The facts a host tells of its own sessions' work (`work.facts`), with the host's id.
-    @ObservationIgnored public var onWorkFacts: ((_ hostId: String, _ facts: [WorkFact]) -> Void)? = nil
     @ObservationIgnored var dirtyBackgroundSnapshotHostIDs: Set<String> = []
     @ObservationIgnored var backgroundSnapshotFlushTask: Task<Void, Never>? = nil
     public var remoteHostErrors: [String: String] = [:]
@@ -487,6 +492,16 @@ public final class SartoState {
     public var attachmentBannerError: String? = nil
     @ObservationIgnored private let draftStore = ComposerDraftStore()
     @ObservationIgnored private var sessionPreviewCache: [String: (fetchedAt: TimeInterval, preview: ComposerSessionPreview)] = [:]
+    private static let maxSessionPreviewCacheEntries = 64
+    @ObservationIgnored private var knownFilePathsCache: (generation: UInt64, revision: UInt64, set: Set<String>)? = nil
+    @ObservationIgnored private var waitingCardCache: (
+        sessionId: String,
+        seq: Int,
+        count: Int,
+        hasWaiting: Bool,
+        awaitsQuestion: Bool,
+        endedOnRejection: Bool
+    )? = nil
     public var showArchivedSessions: Bool = false
     public var isLoadingOlderPage: Bool = false
     public var outlineBySession: [String: [OutlineEntryInfo]] = [:]
@@ -758,10 +773,9 @@ public final class SartoState {
                     "accentMode", "motionTier", "sendKeyMode", "defaultAgentID",
                     "restoreLastSession", "confirmQuitWhileRunning", "textSize", "threadWideWidth",
                     "uiFontFamily", "proseFontFamily", "codeFontFamily", "terminalFontSize",
-                    "terminalFontFamily", "notifications", "islandEnabled", "subtleReminders",
-                    "islandSessionStack", "islandMaxRows", "islandShowQuota", "islandMotion",
+                    "terminalFontFamily", "notifications", "subtleReminders", "islandMotion",
                     "runningRailEnabled", "browserAllowedOrigins",
-                    "menubarEnabled", "statusText", "providerOrder", "providerHidden",
+                    "statusText", "providerOrder", "providerHidden",
                     "usageScope", "lowAlert", "lowThreshold", "usagePrivacy",
                 ]
                 var seeded: [String: Double] = [:]
@@ -777,7 +791,7 @@ public final class SartoState {
         self.isInitializingPrefs = false
         restorePersistedDrafts()
 
-        workspace.attach(host: nil, terminal: nil, projectPath: Self.defaultWorkspacePath)
+        workspace.attach(host: nil, terminal: nil, projectPath: "")
         // A push or branch switch from the Git pane keeps the tray's branch chip current.
         workspace.onGitStatusLoaded = { [weak self] status in
             guard let self, self.gitStatusByProject[status.projectPath] != nil,
@@ -957,16 +971,19 @@ public final class SartoState {
     public var activeModelHostRef: ModelHostRef? {
         guard !isViewingRemoteHost else { return nil }
         if showStudioHome {
+            guard selectedAgentID == "claude-code", let hostId = selectedModelHostID else { return nil }
             if let host = selectedRemoteClaudeHost {
                 return ModelHostRef(hostId: host.hostId, hostName: host.hostName)
             }
-            if let hostId = selectedModelHostID {
-                let name = otherHosts.first(where: { $0.id == hostId })?.name ?? hostId
-                return ModelHostRef(hostId: hostId, hostName: name)
-            }
-            return nil
+            let name = otherHosts.first(where: { $0.id == hostId })?.name ?? hostId
+            return ModelHostRef(hostId: hostId, hostName: name)
         }
-        return activeReplica?.session.modelHost ?? selectedSessionSummary?.modelHost
+        let sessionAgentID = activeReplica?.session.agentId ?? selectedSessionSummary?.agentId
+        guard sessionAgentID == "claude-code" else { return nil }
+        if let replica = activeReplica {
+            return replica.session.modelHost
+        }
+        return selectedSessionSummary?.modelHost
     }
 
     public func isModelHostOffline(_ ref: ModelHostRef) -> Bool {
@@ -1031,10 +1048,10 @@ public final class SartoState {
     }
 
     public func setNewSessionRemoteClaudeHost(_ hostId: String?) {
-        selectedModelHostID = hostId
         if hostId != nil {
             selectedAgentID = "claude-code"
         }
+        selectedModelHostID = hostId
         syncEffortFromActiveConfig()
         Task { [weak self] in
             await self?.prepareNewSessionIfNeeded()
@@ -1162,18 +1179,20 @@ public final class SartoState {
 
     public var prioritizedSessions: [SessionSummary] {
         let filtered = sessions.filter { showArchivedSessions ? true : ($0.archivedAt == nil) }
-        return filtered.sorted { lhs, rhs in
-            let lPinned = lhs.pinnedAt != nil
-            let rPinned = rhs.pinnedAt != nil
-            if lPinned != rPinned { return lPinned }
-            if lPinned && rPinned, let lp = lhs.pinnedAt, let rp = rhs.pinnedAt, lp != rp {
-                return lp > rp
-            }
-            let lRank = priorityRank(lhs)
-            let rRank = priorityRank(rhs)
-            if lRank != rRank { return lRank < rRank }
-            return lhs.updatedAt > rhs.updatedAt
+        return filtered.sorted(by: sessionPrecedes)
+    }
+
+    private func sessionPrecedes(_ lhs: SessionSummary, _ rhs: SessionSummary) -> Bool {
+        let lPinned = lhs.pinnedAt != nil
+        let rPinned = rhs.pinnedAt != nil
+        if lPinned != rPinned { return lPinned }
+        if lPinned && rPinned, let lp = lhs.pinnedAt, let rp = rhs.pinnedAt, lp != rp {
+            return lp > rp
         }
+        let lRank = priorityRank(lhs)
+        let rRank = priorityRank(rhs)
+        if lRank != rRank { return lRank < rRank }
+        return lhs.updatedAt > rhs.updatedAt
     }
 
     public var selectedSessionSummary: SessionSummary? {
@@ -1181,7 +1200,12 @@ public final class SartoState {
            let found = sessions.first(where: { $0.id == id }) {
             return found
         }
-        return prioritizedSessions.first
+        // The first of `prioritizedSessions`, found in one pass instead of a full sort, as the
+        // island asks for it several times a sync.
+        return sessions
+            .lazy
+            .filter { self.showArchivedSessions ? true : ($0.archivedAt == nil) }
+            .min(by: sessionPrecedes)
     }
 
     public func sessionSummary(for id: String) -> SessionSummary? {
@@ -1284,26 +1308,54 @@ public final class SartoState {
               let projectPath = activeTrayProjectPath,
               !workspace.filePaths.isEmpty
         else { return [] }
+        let known: Set<String>
+        if let cached = knownFilePathsCache,
+           cached.generation == workspace.projectGeneration,
+           cached.revision == workspace.fileTreeRevision {
+            known = cached.set
+        } else {
+            let built = Set(workspace.filePaths)
+            knownFilePathsCache = (workspace.projectGeneration, workspace.fileTreeRevision, built)
+            known = built
+        }
         return ComposerPathMatcher.usedFiles(
             from: replica.entries,
             projectPath: projectPath,
-            known: Set(workspace.filePaths)
+            known: known
         )
     }
 
+    private func activeWaitingCardFlags() -> (hasWaiting: Bool, awaitsQuestion: Bool, endedOnRejection: Bool) {
+        guard !showStudioHome,
+              let sessionId = selectedSessionID,
+              let replica = activeReplica
+        else { return (false, false, false) }
+        if let cached = waitingCardCache,
+           cached.sessionId == sessionId,
+           cached.seq == replica.seq,
+           cached.count == replica.entries.count {
+            return (cached.hasWaiting, cached.awaitsQuestion, cached.endedOnRejection)
+        }
+        let entries = replica.entries
+        let flags = (
+            hasWaiting: ComposerWaitingCard.hasWaitingCard(in: entries),
+            awaitsQuestion: ComposerWaitingCard.awaitsQuestionAnswer(in: entries),
+            endedOnRejection: ComposerWaitingCard.endedOnRejection(in: entries)
+        )
+        waitingCardCache = (sessionId, replica.seq, entries.count, flags.hasWaiting, flags.awaitsQuestion, flags.endedOnRejection)
+        return flags
+    }
+
     public var activeHasWaitingCard: Bool {
-        guard !showStudioHome, let entries = activeReplica?.entries else { return false }
-        return ComposerWaitingCard.hasWaitingCard(in: entries)
+        activeWaitingCardFlags().hasWaiting
     }
 
     public var activeAwaitsQuestionAnswer: Bool {
-        guard !showStudioHome, let entries = activeReplica?.entries else { return false }
-        return ComposerWaitingCard.awaitsQuestionAnswer(in: entries)
+        activeWaitingCardFlags().awaitsQuestion
     }
 
     public var activeEndedOnRejection: Bool {
-        guard !showStudioHome, let entries = activeReplica?.entries else { return false }
-        return ComposerWaitingCard.endedOnRejection(in: entries)
+        activeWaitingCardFlags().endedOnRejection
     }
 
     /// Executes the keyboard action (`Enter`, `Cmd+Enter`, or `Esc`) on the first waiting card in the active session.
@@ -1829,6 +1881,18 @@ public final class SartoState {
         let entries = await fetchSessionEntriesForReference(sessionId: sessionId)
         let preview = ComposerSessionContextFormatter.preview(from: entries)
         sessionPreviewCache[sessionId] = (now, preview)
+        if sessionPreviewCache.count > Self.maxSessionPreviewCacheEntries {
+            sessionPreviewCache = sessionPreviewCache.filter { (now - $0.value.fetchedAt) < 12.0 }
+            if sessionPreviewCache.count > Self.maxSessionPreviewCacheEntries {
+                let overflow = sessionPreviewCache.count - Self.maxSessionPreviewCacheEntries
+                let oldest = sessionPreviewCache
+                    .sorted { $0.value.fetchedAt < $1.value.fetchedAt }
+                    .prefix(overflow)
+                for (key, _) in oldest {
+                    sessionPreviewCache.removeValue(forKey: key)
+                }
+            }
+        }
         return preview
     }
 
@@ -3191,7 +3255,7 @@ public final class SartoState {
             statusMessage = error.localizedDescription
             // A path from a remote host must not be read from this Mac's disk.
             let fallbackPath = workspace.isRemoteWorkspace && !mode.isRemote
-                ? Self.defaultWorkspacePath
+                ? ""
                 : workspace.activeProjectPath
             workspace.attach(host: nil, terminal: nil, projectPath: fallbackPath, hostId: targetHostID, isRemote: mode.isRemote)
             return false
@@ -3255,6 +3319,9 @@ public final class SartoState {
         } else if let top = selectableAgents.first(where: { $0.state != "not-installed" }) {
             selectedAgentID = top.id
         }
+        if mode.isRemote || !isReattach || !previousShowStudioHome || selectedAgentID != "claude-code" {
+            selectedModelHostID = nil
+        }
 
         if newSessionProjectPath == nil {
             newSessionProjectPath = projects.first(where: { !$0.isMissing })?.path ?? projects.first?.path
@@ -3281,7 +3348,7 @@ public final class SartoState {
         let initialPath = initialSession?.projectPath
             ?? (keepsNewSessionStage ? effectiveNewSessionProjectPath : nil)
             ?? projects.first?.path
-            ?? Self.defaultWorkspacePath
+            ?? ""
         workspace.attach(host: session, terminal: terminal, projectPath: initialPath, hostId: targetHostID, isRemote: mode.isRemote)
 
         // Register active host into the persistent multi-host pool and start consuming events before
@@ -3446,7 +3513,7 @@ public final class SartoState {
         currentTPS = nil
         currentTTFTMs = nil
         currentCacheHit = nil
-        workspace.attach(host: nil, terminal: nil, projectPath: Self.defaultWorkspacePath)
+        workspace.attach(host: nil, terminal: nil, projectPath: "")
     }
 
     public func refreshUsageSummary() async {
@@ -3903,9 +3970,6 @@ public final class SartoState {
         case .hostLoad(let load):
             hostLoadsByHostID[activeHostID] = load
 
-        case .workFacts(let facts):
-            onWorkFacts?(activeHostID, facts)
-
         case .gameStatus, .gameFrame:
             // The game comes from the daemon's control connection, never from a host port.
             break
@@ -3971,14 +4035,21 @@ public final class SartoState {
             newSessionIsScratch = parent.scratch == true
             newSessionProjectPath = parent.scratch == true ? nil : parent.projectPath
             if let agentId {
-                selectedAgentID = agentId
-                selectedModelHostID = nil
+                if let remoteHostId = Self.remoteClaudeHostID(from: agentId) {
+                    selectedAgentID = "claude-code"
+                    selectedModelHostID = isViewingRemoteHost ? nil : remoteHostId
+                } else {
+                    selectedAgentID = agentId
+                    selectedModelHostID = nil
+                }
             } else {
                 selectedAgentID = parent.agentId
-                selectedModelHostID = isViewingRemoteHost ? nil : parent.modelHost?.hostId
+                selectedModelHostID = (!isViewingRemoteHost && parent.agentId == "claude-code")
+                    ? parent.modelHost?.hostId
+                    : nil
             }
         } else {
-            if isViewingRemoteHost {
+            if isViewingRemoteHost || selectedAgentID != "claude-code" {
                 selectedModelHostID = nil
             }
             if let scratch {
@@ -4012,6 +4083,8 @@ public final class SartoState {
                 await self?.workspace.setProjectPath(path)
                 await self?.refreshGitMetadata(for: path)
             }
+        } else {
+            workspace.clearProjectPath()
         }
         syncReportedShownSessions()
         syncEffortFromActiveConfig()
@@ -4029,11 +4102,13 @@ public final class SartoState {
         if !scratch {
             newSessionProjectPath = path
         }
-        if let path, !scratch {
+        if let path, !path.isEmpty, !scratch {
             Task { [weak self] in
                 await self?.workspace.setProjectPath(path)
                 await self?.refreshGitMetadata(for: path)
             }
+        } else {
+            workspace.clearProjectPath()
         }
         Task { [weak self] in
             await self?.prepareNewSessionIfNeeded()
@@ -4452,6 +4527,7 @@ public final class SartoState {
 
         if let s = sessionSummary(for: id) {
             selectedAgentID = s.agentId
+            selectedModelHostID = nil
             if !s.projectPath.isEmpty {
                 let projectPath = s.worktree?.path ?? s.projectPath
                 Task { [weak self] in
@@ -4460,6 +4536,8 @@ public final class SartoState {
                         await self?.refreshGitMetadata(for: s.projectPath)
                     }
                 }
+            } else {
+                workspace.clearProjectPath()
             }
         }
         guard let hostSession else { return }
@@ -4748,7 +4826,7 @@ public final class SartoState {
     ) async -> SessionSummary? {
         let resolvedProject: String? = allowNoProject
             ? projectPath
-            : (projectPath ?? projects.first?.path ?? Self.defaultWorkspacePath)
+            : (projectPath ?? projects.first?.path)
         triggerStartOptics()
         connectionError = nil
 
@@ -5547,6 +5625,16 @@ public final class SartoState {
         syncEffortFromActiveConfig()
     }
 
+    /// Why an answer to a permission request did not reach its host.
+    public enum PermissionAnswerFailure: Error, Equatable {
+        /// No connection to the host that asked.
+        case hostUnavailable
+        /// The host refused or the call failed, with its message.
+        case failed(String)
+    }
+
+    /// Sends the answer to the host that asked; returns why it failed, or nil once it is sent.
+    @discardableResult
     public func respondPermission(
         sessionId: String,
         requestId: String,
@@ -5555,9 +5643,9 @@ public final class SartoState {
         answers: [QuestionAnswer]? = nil,
         values: [String: JSONValue]? = nil,
         onHost hostId: String? = nil
-    ) async {
+    ) async -> PermissionAnswerFailure? {
         let resolvedHost = hostId ?? hostID(owningSession: sessionId)
-        guard let host = resolveHostSession(for: resolvedHost) else { return }
+        guard let host = resolveHostSession(for: resolvedHost) else { return .hostUnavailable }
         let isBackground = resolvedHost != nil && resolvedHost != activeHostID
         do {
             try await host.respondPermission(
@@ -5577,8 +5665,11 @@ public final class SartoState {
             } else if !watchedSessionOrder.contains(sessionId) {
                 await reloadSnapshot(sessionId: sessionId)
             }
+            return nil
         } catch {
             reportConnectionError(error)
+            if Self.isCancellationError(error) { return .failed("") }
+            return .failed(error.localizedDescription)
         }
     }
 

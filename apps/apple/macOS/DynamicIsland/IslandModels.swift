@@ -5,36 +5,6 @@ import SwiftUI
 
 // MARK: - Placement & Geometry
 
-/// Which display hosts the Dynamic Island on multi-monitor setups (such as dual 4K monitors).
-enum IslandScreenPreference: String, CaseIterable, Identifiable, Sendable {
-    case followActive
-    case followPointer
-    case primaryOrNotch
-
-    var id: String { rawValue }
-
-    private static let defaultsKey = "dev.sarto.island.screenPreference"
-
-    static func loadSaved() -> IslandScreenPreference {
-        guard let raw = UserDefaults.standard.string(forKey: defaultsKey),
-              let parsed = IslandScreenPreference(rawValue: raw)
-        else { return .followActive }
-        return parsed
-    }
-
-    func save() {
-        UserDefaults.standard.set(rawValue, forKey: Self.defaultsKey)
-    }
-
-    func localizedTitle(_ strings: IslandStrings) -> String {
-        switch self {
-        case .followActive: return strings.text("screen.active")
-        case .followPointer: return strings.text("screen.pointer")
-        case .primaryOrNotch: return strings.text("screen.primary")
-        }
-    }
-}
-
 /// Where the island sits and how large it may grow on the active screen.
 struct IslandGeometry: Equatable, Sendable {
     /// Hardware notch width, or 0 on a non-notch external monitor.
@@ -109,42 +79,49 @@ struct IslandQuotaWindow: Equatable, Identifiable, Sendable {
     let resetsAt: Double?
 }
 
-/// How the running rail and collapsed island animate; 3 degradation levels from full idle RPG down
-/// to static frames. Set from Settings -> Animation.
+/// How the running rail and collapsed island animate, from full particles down to still frames.
+/// Set from Settings -> Dynamic Island -> Animation, and capped by the app's motion tier.
 enum IslandMotionStyle: String, Codable, CaseIterable, Sendable {
-    /// 60 fps full idle RPG game (XP, leveling, weapons, cosmetics, auto skills, damage numbers).
-    case arcade
-    /// 60 fps pure animation with particles and shockwaves, without idle RPG overlays.
+    /// Particles and shockwaves at the frame rate the energy policy allows.
     case lively
-    /// 30 fps quieter animation.
+    /// Quieter animation at half the rate.
     case calm
     /// Static frames only.
     case still
 
+    /// Reads a stored or synced value; `arcade`, the tier the removed Agent RPG used, is `lively`.
+    init?(storedValue: String) {
+        if storedValue == "arcade" {
+            self = .lively
+        } else {
+            self.init(rawValue: storedValue)
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        guard let style = IslandMotionStyle(storedValue: raw) else {
+            throw DecodingError.dataCorrupted(
+                .init(codingPath: decoder.codingPath, debugDescription: "Unknown motion style \(raw)")
+            )
+        }
+        self = style
+    }
+
     var framesPerSecond: Double {
         switch self {
-        case .arcade, .lively: return 60
+        case .lively: return 60
         case .calm: return 30
         case .still: return 0
         }
     }
 
-    /// True only at the highest tier where the running rail enables the full idle RPG game.
-    var enablesIdleGame: Bool {
-        self == .arcade
+    /// The style the app's motion tier and Reduce Motion leave: `off` stills it, `subtle` calms it.
+    func capped(by tier: PrismMotionTier, reduceMotion: Bool) -> IslandMotionStyle {
+        if reduceMotion || tier == .off { return .still }
+        if tier == .subtle, self == .lively { return .calm }
+        return self
     }
-}
-
-struct IslandStackOptions: Equatable, Sendable {
-    /// One row per running session under the notch while any session runs; off by default, as
-    /// the window's running panel shows them.
-    var enabled = false
-    /// Rows shown before the rest fold into one line.
-    var maxRows = 5
-    var showQuota = true
-    var motion: IslandMotionStyle = .arcade
-
-    static let rowChoices = [3, 5, 8]
 }
 
 struct IslandLimitSnapshot: Equatable, Sendable {
@@ -205,7 +182,8 @@ struct IslandPendingRequest: Equatable, Identifiable, Sendable {
     let lines: [String]
     let code: Bool
     let options: [IslandRequestOption]
-    let askedAt: Double?
+    /// When the island first saw the request (epoch milliseconds); requests are shown oldest first.
+    var askedAt: Double?
     let isDemo: Bool
     var hostId: String? = nil
     var hostName: String? = nil
@@ -258,11 +236,7 @@ struct IslandPopItem: Equatable, Identifiable, Sendable {
 
 /// The one compact fact shown beside the status signal when collapsed.
 enum IslandCollapsedFact: Equatable, Sendable {
-    case count(Int)
     case cache(String, ending: Bool)
-    case plan(done: Int, total: Int)
-    case speed(String)
-    case word(String)
     /// Approvals waiting on the user.
     case pending(Int)
     /// A used-up window, counting down to its reset (epoch milliseconds).
@@ -272,14 +246,12 @@ enum IslandCollapsedFact: Equatable, Sendable {
     case done(Int)
     /// Sessions running, and when the longest turn started (epoch milliseconds).
     case running(count: Int, since: Double?)
-    /// Idle: the scarcest plan window, its agent and when it resets.
-    case quota(IslandQuotaWindow, agent: IslandAgentIdentity, reset: String?)
 
     /// Shown alone in the right wing, as a pill, without the status signal beside it.
     var isPill: Bool {
         switch self {
-        case .pending, .resumeAt, .failed, .done, .running, .quota: return true
-        default: return false
+        case .pending, .resumeAt, .failed, .done, .running: return true
+        case .cache: return false
         }
     }
 }
@@ -324,48 +296,50 @@ protocol IslandActionSink: AnyObject {
     func islandOpenMenuBarPanel(page: MenuBarPage)
     func islandOpenSettings(section: PrismSettingsSection?)
     func islandToggleDisplay(_ display: DisplayInfo)
+    func islandUseAutomaticDisplays()
     func islandRequestHide()
     func islandTriggerDemoPop()
     func islandTriggerDemoApproval()
 }
 
-// MARK: - Theme & Metrics (Black Hardware Surface + Subtle Obsidian Prism Accents)
+// MARK: - Theme & Metrics
 
+/// Static names for the island's colors, forwarded from `PrismIslandTokens.standard` for code with
+/// no tokens at hand. The chassis, the accent and the spectrum change with the palette, so views
+/// with the island model read those from `model.prismTokens.island` instead.
 enum IslandTheme {
-    static let surface = Color(hex: 0x050507)
-    static let card = Color(hex: 0x16161B)
-    static let focusCard = Color(hex: 0x111116)
-    static let line = Color.white.opacity(0.085)
-    static let track = Color(hex: 0x26262E)
-    static let cardHover = Color(hex: 0x22222A)
-    static let rowHover = Color(hex: 0x14141A)
-    static let button = Color(hex: 0x26262E)
-    static let buttonHover = Color(hex: 0x31313B)
-    static let primaryButton = Color(hex: 0xF5F5F7)
-    static let text = Color(hex: 0xF2F2F7)
-    static let quote = Color(hex: 0xC7C7CC)
-    static let secondary = Color(hex: 0x8E8E98)
-    static let tertiary = Color(hex: 0x6A6A74)
+    private static let tokens = PrismIslandTokens.standard
 
-    // Obsidian Prism optical spectral palette
-    static let prismCobalt = Color(hex: 0x4C8DF6)
-    static let prismIris = Color(hex: 0x9B72CB)
-    static let prismCoral = Color(hex: 0xD96570)
-    static let prismAmber = Color(hex: 0xF2B84B)
+    static let surface = tokens.surface
+    static let card = tokens.card
+    static let focusCard = tokens.focusCard
+    static let line = tokens.line
+    static let track = tokens.track
+    static let cardHover = tokens.cardHover
+    static let rowHover = tokens.rowHover
+    static let button = tokens.button
+    static let buttonHover = tokens.buttonHover
+    static let primaryButton = tokens.primaryButton
+    static let text = tokens.text
+    static let quote = tokens.quote
+    static let secondary = tokens.secondary
+    static let tertiary = tokens.tertiary
 
-    // Semantic signals matching Prism
-    static let attentionDot = Color(hex: 0xF2B84B)
-    static let attention = Color(hex: 0xF4BE5B)
-    static let danger = Color(hex: 0xE5534B)
-    static let success = Color(hex: 0x50A37B)
-    static let warning = Color(hex: 0xF2B84B)
-    static let usageRed = Color(hex: 0xE5534B)
-    static let usageGreen = Color(hex: 0x50A37B)
-    static let unread = Color(hex: 0x4C8DF6)
-    static let running = Color(hex: 0x6BA4FF)
-    static let planDone = Color(hex: 0x50A37B)
+    static let prismCobalt = tokens.cobalt
+    static let prismIris = tokens.iris
+    static let prismCoral = tokens.coral
+    static let prismAmber = tokens.amber
 
-    static let turnDotsNSColor = NSColor(srgbRed: 0.42, green: 0.64, blue: 0.99, alpha: 1.0)
+    static let attentionDot = tokens.warning
+    static let attention = tokens.attention
+    static let danger = tokens.danger
+    static let success = tokens.success
+    static let warning = tokens.warning
+    static let usageRed = tokens.danger
+    static let usageGreen = tokens.success
+    static let unread = tokens.unread
+    static let running = tokens.running
+    static let planDone = tokens.planDone
 }
 
 enum IslandMetrics {
@@ -392,15 +366,8 @@ enum IslandMetrics {
     static let plainMiddle: CGFloat = 192
 }
 
-/// Fixed row heights of the running session stack; `PrismIslandModel.stackBodyHeight` adds them up.
-enum IslandStackMetrics {
-    static let width: CGFloat = 420
-    static let radius: CGFloat = 20
-    static let topPadding: CGFloat = 4
-    static let bottomPadding: CGFloat = 10
-    static let groupHeader: CGFloat = 24
-    static let row: CGFloat = 30
-    static let foldRow: CGFloat = 24
+/// The strike lane the window's running rail shows for each session.
+enum IslandLaneMetrics {
     /// Widest the centred title band gets, leaving the two marks and some runway clear.
     static let titleWidth: CGFloat = 300
 }

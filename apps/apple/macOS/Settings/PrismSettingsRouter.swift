@@ -144,18 +144,15 @@ enum PrismSettingsSearchCatalog {
         // Island & Menu Bar
         .init(id: "isl.show", section: .islandAndMenuBar, rowID: "island.enabled", titleKey: "settings.island.show", subtitleKey: "settings.island.showSub", keywords: "dynamic island notch 灵动岛 刘海"),
         .init(id: "isl.displays", section: .islandAndMenuBar, rowID: "island.displays", titleKey: "settings.island.displays", subtitleKey: "settings.island.displaysSub", keywords: "monitor display screen map 显示器 多屏 位置"),
-        .init(id: "isl.subtle", section: .islandAndMenuBar, rowID: "island.subtle", titleKey: "settings.island.subtle", subtitleKey: "settings.island.subtleSub", keywords: "subtle reminder expand 轻提醒 自动展开"),
         .init(id: "isl.preview", section: .islandAndMenuBar, rowID: "island.preview", titleKey: "settings.island.previewTitle", subtitleKey: "settings.island.previewSub", keywords: "preview test pop approval 预览 测试 弹窗 审批"),
-        .init(id: "isl.rail", section: .islandAndMenuBar, rowID: "island.rail", titleKey: "settings.island.rail", subtitleKey: "settings.island.railSub", keywords: "running rail panel sidebar 右侧 运行中 面板"),
-        .init(id: "isl.stack", section: .islandAndMenuBar, rowID: "island.stack", titleKey: "settings.island.stack", subtitleKey: "settings.island.stackSub", keywords: "session stack rows running 展开 会话 列表"),
-        .init(id: "isl.maxrows", section: .islandAndMenuBar, rowID: "island.maxRows", titleKey: "settings.island.maxRows", subtitleKey: "settings.island.maxRowsSub", keywords: "max rows fold count 最多 行数 折叠"),
-        .init(id: "isl.quota", section: .islandAndMenuBar, rowID: "island.quota", titleKey: "settings.island.quota", subtitleKey: "settings.island.quotaSub", keywords: "quota remaining group stack 显示 额度 分组"),
-        .init(id: "isl.motion", section: .islandAndMenuBar, rowID: "island.motion", titleKey: "settings.island.motion", subtitleKey: "settings.island.motionSub", keywords: "animation arcade lively calm still rpg game 动画 小游戏 灵动 柔和 静止"),
+        .init(id: "app.rail", section: .appearance, rowID: "appearance.rail", titleKey: "settings.island.rail", subtitleKey: "settings.island.railSub", keywords: "running rail panel sidebar layout 右侧 运行中 面板 布局"),
+        .init(id: "isl.motion", section: .islandAndMenuBar, rowID: "island.motion", titleKey: "settings.island.motion", subtitleKey: "settings.island.motionSub", keywords: "animation motion lively calm still frame rate 动画 动效 灵动 柔和 静止"),
         .init(id: "isl.menubar", section: .islandAndMenuBar, rowID: "menubar.enabled", titleKey: "settings.menubar.show", subtitleKey: "settings.menubar.showSub", keywords: "menu bar status icon vial 菜单栏 状态栏 图标 文字"),
 
         // Usage & Sync
         .init(id: "use.sources", section: .usageAndSync, rowID: "usage.sources", titleKey: "settings.usage.sources", subtitleKey: "settings.usage.sourcesSub", keywords: "provider usage quota source order claude codex antigravity 数据来源 额度 排序"),
-        .init(id: "use.alerts", section: .usageAndSync, rowID: "usage.lowAlert", titleKey: "settings.usage.lowAlert", subtitleKey: "settings.usage.lowAlertSub", keywords: "low alert threshold quota privacy money 额度 预警 阈值 隐藏金额 隐私"),
+        .init(id: "use.privacy", section: .usageAndSync, rowID: "usage.privacy", titleKey: "settings.usage.privacy", subtitleKey: "settings.usage.privacySub", keywords: "privacy money hide amounts 隐藏金额 隐私"),
+        .init(id: "notif.lowquota", section: .notifications, rowID: "notifications.lowQuota", titleKey: "settings.usage.lowAlert", subtitleKey: "settings.notifications.lowQuotaSub", keywords: "low quota alert threshold subtle badge pop 额度 预警 阈值 轻提醒 角标 弹出"),
         .init(id: "use.sync", section: .usageAndSync, rowID: "usage.sync", titleKey: "settings.usage.sync", subtitleKey: "settings.usage.syncSub", keywords: "sarto cloud usage quota sync multi mac encrypted 多设备 多机 同步 用量 额度 加密"),
         .init(id: "use.hostlogs", section: .usageAndSync, rowID: "usage.fromComputer", titleKey: "settings.usage.fromComputer", subtitleKey: "settings.usage.fromComputerSub", keywords: "host local logs usage summary 读取 本地 日志"),
 

@@ -57,6 +57,15 @@ public enum PrismPalette: String, CaseIterable, Identifiable, Codable, Sendable 
         isDark ? .dark : .light
     }
 
+    /// The dark palette of the same family, for surfaces that stay dark in every palette (the
+    /// Dynamic Island): Crystal's is Obsidian, Alabaster's is Warm, and a dark palette is its own.
+    public var darkCounterpart: PrismPalette {
+        switch self {
+        case .obsidian, .crystal: return .obsidian
+        case .warm, .alabaster: return .warm
+        }
+    }
+
     /// Exact opaque stage background RGB matching `PrismTokens.resolved(palette:).background`
     /// so the full-stage Metal backdrop can render with `isOpaque = true` (zero WindowServer alpha blend).
     public var backgroundRGB: SIMD3<Float> {
@@ -293,6 +302,10 @@ public struct PrismTokens: Sendable {
     // 6-level heatmap crystal ramp (0..5)
     public let heatColors: [Color]
 
+    /// The Dynamic Island's hardware-black set, dark in every palette, with this palette's accent
+    /// made legible on black.
+    public let island: PrismIslandTokens
+
     // Concentric micro-bevel radii (R_outer = R_inner + d)
     public var rMicro: CGFloat { 2 }
     public var rXS: CGFloat { max(2, radiusBase - 2) }
@@ -406,7 +419,8 @@ public struct PrismTokens: Sendable {
                     Color(hex: 0x4378CF),
                     Color(hex: 0x6C7EE1),
                     Color(hex: 0x9B72CB),
-                ]
+                ],
+                island: .resolved(palette: palette, accent: accent)
             )
 
         case .warm:
@@ -461,7 +475,8 @@ public struct PrismTokens: Sendable {
                     Color(hex: 0xB55D3E),
                     Color(hex: 0xD97757),
                     Color(hex: 0xF2B84B),
-                ]
+                ],
+                island: .resolved(palette: palette, accent: accent)
             )
 
         case .crystal:
@@ -516,7 +531,8 @@ public struct PrismTokens: Sendable {
                     Color(hex: 0x5893F5),
                     Color(hex: 0x366CE8),
                     Color(hex: 0x6D48E5),
-                ]
+                ],
+                island: .resolved(palette: palette, accent: accent)
             )
 
         case .alabaster:
@@ -571,7 +587,8 @@ public struct PrismTokens: Sendable {
                     Color(hex: 0xD98260),
                     Color(hex: 0xC96442),
                     Color(hex: 0xA8472A),
-                ]
+                ],
+                island: .resolved(palette: palette, accent: accent)
             )
         }
     }

@@ -4,9 +4,11 @@
 
 import { spawn, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { lstat, mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, readdir, readFile, realpath, stat, writeFile } from 'node:fs/promises'
+import os from 'node:os'
 import path from 'node:path'
 import vm from 'node:vm'
+import type { Platform } from '@shared/platform'
 import {
   REMOTE_CLAUDE_MAX_MCP_BODY_BYTES,
   REMOTE_CLAUDE_MAX_OUTPUT_CHARS,
@@ -16,7 +18,9 @@ import {
 import type { Patch, ToolEntry } from '@shared/thread'
 import { unsafeCommand, type Shell } from '../command-safety'
 import type { PermissionAnswer, PermissionRequest } from '../connection'
+import { protectedRelativePrefixes } from '../files'
 import { t } from '../i18n'
+import { pathKey } from '../paths'
 import { defaultShell } from '../shell-env'
 import { runGlobInWorker } from './glob-worker'
 import type { WorkspaceMapper } from './workspace'
@@ -36,7 +40,16 @@ const MAX_BG_SHELLS = 8
 const MAX_BG_BUFFER_CHARS = 256 * 1024
 /** How long a stopped command's processes get to end before they are killed. */
 const KILL_GRACE_MS = 3_000
-const SKIP_DIRS = new Set(['.git', 'node_modules', '.next', 'dist', 'out'])
+const SKIP_DIRS = new Set(['.git', 'node_modules', '.next', 'dist', 'out', '.Trash'])
+const DARWIN_PACKAGE_SUFFIXES = [
+  '.photoslibrary',
+  '.photolibrary',
+  '.musiclibrary',
+  '.tvlibrary',
+  '.aplibrary',
+  '.fcpbundle',
+  '.app',
+] as const
 
 interface BackgroundShell {
   id: string
@@ -50,6 +63,8 @@ interface BackgroundShell {
 export interface LocalExecMcpDeps {
   mapper: WorkspaceMapper | (() => WorkspaceMapper)
   hostName: string
+  /** Optional home directory override used to skip OS-protected directories such as `~/Library`. */
+  homeDir?: string
   /** Current local permission mode (`default`, `acceptEdits`, `auto`, `plan`, `dontAsk`, `bypassPermissions`). */
   permissionMode(): string
   /** Asks the local user to approve an action on this computer. */
@@ -208,6 +223,17 @@ function requestId(body: string): unknown {
   } catch {
     return null
   }
+}
+
+/** Answers a call for a run this computer has no executor for, so the model host stops waiting. */
+export function runNotOpenAnswer(call: RemoteClaudeMcpCall): RemoteClaudeMcpAnswer {
+  return jsonRpcError(
+    call.runId,
+    call.callId,
+    requestId(call.body),
+    -32000,
+    'The run is not open on the local computer.',
+  )
 }
 
 /** Stops a command and every process it started, killing what is left after a grace period. */
@@ -609,12 +635,24 @@ export class LocalExecMcp {
       return toolText(`Permission denied searching ${base}`, true)
     }
     const regex = globToRegExp(pattern.replaceAll('\\', '/'))
+    const platform = process.platform as Platform
+    const rawHome = this.deps.homeDir ?? os.homedir()
+    const [realBase, realHome] = await Promise.all([
+      realpath(base).catch(() => base),
+      realpath(rawHome).catch(() => rawHome),
+    ])
+    const protectedPaths = protectedRelativePrefixes(realBase, platform, realHome).map((rel) =>
+      path.join(base, ...rel.split('/')),
+    )
     const localMatches = await runGlobInWorker({
       base,
       patternSource: regex.source,
       maxResults: MAX_GLOB_RESULTS,
       maxWalk: MAX_WALK_FILES,
       skipDirs: [...SKIP_DIRS],
+      protectedPaths,
+      skipPackageSuffixes: platform === 'darwin' ? [...DARWIN_PACKAGE_SUFFIXES] : [],
+      caseInsensitive: platform === 'darwin' || platform === 'win32',
     })
     const matches = localMatches.map((abs) => this.mapper.toRemoteText(abs))
     return toolText(matches.length > 0 ? matches.join('\n') : 'No files matched.')
@@ -688,16 +726,42 @@ export class LocalExecMcp {
       if (rootInfo.isFile()) {
         await scanFile(target, path.basename(target))
       } else {
+        const platform = process.platform as Platform
+        const rawHome = this.deps.homeDir ?? os.homedir()
+        const [realTarget, realHome] = await Promise.all([
+          realpath(target).catch(() => target),
+          realpath(rawHome).catch(() => rawHome),
+        ])
+        const ci = platform === 'darwin' || platform === 'win32'
+        const protectedSet = new Set(
+          protectedRelativePrefixes(realTarget, platform, realHome).map((rel) => {
+            const full = pathKey(path.join(target, ...rel.split('/')), platform)
+            return ci ? full.toLowerCase() : full
+          }),
+        )
+        const isDarwin = platform === 'darwin'
+        const isSkippedDir = (name: string, abs: string): boolean => {
+          if (SKIP_DIRS.has(name)) return true
+          if (isDarwin) {
+            const lower = name.toLowerCase()
+            if (DARWIN_PACKAGE_SUFFIXES.some((suffix) => lower.endsWith(suffix))) return true
+          }
+          if (protectedSet.size > 0) {
+            const key = pathKey(abs, platform)
+            if (protectedSet.has(ci ? key.toLowerCase() : key)) return true
+          }
+          return false
+        }
         const walk = async (dir: string, prefix: string): Promise<void> => {
           if (results.length >= MAX_GREP_RESULTS || visited >= MAX_WALK_FILES) return
           const entries = await readdir(dir, { withFileTypes: true }).catch(() => [])
           for (const entry of entries) {
             if (results.length >= MAX_GREP_RESULTS || visited >= MAX_WALK_FILES) return
-            if (entry.isDirectory() && SKIP_DIRS.has(entry.name)) continue
             if (entry.isSymbolicLink()) continue
+            const abs = path.join(dir, entry.name)
+            if (entry.isDirectory() && isSkippedDir(entry.name, abs)) continue
             visited += 1
             const rel = prefix ? `${prefix}/${entry.name}` : entry.name
-            const abs = path.join(dir, entry.name)
             if (entry.isDirectory()) await walk(abs, rel)
             else await scanFile(abs, rel)
           }

@@ -52,6 +52,12 @@ pnpm package:mac
 # Fast local Debug-configuration test package (reuses .cache/sarto-package/)
 node apps/apple/scripts/package-mac.mjs --channel dev --debug --skip-helpers
 
+# Recommended local self-test package for /Applications/Sarto.app (Developer ID signed, no notarization)
+# Keeps Keychain/TCC grants stable across rebuilds and enables SartoUpdateMode=install;
+# use --channel dev to stay off auto-update prompts, or --channel beta to test beta updates.
+SARTO_SIGN_IDENTITY="Developer ID Application: <Your Name> (<TeamID>)" \
+  node apps/apple/scripts/package-mac.mjs --channel dev
+
 # Package a beta test build with independent app & daemon base versions (pass --clean for a fresh DerivedData)
 node apps/apple/scripts/package-mac.mjs \
   --version 0.4.0 \

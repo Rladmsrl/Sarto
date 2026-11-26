@@ -123,9 +123,6 @@ struct MenuBarPanelActions {
     let openMainWindow: (String?) -> Void
     let openSettings: (PrismSettingsSection?) -> Void
     let toggleIsland: () -> Void
-    let setPinned: (Bool) -> Void
-    let previewPop: () -> Void
-    let previewApproval: () -> Void
     let refresh: () -> Void
     let close: () -> Void
     let quit: () -> Void
@@ -142,7 +139,6 @@ struct MenuBarPanelRootView: View {
     var islandModel: PrismIslandModel
     @ObservedObject var usageStore: PrismUsageStore
     @ObservedObject var settingsStore: UsageSettingsStore
-    @ObservedObject var launch: PrismLaunchAtLogin
     @ObservedObject var router: MenuBarPanelRouter
     @ObservedObject var panel: MenuBarPanelState
     let actions: MenuBarPanelActions

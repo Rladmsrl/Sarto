@@ -20,6 +20,7 @@ import {
 } from '@shared/report'
 import type { SettingsFile } from '@shared/settings'
 import type { BuildChannel, DaemonOrigin } from '../core/build-info'
+import { computerName } from '../core/system-name'
 import type { CloudAccount } from './cloud-account'
 import type { HostName, HostStatus } from './control'
 import type { Hosts } from './hosts'
@@ -173,7 +174,7 @@ export async function submitShelvedReport(
   const title = firstLineTitle(description)
   const version = shelved.clientMeta?.version?.trim() || options.version
   const platform = shelved.clientMeta?.platform?.trim() || defaultPlatformLabel()
-  const deviceName = options.settings.remote.name?.trim() || os.hostname()
+  const deviceName = options.settings.remote.name?.trim() || (await computerName())
 
   try {
     const submitted = await options.cloud.submitReport({

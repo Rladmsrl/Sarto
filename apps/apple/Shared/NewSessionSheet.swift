@@ -121,8 +121,6 @@ public struct NewSessionSheet: View {
                 selectedProjectPath = activeProject
             } else if let firstProject = state.projects.first?.path, !firstProject.isEmpty {
                 selectedProjectPath = firstProject
-            } else if selectedProjectPath.isEmpty {
-                selectedProjectPath = SartoState.defaultWorkspacePath
             }
         }
         #if os(macOS)

@@ -17,8 +17,10 @@ struct ExpeditionWindowView: View {
     var appState: SartoState
     var store: GameStore
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dismissWindow) private var dismissWindow
     @State private var tab: SectionTab = .loadout
+    /// The window is on screen; the arena animates and the daemon follows the battle only then.
+    @State private var onScreen = false
     @State private var selectedCards: Set<String> = []
     @State private var targetedSchool: String = "review"
 
@@ -39,8 +41,18 @@ struct ExpeditionWindowView: View {
         .environment(\.prismTokens, tokens)
         .environment(\.prismL10n, l10n)
         .environment(\.locale, appState.language.resolvedLocale)
-        .onAppear { store.setSurfaceVisible(true) }
-        .onDisappear { store.setSurfaceVisible(false) }
+        .background(GameSurfaceProbe(store: store, requiresActiveApp: false, onScreen: $onScreen))
+        .onChange(of: store.status.map(\.optedIn), initial: true) { _, optedIn in
+            // Nothing of the game stays on screen once it is off on this Mac.
+            if optedIn == false { dismissWindow(id: "expedition") }
+        }
+    }
+
+    private var emptySubtitle: String {
+        guard let status = store.status, status.lastErrorCode != nil || status.lastError != nil else {
+            return l10n.tr("game.empty.subtitle")
+        }
+        return l10n.tr(GameStore.linkErrorKey(status.lastErrorCode))
     }
 
     private var emptyView: some View {
@@ -51,7 +63,7 @@ struct ExpeditionWindowView: View {
             Text(l10n.tr("game.empty.title"))
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(tokens.foreground)
-            Text(store.status?.lastError ?? l10n.tr("game.empty.subtitle"))
+            Text(emptySubtitle)
                 .font(.system(size: 12.5))
                 .foregroundStyle(tokens.secondaryForeground)
                 .multilineTextAlignment(.center)
@@ -122,7 +134,7 @@ struct ExpeditionWindowView: View {
                     }
                 }
                 .frame(width: 96, height: 6)
-                Text("XP \(state.xp)/\(state.xpNext)")
+                Text(l10n.tr("game.xp.progress", "\(state.xp)", "\(state.xpNext)"))
                     .font(.system(size: 10.5, design: .monospaced))
                     .foregroundStyle(tokens.mutedForeground)
                     .monospacedDigit()
@@ -168,11 +180,11 @@ struct ExpeditionWindowView: View {
         .background(Capsule().fill(tokens.surface2))
     }
 
-    private func errorBanner(_ text: String) -> some View {
+    private func errorBanner(_ error: String) -> some View {
         HStack(spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(tokens.danger)
-            Text(text)
+            Text(l10n.tr(GameStore.commandErrorKey(error)))
                 .font(.system(size: 12))
                 .foregroundStyle(tokens.foreground)
             Spacer()
@@ -205,74 +217,31 @@ struct ExpeditionWindowView: View {
                     .foregroundStyle(tokens.secondaryForeground)
             }
 
-            arenaCanvas(state)
-                .frame(height: 132)
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .strokeBorder(tokens.borderEtched, lineWidth: 1)
-                )
-
-            // Ultimate Bar + Boss Challenge Controls
-            HStack(spacing: 10) {
-                Text("Ship it!")
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(tokens.prismAmber)
-
-                GeometryReader { geo in
-                    let pct = min(1, max(0, CGFloat(store.liveUlt) / CGFloat(max(1, state.ultMax))))
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(tokens.surface3)
-                        Capsule()
-                            .fill(store.liveUlt >= state.ultMax ? tokens.prismAmber : tokens.prismCobalt)
-                            .frame(width: geo.size.width * pct)
-                    }
-                }
-                .frame(width: 120, height: 7)
-
-                Text("\(store.liveUlt)/\(state.ultMax)")
-                    .font(.system(size: 10.5, design: .monospaced))
-                    .foregroundStyle(tokens.mutedForeground)
-                    .monospacedDigit()
-
-                Toggle(isOn: Binding(
-                    get: { state.ultManual },
-                    set: { manual in Task { await store.send("setUltMode", args: ["manual": .bool(manual)]) } }
-                )) {
-                    Text(l10n.tr("game.ult.manual"))
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(tokens.secondaryForeground)
-                }
-                .toggleStyle(.checkbox)
-                .disabled(store.busy)
-
-                actionButton(
-                    title: "Ship it!",
-                    prominent: store.liveUlt >= state.ultMax && store.fightingEliteOrBoss,
-                    disabled: store.busy || store.liveUlt < state.ultMax || !store.fightingEliteOrBoss
-                ) {
-                    Task { await store.send("castUlt") }
-                }
-
-                Spacer()
-
-                actionButton(
-                    title: state.boss != nil
+            ExpeditionLiveArena(
+                store: store,
+                weapon: state.mainWeapon,
+                controls: ExpeditionUltRow(
+                    store: store,
+                    ult: 0,
+                    ultMax: state.ultMax,
+                    manual: state.ultManual,
+                    canCast: store.fightingEliteOrBoss,
+                    busy: store.busy,
+                    bossTitle: state.boss != nil
                         ? l10n.tr("game.boss.inProgress")
                         : l10n.tr("game.boss.challenge", "\(state.chapter)", "\(state.stageRequired)"),
-                    prominent: state.bossReady && state.boss == nil,
-                    disabled: store.busy || !state.bossReady || state.boss != nil
-                ) {
-                    Task { await store.send("challengeBoss") }
-                }
-            }
+                    bossProminent: state.bossReady && state.boss == nil,
+                    bossDisabled: !state.bossReady || state.boss != nil
+                ),
+                paused: !onScreen
+            )
 
             // Stage Track (1..10)
             HStack(spacing: 4) {
                 ForEach(1...10, id: \.self) { idx in
                     let done = idx < state.stage
                     let current = idx == state.stage
-                    Text(idx == 10 ? "Boss" : (idx == 5 ? "\(state.chapter)-5★" : "\(state.chapter)-\(idx)"))
+                    Text(idx == 10 ? l10n.tr("game.stage.boss") : (idx == 5 ? "\(state.chapter)-5★" : "\(state.chapter)-\(idx)"))
                         .font(.system(size: 10, weight: current ? .bold : .medium, design: .monospaced))
                         .foregroundStyle(current ? tokens.onPrimary : (done ? tokens.success : tokens.mutedForeground))
                         .frame(maxWidth: .infinity)
@@ -295,36 +264,6 @@ struct ExpeditionWindowView: View {
         .padding(14)
         .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(tokens.surface1))
         .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(tokens.borderEtched, lineWidth: 1))
-    }
-
-    @ViewBuilder
-    private func arenaCanvas(_ state: GameStateInfo) -> some View {
-        let fps = PrismEnergyPolicy.capped(
-            PrismEnergyPolicy.framesPerSecond(
-                for: .streaming,
-                surface: .fullWindow,
-                displayMaxFPS: 60,
-                conditions: PrismEnergyMonitor.shared.conditions
-            ),
-            requestedFPS: 30
-        )
-        let still = reduceMotion || fps <= 0
-        TimelineView(.animation(minimumInterval: 1.0 / Double(max(1, still ? 4 : fps)), paused: false)) { timeline in
-            Canvas(rendersAsynchronously: false) { context, size in
-                GameArenaRenderer.draw(
-                    context: &context,
-                    size: size,
-                    display: store.frame(at: timeline.date),
-                    weaponHarness: state.mainWeapon,
-                    tokens: tokens,
-                    l10n: l10n,
-                    now: timeline.date,
-                    still: still,
-                    compact: false
-                )
-            }
-        }
-        .background(tokens.surface2)
     }
 
     private func bossAdviceBox(_ result: GameBossResultInfo) -> some View {
@@ -668,8 +607,8 @@ struct ExpeditionWindowView: View {
 
     private func policyMenu(_ state: GameStateInfo) -> some View {
         let current = state.policyKind == "recommended"
-            ? "recommended"
-            : "\(state.policyKind):\(state.policyValue ?? "review")"
+            ? l10n.tr("game.policy.recommended")
+            : "\(l10n.tr("game.policy.prefer")) \(schoolName(state.policyValue ?? "review"))"
         return Menu {
             Button(l10n.tr("game.policy.recommended")) {
                 Task { await store.send("setPolicy", args: ["policy": .object(["kind": .string("recommended")])]) }
@@ -684,7 +623,7 @@ struct ExpeditionWindowView: View {
                 }
             }
         } label: {
-            Text("\(l10n.tr("game.policy.label")): \(current == "recommended" ? l10n.tr("game.policy.recommended") : current)")
+            Text("\(l10n.tr("game.policy.label")): \(current)")
                 .font(.system(size: 11))
                 .foregroundStyle(tokens.secondaryForeground)
         }
@@ -800,7 +739,7 @@ struct ExpeditionWindowView: View {
                             .font(.system(size: 12, design: .monospaced))
                             .foregroundStyle(tokens.foreground)
                     } else if let boss = run.boss {
-                        Text("Boss: \(boss.hp)/\(boss.maxHp)")
+                        Text(l10n.tr("game.hack.bossHp", "\(boss.hp)", "\(boss.maxHp)"))
                             .font(.system(size: 12, design: .monospaced))
                             .foregroundStyle(tokens.danger)
                     }
@@ -937,7 +876,7 @@ struct ExpeditionWindowView: View {
                         HStack(spacing: 10) {
                             let (_, color) = GameArenaRenderer.visual(for: w.harness, tokens: tokens)
                             Circle().fill(color).frame(width: 8, height: 8)
-                            Text("\(w.harness) · Lv.\(w.level)")
+                            Text(l10n.tr("game.weapons.level", w.harness, "\(w.level)"))
                                 .font(.system(size: 12, weight: .semibold, design: .monospaced))
                                 .foregroundStyle(tokens.foreground)
                             Text(l10n.tr("game.weapons.minutes", "\(w.minutes)", "\(w.todayMinutes)"))
@@ -1050,7 +989,7 @@ struct ExpeditionWindowView: View {
                             .foregroundStyle(tokens.prismAmber)
                     }
                 }
-                Text("\(schoolName(perk.school)) · \(perk.rarity)")
+                Text("\(schoolName(perk.school)) · \(l10n.lookup("game.rarity.\(perk.rarity)") ?? perk.rarity)")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(schoolColor(perk.school))
                 Text(perk.desc)
@@ -1080,24 +1019,7 @@ struct ExpeditionWindowView: View {
         disabled: Bool,
         action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
-            Text(title)
-                .font(.system(size: 11.5, weight: .semibold))
-                .foregroundStyle(prominent ? tokens.onPrimary : tokens.foreground)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(prominent ? tokens.primary : tokens.surface2)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .strokeBorder(prominent ? Color.clear : tokens.border, lineWidth: 0.8)
-                )
-        }
-        .buttonStyle(.plain)
-        .disabled(disabled)
-        .opacity(disabled ? 0.45 : 1)
+        GameActionButton(title: title, prominent: prominent, disabled: disabled, action: action)
     }
 
     private func stageHeaderTitle(_ state: GameStateInfo) -> String {
@@ -1142,6 +1064,178 @@ struct ExpeditionWindowView: View {
         case "active": tokens.success
         case "inactive": tokens.warning
         default: tokens.mutedForeground
+        }
+    }
+}
+
+private struct GameActionButton: View {
+    @Environment(\.prismTokens) private var tokens
+
+    let title: String
+    let prominent: Bool
+    let disabled: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 11.5, weight: .semibold))
+                .foregroundStyle(prominent ? tokens.onPrimary : tokens.foreground)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(prominent ? tokens.primary : tokens.surface2)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .strokeBorder(prominent ? Color.clear : tokens.border, lineWidth: 0.8)
+                )
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        .opacity(disabled ? 0.45 : 1)
+    }
+}
+
+/// The parts of the arena that change with every hit: the battle canvas and the ultimate's gauge.
+/// They redraw on their own timeline, so a hit leaves the rest of the window alone.
+private struct ExpeditionLiveArena: View {
+    @Environment(\.prismTokens) private var tokens
+    @Environment(\.prismL10n) private var l10n
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    let store: GameStore
+    let weapon: String?
+    /// The gauge's row; its charge comes from the battle as it plays.
+    let controls: ExpeditionUltRow
+    let paused: Bool
+
+    var body: some View {
+        let fps = PrismEnergyPolicy.capped(
+            PrismEnergyPolicy.framesPerSecond(
+                for: .streaming,
+                surface: .fullWindow,
+                displayMaxFPS: 60,
+                conditions: PrismEnergyMonitor.shared.conditions
+            ),
+            requestedFPS: 30
+        )
+        let still = reduceMotion || fps <= 0
+        TimelineView(.animation(minimumInterval: 1.0 / Double(max(1, still ? 4 : fps)), paused: paused)) { timeline in
+            let display = store.frame(at: timeline.date)
+            VStack(alignment: .leading, spacing: 10) {
+                Canvas(rendersAsynchronously: false) { context, size in
+                    GameArenaRenderer.draw(
+                        context: &context,
+                        size: size,
+                        display: display,
+                        weaponHarness: weapon,
+                        tokens: tokens,
+                        l10n: l10n,
+                        now: timeline.date,
+                        still: still,
+                        compact: false
+                    )
+                }
+                .background(tokens.surface2)
+                .frame(height: 132)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(tokens.borderEtched, lineWidth: 1)
+                )
+
+                controls.charged(display.ult ?? 0).equatable()
+            }
+        }
+    }
+}
+
+/// The ultimate's gauge with the manual switch, the cast and the Boss challenge. Equal inputs skip
+/// its body, so the arena's frames re-render it only when the charge or a control changes.
+private struct ExpeditionUltRow: View, Equatable {
+    @Environment(\.prismTokens) private var tokens
+    @Environment(\.prismL10n) private var l10n
+
+    let store: GameStore
+    let ult: Int
+    let ultMax: Int
+    let manual: Bool
+    let canCast: Bool
+    let busy: Bool
+    let bossTitle: String
+    let bossProminent: Bool
+    let bossDisabled: Bool
+
+    func charged(_ value: Int) -> ExpeditionUltRow {
+        ExpeditionUltRow(
+            store: store,
+            ult: value,
+            ultMax: ultMax,
+            manual: manual,
+            canCast: canCast,
+            busy: busy,
+            bossTitle: bossTitle,
+            bossProminent: bossProminent,
+            bossDisabled: bossDisabled
+        )
+    }
+
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.store === rhs.store && lhs.ult == rhs.ult && lhs.ultMax == rhs.ultMax
+            && lhs.manual == rhs.manual && lhs.canCast == rhs.canCast && lhs.busy == rhs.busy
+            && lhs.bossTitle == rhs.bossTitle && lhs.bossProminent == rhs.bossProminent
+            && lhs.bossDisabled == rhs.bossDisabled
+    }
+
+    var body: some View {
+        let full = ult >= ultMax
+        HStack(spacing: 10) {
+            Text(l10n.tr("game.ult.name"))
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundStyle(tokens.prismAmber)
+
+            GeometryReader { geo in
+                let pct = min(1, max(0, CGFloat(ult) / CGFloat(max(1, ultMax))))
+                ZStack(alignment: .leading) {
+                    Capsule().fill(tokens.surface3)
+                    Capsule()
+                        .fill(full ? tokens.prismAmber : tokens.prismCobalt)
+                        .frame(width: geo.size.width * pct)
+                }
+            }
+            .frame(width: 120, height: 7)
+
+            Text("\(ult)/\(ultMax)")
+                .font(.system(size: 10.5, design: .monospaced))
+                .foregroundStyle(tokens.mutedForeground)
+                .monospacedDigit()
+
+            Toggle(isOn: Binding(
+                get: { manual },
+                set: { next in Task { await store.send("setUltMode", args: ["manual": .bool(next)]) } }
+            )) {
+                Text(l10n.tr("game.ult.manual"))
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(tokens.secondaryForeground)
+            }
+            .toggleStyle(.checkbox)
+            .disabled(busy)
+
+            GameActionButton(
+                title: l10n.tr("game.ult.name"),
+                prominent: full && canCast,
+                disabled: busy || !full || !canCast
+            ) {
+                Task { await store.send("castUlt") }
+            }
+
+            Spacer()
+
+            GameActionButton(title: bossTitle, prominent: bossProminent, disabled: busy || bossDisabled) {
+                Task { await store.send("challengeBoss") }
+            }
         }
     }
 }

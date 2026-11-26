@@ -35,6 +35,7 @@ struct PrismSettingsWindowView: View {
         .preferredColorScheme(state.palette.colorScheme)
         .environment(\.prismTokens, tokens)
         .environment(\.prismL10n, l10n)
+        .environment(\.prismMotionTier, state.motionTier)
         .environment(\.locale, state.language.resolvedLocale)
         .onAppear {
             island.launchAtLogin.refresh()

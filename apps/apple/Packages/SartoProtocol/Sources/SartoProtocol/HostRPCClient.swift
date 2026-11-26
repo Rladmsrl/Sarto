@@ -2972,6 +2972,16 @@ public actor SartoHostSession {
         _ = try await request("game.watch", params: .object(["watching": .bool(watching)]), as: JSONValue.self)
     }
 
+    /// Turns the idle game on or off for this Mac; the daemon answers with the link's new status.
+    public func daemonGameSetEnabled(_ enabled: Bool) async throws -> GameLinkStatusInfo {
+        let raw = try await request(
+            "game.setEnabled",
+            params: .object(["enabled": .bool(enabled)]),
+            as: JSONValue.self
+        )
+        return GameLinkStatusInfo(raw.objectValue ?? [:])
+    }
+
     /// Sends a player command to the idle game service through the daemon.
     public func daemonGameCommand(type: String, args: [String: JSONValue] = [:]) async throws -> GameCommandOutcome {
         let raw = try await request(

@@ -9,6 +9,9 @@ export interface GlobWorkerParams {
   maxResults: number
   maxWalk: number
   skipDirs: readonly string[]
+  protectedPaths?: readonly string[]
+  skipPackageSuffixes?: readonly string[]
+  caseInsensitive?: boolean
 }
 
 type WorkerRequest = { id: number } & GlobWorkerParams
@@ -28,8 +31,26 @@ const { parentPort } = require('node:worker_threads');
 async function walkGlob(req) {
   const regex = new RegExp(req.patternSource);
   const skip = new Set(req.skipDirs);
+  const ci = req.caseInsensitive === true;
+  const protectedSet = new Set((req.protectedPaths || []).map((p) => (ci ? p.toLowerCase() : p)));
+  const suffixes = req.skipPackageSuffixes || [];
   const matches = [];
   let visited = 0;
+
+  function isSkippedDir(name, abs) {
+    if (skip.has(name)) return true;
+    if (suffixes.length > 0) {
+      const lower = name.toLowerCase();
+      for (const s of suffixes) {
+        if (lower.endsWith(s)) return true;
+      }
+    }
+    if (protectedSet.size > 0) {
+      const key = ci ? abs.toLowerCase() : abs;
+      if (protectedSet.has(key)) return true;
+    }
+    return false;
+  }
 
   async function walk(dir, prefix) {
     if (matches.length >= req.maxResults || visited >= req.maxWalk) return;
@@ -37,10 +58,10 @@ async function walkGlob(req) {
     for (const entry of entries) {
       if (matches.length >= req.maxResults || visited >= req.maxWalk) return;
       if (entry.isSymbolicLink()) continue;
-      if (entry.isDirectory() && skip.has(entry.name)) continue;
+      const abs = path.join(dir, entry.name);
+      if (entry.isDirectory() && isSkippedDir(entry.name, abs)) continue;
       visited += 1;
       const rel = prefix ? prefix + '/' + entry.name : entry.name;
-      const abs = path.join(dir, entry.name);
       if (entry.isDirectory()) {
         await walk(abs, rel);
       } else if (regex.test(rel)) {

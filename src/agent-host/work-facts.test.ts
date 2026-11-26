@@ -41,11 +41,17 @@ describe('WorkFactTracker for the game', () => {
     const tracker = new WorkFactTracker(c, 'boot')
     const start = c.wall()
     tracker.observe(summary({}))
-    tracker.observe(summary({ status: 'running', turnStartedAt: start, phase: 'edit' }))
+    expect(
+      tracker.observe(summary({ status: 'running', turnStartedAt: start, phase: 'edit' })),
+    ).toEqual([])
     c.advance(10_000)
-    tracker.observe(summary({ status: 'awaiting_permission', turnStartedAt: start }))
+    expect(
+      tracker.observe(summary({ status: 'awaiting_permission', turnStartedAt: start })),
+    ).toEqual([])
     c.advance(5_000)
-    tracker.observe(summary({ status: 'running', turnStartedAt: start, phase: 'thinking' }))
+    expect(
+      tracker.observe(summary({ status: 'running', turnStartedAt: start, phase: 'thinking' })),
+    ).toEqual([])
     c.advance(3_000)
     tracker.noteUsage('s1', [
       {
@@ -61,6 +67,7 @@ describe('WorkFactTracker for the game', () => {
         lastTurn: { reason: 'end_turn', endedAt: end } as never,
       }),
     )
+    expect(kinds(facts)).toEqual(['turn.completed'])
     const turn = facts.find((f) => f.kind === 'turn.completed')
     expect(turn).toMatchObject({
       kind: 'turn.completed',

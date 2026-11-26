@@ -5,26 +5,55 @@ import Foundation
 
 /// The daemon's link to the game service.
 public struct GameLinkStatusInfo: Sendable, Equatable {
+    /// A game service is configured for this Mac.
+    public var available: Bool
+    /// The owner turned the game on for this Mac.
+    public var optedIn: Bool
+    /// Available, turned on and signed in: the game shows and this Mac's facts go to the service.
     public var enabled: Bool
     public var server: String?
     public var connected: Bool
     public var queued: Int
+    /// The daemon's own words, for diagnostics; the app shows `lastErrorCode` in its own.
     public var lastError: String?
+    /// `needs_tokens`, `unreachable` or `rejected`.
+    public var lastErrorCode: String?
+    /// The file that records every batch this Mac sent.
+    public var uploadLog: String?
 
-    public init(enabled: Bool, server: String?, connected: Bool, queued: Int, lastError: String?) {
+    public init(
+        available: Bool = false,
+        optedIn: Bool = false,
+        enabled: Bool,
+        server: String?,
+        connected: Bool,
+        queued: Int,
+        lastError: String?,
+        lastErrorCode: String? = nil,
+        uploadLog: String? = nil
+    ) {
+        self.available = available
+        self.optedIn = optedIn
         self.enabled = enabled
         self.server = server
         self.connected = connected
         self.queued = queued
         self.lastError = lastError
+        self.lastErrorCode = lastErrorCode
+        self.uploadLog = uploadLog
     }
 
     init(_ obj: [String: JSONValue]) {
+        // A daemon from before the switch sends no `optedIn`; its game stays hidden.
+        available = obj["available"]?.boolValue ?? false
+        optedIn = obj["optedIn"]?.boolValue ?? false
         enabled = obj["enabled"]?.boolValue ?? false
         server = obj["server"]?.stringValue
         connected = obj["connected"]?.boolValue ?? false
         queued = Int(obj["queued"]?.doubleValue ?? 0)
         lastError = obj["lastError"]?.stringValue
+        lastErrorCode = obj["lastErrorCode"]?.stringValue
+        uploadLog = obj["uploadLog"]?.stringValue
     }
 }
 
@@ -315,10 +344,23 @@ public struct GameHackathonInfo: Sendable, Equatable {
     }
 }
 
+/// A reading of the game clock. Every frame carries a new one, so it takes no part in equality:
+/// two states that differ only in it are the same state.
+@propertyWrapper
+public struct GameClockReading: Sendable, Equatable {
+    public var wrappedValue: Double
+
+    public init(wrappedValue: Double) {
+        self.wrappedValue = wrappedValue
+    }
+
+    public static func == (_: Self, _: Self) -> Bool { true }
+}
+
 /// The game state the app draws and acts upon.
 public struct GameStateInfo: Sendable, Equatable {
     public var revision: Int
-    public var serverNow: Double
+    @GameClockReading public var serverNow: Double = 0
     public var heroName: String
     public var version: String
     public var level: Int

@@ -19,6 +19,7 @@ import {
   unlink,
   type FileHandle,
 } from 'node:fs/promises'
+import os from 'node:os'
 import path from 'node:path'
 import {
   FILE_LIST_LIMIT,
@@ -53,6 +54,8 @@ export interface FilesLimits {
   folders: number
   /** Entries read on disk to find empty folders among the ones git names untracked. */
   folderScan: number
+  /** Directories read on disk during a non-git walk, bounding I/O and queue memory. */
+  walkDirs: number
 }
 
 const DEFAULT_LIMITS: FilesLimits = {
@@ -64,6 +67,7 @@ const DEFAULT_LIMITS: FilesLimits = {
   depth: 20,
   folders: 5_000,
   folderScan: 20_000,
+  walkDirs: 10_000,
 }
 
 const GIT_MAX_BUFFER = 64 * 1024 * 1024
@@ -71,6 +75,123 @@ const GIT_MAX_BUFFER = 64 * 1024 * 1024
 const BINARY_PROBE_BYTES = 8_000
 const SCAN_BATCH = 16
 const SKIPPED_DIRECTORIES: ReadonlySet<string> = new Set(['.git', 'node_modules'])
+// macOS privacy-protected and bundle directories that cause TCC storms or huge scans if walked.
+const DARWIN_HOME_PROTECTED = ['Library', '.Trash'] as const
+const DARWIN_LIBRARY_PROTECTED = [
+  'Application Support',
+  'Biomes',
+  'Caches',
+  'Calendars',
+  'Containers',
+  'Cookies',
+  'Group Containers',
+  'Logs',
+  'Mail',
+  'Messages',
+  'Metadata',
+  'PersonalizationPortrait',
+  'Safari',
+  'Saved Application State',
+] as const
+const DARWIN_SYSTEM_PROTECTED = [
+  '/System',
+  '/Library',
+  '/Volumes',
+  '/dev',
+  '/private',
+  '/Network',
+  '/cores',
+] as const
+const LINUX_SYSTEM_PROTECTED = ['/proc', '/sys', '/dev', '/run'] as const
+const DARWIN_SKIPPED_PACKAGE_SUFFIXES = [
+  '.photoslibrary',
+  '.photolibrary',
+  '.musiclibrary',
+  '.tvlibrary',
+  '.aplibrary',
+  '.fcpbundle',
+  '.app',
+] as const
+
+/**
+ * True when `root` is the filesystem root, the user's home directory, or an ancestor of it
+ * (such as `/Users` or `/`), where recursive watching or unbounded walks scan unrelated trees.
+ */
+export function isBroadRoot(root: string, platform: Platform, homeDir?: string): boolean {
+  const api = platform === 'win32' ? path.win32 : path.posix
+  const resolved = api.resolve(root)
+  if (api.dirname(resolved) === resolved) return true
+  if (!homeDir) return false
+  const rootKey = pathKey(resolved, platform)
+  const homeKey = pathKey(api.resolve(homeDir), platform)
+  if (rootKey === homeKey) return true
+  const prefix = rootKey.endsWith(api.sep) ? rootKey : rootKey + api.sep
+  return homeKey.startsWith(prefix)
+}
+
+/**
+ * Canonical keys of OS-protected or Sarto-owned directories that fall strictly inside `root`,
+ * so walking `$HOME` skips `~/Library` while explicitly opening a project inside iCloud Drive
+ * (`~/Library/Mobile Documents/...`) still works.
+ */
+export function protectedKeysUnderRoot(
+  root: string,
+  platform: Platform,
+  homeDir?: string,
+  extraPaths: readonly string[] = [],
+): string[] {
+  const api = platform === 'win32' ? path.win32 : path.posix
+  const resolvedRoot = api.resolve(root)
+  const rootKey = pathKey(resolvedRoot, platform)
+  const rootPrefix = rootKey.endsWith(api.sep) ? rootKey : rootKey + api.sep
+  const candidates: string[] = [...extraPaths]
+  if (platform === 'darwin') {
+    candidates.push(...DARWIN_SYSTEM_PROTECTED)
+    if (homeDir) {
+      const home = api.resolve(homeDir)
+      for (const name of DARWIN_HOME_PROTECTED) candidates.push(api.join(home, name))
+      for (const name of DARWIN_LIBRARY_PROTECTED) {
+        candidates.push(api.join(home, 'Library', name))
+      }
+    }
+  } else if (platform === 'linux') {
+    candidates.push(...LINUX_SYSTEM_PROTECTED)
+  } else if (platform === 'win32' && homeDir) {
+    candidates.push(api.join(api.resolve(homeDir), 'AppData'))
+  }
+  const unique = new Set<string>()
+  for (const candidate of candidates) {
+    const key = pathKey(api.resolve(candidate), platform)
+    if (key.startsWith(rootPrefix)) unique.add(key)
+  }
+  return [...unique]
+}
+
+/**
+ * Protected directories under `root` expressed as `/`-separated relative paths, for matching
+ * watcher event paths.
+ */
+export function protectedRelativePrefixes(
+  root: string,
+  platform: Platform,
+  homeDir?: string,
+  extraPaths: readonly string[] = [],
+): string[] {
+  const api = platform === 'win32' ? path.win32 : path.posix
+  const resolvedRoot = api.resolve(root)
+  const rootKey = pathKey(resolvedRoot, platform)
+  const rootPrefix = rootKey.endsWith(api.sep) ? rootKey : rootKey + api.sep
+  const keys = protectedKeysUnderRoot(resolvedRoot, platform, homeDir, extraPaths)
+  return keys
+    .map((key) => key.slice(rootPrefix.length).split(api.sep).filter(Boolean).join('/'))
+    .filter((rel) => rel !== '')
+}
+
+function isProtectedDarwinPackage(name: string): boolean {
+  const lower = name.toLowerCase()
+  return DARWIN_SKIPPED_PACKAGE_SUFFIXES.some((suffix) => lower.endsWith(suffix))
+}
+
 const EMPTY_SEARCH: FileSearch = { matches: [], truncated: false }
 // Copies named after a taken name: `name copy.ext`, then `name copy 2.ext` and on.
 const COPY_NAMES = 1_000
@@ -81,6 +202,10 @@ export interface FilesServiceDeps {
   /** Runs git; it must give git the agent environment. */
   exec: Exec
   platform: Platform
+  /** User home directory used to avoid walking OS-protected folders like `~/Library`. */
+  homeDir?: string
+  /** Extra absolute paths (such as Sarto's own data folder) never descended into when walking. */
+  ignorePaths?: readonly string[]
   /** A grant on the media scheme for a file at its real path, or null when it is no media or document. */
   media(real: string, info: Stats): Promise<MediaGrant | null>
   /** The same file described as media or a document for a paired device, granting nothing. */
@@ -219,14 +344,34 @@ type MakeAt = (at: string) => Promise<void>
 export class FilesService {
   private readonly limits: FilesLimits
   private readonly paths: path.PlatformPath
+  private readonly homeDir: string | undefined
+  private readonly ignorePaths: readonly string[]
+  private readonly inFlightLists = new Map<string, Promise<FileList>>()
 
   constructor(private readonly deps: FilesServiceDeps) {
     this.limits = { ...DEFAULT_LIMITS, ...deps.limits }
     this.paths = deps.platform === 'win32' ? path.win32 : path.posix
+    this.homeDir = deps.homeDir ?? os.homedir()
+    this.ignorePaths = deps.ignorePaths ?? []
   }
 
-  /** The files under `root`, relative and sorted. `root` is a canonical project path. */
-  async list(root: string): Promise<FileList> {
+  /**
+   * The files under `root`, relative and sorted. `root` is a canonical project path.
+   * Concurrent calls for the same `root` share one in-flight scan so rapid watcher bursts
+   * never pile up parallel directory walks.
+   */
+  list(root: string): Promise<FileList> {
+    const key = pathKey(root, this.deps.platform)
+    const existing = this.inFlightLists.get(key)
+    if (existing) return existing
+    const run = this.listOnce(root).finally(() => {
+      if (this.inFlightLists.get(key) === run) this.inFlightLists.delete(key)
+    })
+    this.inFlightLists.set(key, run)
+    return run
+  }
+
+  private async listOnce(root: string): Promise<FileList> {
     const [listed, deleted, untracked, excluded] = await Promise.all([
       this.git(root, ['ls-files', '-z', '--cached', '--others', '--exclude-standard']),
       this.git(root, ['ls-files', '-z', '--deleted']),
@@ -339,6 +484,9 @@ export class FilesService {
    */
   private async emptyFolders(root: string, candidates: string[]): Promise<string[]> {
     const found: string[] = []
+    const protectedKeys = new Set(
+      protectedKeysUnderRoot(root, this.deps.platform, this.homeDir, this.ignorePaths),
+    )
     let budget = this.limits.folderScan
     const full = () => budget <= 0 || found.length >= this.limits.folders
     const scan = async (folder: string, depth: number): Promise<void> => {
@@ -356,8 +504,12 @@ export class FilesService {
       if (depth >= this.limits.depth || entries.some((entry) => entry.name === '.git')) return
       for (const entry of entries) {
         if (full()) return
-        if (entry.isDirectory() && !SKIPPED_DIRECTORIES.has(entry.name)) {
-          await scan(`${folder}/${entry.name}`, depth + 1)
+        const child = `${folder}/${entry.name}`
+        if (
+          entry.isDirectory() &&
+          !this.shouldSkipDirectory(root, child, entry.name, protectedKeys)
+        ) {
+          await scan(child, depth + 1)
         }
       }
     }
@@ -781,19 +933,41 @@ export class FilesService {
     })
   }
 
+  private shouldSkipDirectory(
+    root: string,
+    relative: string,
+    name: string,
+    protectedKeys: ReadonlySet<string>,
+  ): boolean {
+    if (SKIPPED_DIRECTORIES.has(name)) return true
+    if (this.deps.platform === 'darwin') {
+      if (name === '.Trash' || isProtectedDarwinPackage(name)) return true
+    }
+    if (protectedKeys.size === 0) return false
+    const key = pathKey(this.paths.join(root, relative), this.deps.platform)
+    return protectedKeys.has(key)
+  }
+
   /** Breadth-first, so a cut at the limit keeps the shallow files. */
   private async walk(root: string, limit: number): Promise<FileList> {
     const paths: string[] = []
     const folders: string[] = []
+    const protectedKeys = new Set(
+      protectedKeysUnderRoot(root, this.deps.platform, this.homeDir, this.ignorePaths),
+    )
     const result = (truncated: boolean): FileList => ({
       paths: sortedUnique(paths),
       folders: sortedUnique(folders),
       truncated,
     })
     let level = ['']
+    let dirsScanned = 0
+    let truncated = false
     for (let depth = 0; level.length > 0 && depth <= this.limits.depth; depth++) {
       const next: string[] = []
       for (const directory of level) {
+        if (dirsScanned >= this.limits.walkDirs) return result(true)
+        dirsScanned += 1
         let entries
         try {
           entries = await readdir(this.paths.join(root, directory), { withFileTypes: true })
@@ -808,7 +982,12 @@ export class FilesService {
         for (const entry of entries) {
           const relative = directory === '' ? entry.name : `${directory}/${entry.name}`
           if (entry.isDirectory()) {
-            if (!SKIPPED_DIRECTORIES.has(entry.name)) next.push(relative)
+            if (this.shouldSkipDirectory(root, relative, entry.name, protectedKeys)) continue
+            if (dirsScanned + next.length >= this.limits.walkDirs) {
+              truncated = true
+              continue
+            }
+            next.push(relative)
             continue
           }
           // A symbolic link to a folder is not followed; one to a file is a file.
@@ -821,7 +1000,7 @@ export class FilesService {
       }
       level = next
     }
-    return result(false)
+    return result(truncated || level.length > 0)
   }
 
   private async linksToFile(root: string, relative: string): Promise<boolean> {

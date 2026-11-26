@@ -11,7 +11,7 @@
 // built-ins only, so its bundle is one file.
 
 import { spawn, type ChildProcess } from 'node:child_process'
-import { statSync } from 'node:fs'
+import { stat } from 'node:fs/promises'
 import path from 'node:path'
 import { createInterface } from 'node:readline'
 
@@ -140,9 +140,9 @@ function folderOf(params: unknown): string | null {
   return typeof cwd === 'string' && path.isAbsolute(cwd) ? cwd : null
 }
 
-function isFolder(file: string): boolean {
+async function isFolder(file: string): Promise<boolean> {
   try {
-    return statSync(file).isDirectory()
+    return (await stat(file)).isDirectory()
   } catch {
     return false
   }
@@ -532,7 +532,7 @@ export class SessionRouter {
     if (this.folderPerSession) {
       const folder = folderOf(params)
       // A missing folder fails the request; spawning in it would end every session as a crash.
-      if (folder === null || !isFolder(folder)) {
+      if (folder === null || !(await isFolder(folder))) {
         throw new RouterError(`The session's folder ${folder ?? '(none)'} does not exist`, {
           reason: 'folder_missing',
           ...(folder === null ? {} : { folder }),

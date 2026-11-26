@@ -47,7 +47,7 @@ import { HostError } from '../errors'
 import { t } from '../i18n'
 import type { MapperEffect } from '../session-updates'
 import type { LogFn } from '../storage'
-import { LocalExecMcp } from './executor'
+import { LocalExecMcp, runNotOpenAnswer } from './executor'
 import { createWorkspaceMapper, normalizeHostedPatches, type WorkspaceMapper } from './workspace'
 
 const STATUS_TIMEOUT_MS = 5_000
@@ -334,6 +334,8 @@ export class RemoteClaudeConnection implements AgentConnection {
   private readonly targets = new Map<string, SessionTarget>()
   private readonly runsBySession = new Map<string, ActiveLocalRun>()
   private readonly runsByRunId = new Map<string, ActiveLocalRun>()
+  /** Executors of runs still opening, which Claude Code there connects to before they are open. */
+  private readonly openingExecs = new Map<string, LocalExecMcp>()
   private readonly unsubEvent: () => void
   private readonly unsubClose: () => void
 
@@ -615,11 +617,40 @@ export class RemoteClaudeConnection implements AgentConnection {
       ...(hidden ? { hidden: true } : {}),
     }
 
-    const opened = await this.openRun({
-      ...openTemplate,
-      runId,
-      ...(resumeSessionId ? { resumeSessionId } : {}),
+    const localEnv = (await this.env?.()) ?? process.env
+    let currentRun: ActiveLocalRun | null = null
+    // Made before the run opens: until then it answers the MCP handshake, which needs no mapping,
+    // and refuses tools, which need the run's workspace.
+    const exec = new LocalExecMcp({
+      mapper: () => {
+        if (!currentRun) throw new Error('The run is still opening.')
+        return currentRun.mapper
+      },
+      env: () => currentRun?.env ?? localEnv,
+      hostName: this.hostName,
+      permissionMode: () => currentRun?.localMode ?? 'default',
+      requestPermission: (request, signal) => {
+        const target = currentRun ? this.targets.get(currentRun.acpSessionId) : undefined
+        if (!target) return Promise.resolve('cancelled')
+        return target.requestPermission(request, signal)
+      },
+      apply: (patches) => {
+        if (!currentRun) return
+        this.targets.get(currentRun.acpSessionId)?.apply({ patches, effects: [] })
+      },
+      sartoMcp: () => (sartoMcp ? { url: sartoMcp.url, token: sartoMcp.token } : null),
     })
+
+    let opened: RemoteClaudeOpenResult
+    try {
+      opened = await this.openRun(
+        { ...openTemplate, runId, ...(resumeSessionId ? { resumeSessionId } : {}) },
+        exec,
+      )
+    } catch (error) {
+      exec.close()
+      throw error
+    }
 
     const mapper = createWorkspaceMapper({
       localRoot: cwd,
@@ -634,27 +665,8 @@ export class RemoteClaudeConnection implements AgentConnection {
       existing.exec.close()
     }
 
-    const localEnv = (await this.env?.()) ?? process.env
     const localMode =
       existing?.localMode ?? this.targets.get(opened.acpSessionId)?.startMode() ?? 'default'
-    let currentRun: ActiveLocalRun | null = null
-    const exec = new LocalExecMcp({
-      mapper: () => currentRun?.mapper ?? mapper,
-      env: () => currentRun?.env ?? localEnv,
-      hostName: this.hostName,
-      permissionMode: () => currentRun?.localMode ?? localMode,
-      requestPermission: (request, signal) => {
-        const sessionId = currentRun?.acpSessionId ?? opened.acpSessionId
-        const target = this.targets.get(sessionId)
-        if (!target) return Promise.resolve('cancelled')
-        return target.requestPermission(request, signal)
-      },
-      apply: (patches) => {
-        const sessionId = currentRun?.acpSessionId ?? opened.acpSessionId
-        this.targets.get(sessionId)?.apply({ patches, effects: [] })
-      },
-      sartoMcp: () => (sartoMcp ? { url: sartoMcp.url, token: sartoMcp.token } : null),
-    })
     const run: ActiveLocalRun = {
       runId,
       acpSessionId: opened.acpSessionId,
@@ -676,10 +688,17 @@ export class RemoteClaudeConnection implements AgentConnection {
   }
 
   /**
-   * `remoteClaude.open`. A run whose answer never came is closed, since the remote host may still
-   * open it and would hold it, and one of its limited runs, until it went idle.
+   * `remoteClaude.open`. Claude Code on the remote host connects its MCP servers before it answers,
+   * so `exec` takes the run's calls from the start; the caller registers the run as soon as the
+   * answer comes, with no await in between. A run whose answer never came is closed, since the
+   * remote host may still open it and would hold it, and one of its limited runs, until it went
+   * idle.
    */
-  private async openRun(params: RemoteClaudeOpenParams): Promise<RemoteClaudeOpenResult> {
+  private async openRun(
+    params: RemoteClaudeOpenParams,
+    exec: LocalExecMcp,
+  ): Promise<RemoteClaudeOpenResult> {
+    this.openingExecs.set(params.runId, exec)
     try {
       return await this.peer.request<RemoteClaudeOpenResult>('remoteClaude.open', params)
     } catch (error) {
@@ -687,6 +706,8 @@ export class RemoteClaudeConnection implements AgentConnection {
         void this.peer.request('remoteClaude.close', { runId: params.runId }).catch(() => {})
       }
       throw toAgentError(error)
+    } finally {
+      this.openingExecs.delete(params.runId)
     }
   }
 
@@ -700,18 +721,22 @@ export class RemoteClaudeConnection implements AgentConnection {
         .filter((option) => option.id !== 'mode' && option.category !== 'mode')
         .map((option) => [option.id, option.value]),
     )
-    const opened = await this.openRun({
-      ...run.openTemplate,
-      snapshotFiles,
-      runId: newRunId,
-      resumeSessionId: run.acpSessionId,
-      ...(Object.keys(options).length > 0 ? { options } : {}),
-    })
+    const env = (await this.env?.()) ?? run.env
+    const opened = await this.openRun(
+      {
+        ...run.openTemplate,
+        snapshotFiles,
+        runId: newRunId,
+        resumeSessionId: run.acpSessionId,
+        ...(Object.keys(options).length > 0 ? { options } : {}),
+      },
+      run.exec,
+    )
     this.runsByRunId.delete(run.runId)
     run.runId = newRunId
     run.reclaimed = false
     run.config = opened.config
-    run.env = (await this.env?.()) ?? run.env
+    run.env = env
     run.mapper = createWorkspaceMapper({
       localRoot: run.localCwd,
       remoteRoot: opened.virtualRoot,
@@ -752,9 +777,9 @@ export class RemoteClaudeConnection implements AgentConnection {
   }
 
   private async onMcpCall(call: RemoteClaudeMcpCall): Promise<void> {
-    const run = this.runsByRunId.get(call.runId)
-    if (!run) return
-    const answer = await run.exec.handle(call)
+    const exec = this.runsByRunId.get(call.runId)?.exec ?? this.openingExecs.get(call.runId)
+    if (!exec) this.log('warn', `${this.hostName} made an MCP call for a run that is not open`)
+    const answer = exec ? await exec.handle(call) : runNotOpenAnswer(call)
     if (this.peer.isClosed) return
     await this.peer.request('remoteClaude.mcpAnswer', answer).catch((error: unknown) => {
       this.log('warn', `Could not send MCP answer to ${this.hostName}: ${(error as Error).message}`)

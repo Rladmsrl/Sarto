@@ -9,7 +9,6 @@ struct RunningSessionsRail: View {
     @Environment(\.prismL10n) private var l10n
 
     var model: PrismIslandModel
-    var rpgStore: AgentRPGStore
     var gameStore: GameStore? = nil
     let collapsed: Bool
     let selectedSessionID: String?
@@ -18,14 +17,6 @@ struct RunningSessionsRail: View {
 
     static let expandedWidth: CGFloat = 300
     static let collapsedWidth: CGFloat = 46
-
-    private var rpgEnabled: Bool {
-        model.stackOptions.motion.enablesIdleGame
-    }
-
-    private var zh: Bool {
-        l10n.tr("rail.title") != "Running"
-    }
 
     /// Sessions the rail lists: at work, waiting on the user, or with work still running in
     /// the background after their turn ended.
@@ -81,27 +72,6 @@ struct RunningSessionsRail: View {
                     .foregroundStyle(tokens.prismCobalt)
                     .contentTransition(.numericText())
                 Spacer(minLength: 4)
-                if rpgEnabled {
-                    let cmd = rpgStore.commander
-                    HStack(spacing: 4) {
-                        Image(systemName: "sparkles")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(tokens.prismCobalt)
-                        Text("Sarto Lv.\(cmd.level)")
-                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(tokens.secondaryForeground)
-                            .monospacedDigit()
-                    }
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2.5)
-                    .background(Capsule().fill(tokens.prismCobalt.opacity(0.11)))
-                    .overlay(Capsule().strokeBorder(tokens.prismCobalt.opacity(0.24), lineWidth: 0.7))
-                    .help(
-                        zh
-                            ? "Sarto 指挥官 Lv.\(cmd.level) · 全员攻击 +\((cmd.level - 1) * 2)% · 已指挥击破 \(cmd.totalTodosCommanded) 个 Todo"
-                            : "Sarto Commander Lv.\(cmd.level) · Squad ATK +\((cmd.level - 1) * 2)% · \(cmd.totalTodosCommanded) Todos commanded"
-                    )
-                }
                 RailIconButton(systemName: "sidebar.right", help: l10n.tr("rail.collapse"), action: onToggleCollapsed)
             }
             .padding(.horizontal, 14)
@@ -117,7 +87,6 @@ struct RunningSessionsRail: View {
                     ForEach(groups, id: \.agent.id) { group in
                         RailAgentGroup(
                             model: model,
-                            rpgStore: rpgStore,
                             agent: group.agent,
                             rows: group.rows,
                             selectedSessionID: selectedSessionID,
@@ -138,8 +107,8 @@ struct RunningSessionsRail: View {
                         .foregroundStyle(tokens.foreground)
                 }
                 Spacer(minLength: 4)
-                if model.snapshot.summary.today > 0 {
-                    Text(l10n.tr("rail.today", model.snapshot.summary.today))
+                if model.summary.today > 0 {
+                    Text(l10n.tr("rail.today", model.summary.today))
                         .foregroundStyle(tokens.mutedForeground)
                 }
             }
@@ -190,25 +159,15 @@ struct RunningSessionsRail: View {
 /// An agent's mark and name, what is left of its plan, then its sessions.
 private struct RailAgentGroup: View {
     @Environment(\.prismTokens) private var tokens
-    @Environment(\.prismL10n) private var l10n
 
     var model: PrismIslandModel
-    var rpgStore: AgentRPGStore
     let agent: IslandAgentIdentity
     let rows: [IslandRowItem]
     let selectedSessionID: String?
     let onSelect: (String) -> Void
 
-    @State private var showCharacterSheet = false
-    @State private var badgeHovered = false
-
-    private var zh: Bool {
-        l10n.tr("rail.title") != "Running"
-    }
-
     var body: some View {
-        let windows = model.stackQuota(for: agent)
-        let rpgEnabled = model.stackOptions.motion.enablesIdleGame
+        let windows = model.quotaWindows(for: agent)
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 7) {
                 IslandMarkView(agent: agent, size: 14)
@@ -216,61 +175,6 @@ private struct RailAgentGroup: View {
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(tokens.secondaryForeground)
                     .lineLimit(1)
-                if rpgEnabled {
-                    let prof = rpgStore.profile(for: agent)
-                    let stats = prof.computeStats(commander: rpgStore.commander)
-                    let tierColor = prof.rankTier.accentColor
-                    let leveledUp = rpgStore.didRecentlyLevelUp(agent.id)
-                    let buffed = rpgStore.isCommanderBuffActive(for: agent.id)
-                    Button {
-                        showCharacterSheet.toggle()
-                    } label: {
-                        VStack(spacing: 1.5) {
-                            HStack(spacing: 3) {
-                                if buffed {
-                                    Image(systemName: "bolt.fill")
-                                        .font(.system(size: 8, weight: .bold))
-                                        .foregroundStyle(Color(hex: 0xFBBF24))
-                                }
-                                Text(leveledUp ? "LV UP!" : "Lv.\(prof.level)")
-                                    .font(.system(size: 9.5, weight: .bold, design: .monospaced))
-                                    .foregroundStyle(leveledUp ? Color(hex: 0x34D399) : tierColor)
-                                    .monospacedDigit()
-                            }
-                            GeometryReader { geo in
-                                ZStack(alignment: .leading) {
-                                    Capsule().fill(tierColor.opacity(0.20))
-                                    Capsule()
-                                        .fill(leveledUp ? Color(hex: 0x34D399) : tierColor)
-                                        .frame(width: max(2, geo.size.width * prof.levelProgress))
-                                }
-                            }
-                            .frame(height: 2)
-                        }
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2.5)
-                        .frame(minWidth: 42)
-                        .background(
-                            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .fill((leveledUp ? Color(hex: 0x34D399) : tierColor).opacity(badgeHovered ? 0.20 : 0.12))
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .strokeBorder((leveledUp ? Color(hex: 0x34D399) : tierColor).opacity(badgeHovered ? 0.65 : 0.35), lineWidth: 0.8)
-                        )
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .onHover { badgeHovered = $0 }
-                    .help(
-                        zh
-                            ? "\(prof.rankTier.title(zh: true)) · 战力 \(stats.powerScore) · DPS \(stats.estimatedDPS) · 点击打开角色属性、武器与装备"
-                            : "\(prof.rankTier.title(zh: false)) · PWR \(stats.powerScore) · DPS \(stats.estimatedDPS) · Click for RPG sheet"
-                    )
-                    .popover(isPresented: $showCharacterSheet, arrowEdge: .leading) {
-                        AgentRPGCharacterPopover(store: rpgStore, agent: agent)
-                    }
-                }
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 4)
@@ -288,7 +192,6 @@ private struct RailAgentGroup: View {
             ForEach(rows) { row in
                 RailSessionCard(
                     model: model,
-                    rpgStore: rpgStore,
                     row: row,
                     selected: row.sessionId == selectedSessionID,
                     onSelect: onSelect
@@ -335,7 +238,6 @@ private struct RailSessionCard: View {
     @Environment(\.prismL10n) private var l10n
 
     var model: PrismIslandModel
-    var rpgStore: AgentRPGStore
     let row: IslandRowItem
     let selected: Bool
     let onSelect: (String) -> Void
@@ -349,7 +251,6 @@ private struct RailSessionCard: View {
             if let plan = row.plan {
                 RailTodoBattleCard(
                     model: model,
-                    rpgStore: rpgStore,
                     row: row,
                     plan: plan,
                     selected: selected,
@@ -429,7 +330,6 @@ private struct RailTodoBattleCard: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var model: PrismIslandModel
-    var rpgStore: AgentRPGStore
     let row: IslandRowItem
     let plan: IslandPlanSnapshot
     let selected: Bool
@@ -541,8 +441,7 @@ private struct RailTodoBattleCard: View {
                 .animation(.spring(response: 0.35, dampingFraction: 0.88), value: progress)
 
                 // Battle arena: pixel Sarto + Agent duo on left, firing toward the active Todo node
-                let motion = model.stackOptions.motion
-                let loadout = rpgStore.loadout(for: row.agent, enabled: motion.enablesIdleGame)
+                let motion = model.effectiveMotion
                 ZStack(alignment: .topLeading) {
                     RailTodoBattleCanvas(
                         agent: row.agent,
@@ -555,8 +454,7 @@ private struct RailTodoBattleCard: View {
                         waiting: waiting,
                         paused: model.suspended,
                         reduceMotion: reduceMotion || !model.animatesStrikes,
-                        motion: motion,
-                        loadout: loadout
+                        motion: motion
                     )
                     .frame(height: arenaHeight)
 
@@ -692,7 +590,6 @@ private struct RailTodoBattleCanvas: View {
     let paused: Bool
     let reduceMotion: Bool
     let motion: IslandMotionStyle
-    let loadout: AgentBattleLoadout
 
     @State private var sim = RailTodoBattleSimulation()
 
@@ -746,10 +643,6 @@ private struct RailTodoBattleCanvas: View {
                     guard size.width > 90, size.height > 16 else { return }
                     let activeID = activeIndex.flatMap { steps.indices.contains($0) ? steps[$0].id : nil }
                     let targetY = rowCenterY(activeIndex ?? 0)
-                    let nextRowY: CGFloat? = {
-                        guard let idx = activeIndex, idx + 1 < steps.count else { return nil }
-                        return rowCenterY(idx + 1)
-                    }()
                     let rowYByID = Dictionary(
                         steps.enumerated().map { ($0.element.id, rowCenterY($0.offset)) },
                         uniquingKeysWith: { first, _ in first }
@@ -759,7 +652,6 @@ private struct RailTodoBattleCanvas: View {
                     sim.step(
                         timestamp: timeline.date.timeIntervalSinceReferenceDate,
                         targetY: targetY,
-                        nextRowY: nextRowY,
                         stepCount: steps.count,
                         activeStepID: activeID,
                         doneCount: doneCount,
@@ -772,8 +664,7 @@ private struct RailTodoBattleCanvas: View {
                         phase: phase,
                         waiting: waiting,
                         intensity: normalizedIntensity,
-                        calmMode: motion == .calm,
-                        loadout: loadout
+                        calmMode: motion == .calm
                     )
 
                     drawBattle(
@@ -803,8 +694,7 @@ private struct RailTodoBattleCanvas: View {
                 agentFlash: 0,
                 hopY: 0,
                 missing: [],
-                palette: palette,
-                elapsed: 0
+                palette: palette
             )
             if !waiting && activeIndex != nil {
                 let brand = palette.first ?? IslandTheme.prismCobalt
@@ -833,20 +723,17 @@ private struct RailTodoBattleCanvas: View {
 
         // 1. Subtle runway speed lines (skipped in calm 30fps mode for a quieter feel)
         if !waiting && activeIndex != nil && motion != .calm {
-            let lineColor: Color = (loadout.enabled && loadout.commanderBuffActive)
-                ? Color(hex: 0xFBBF24)
-                : .white
             for line in sim.speedLines {
                 let lx = (Self.agentX + 9) + line.x * (Self.targetX - Self.agentX - 16)
                 let ly = snap(sim.squadY + line.yOffset, step: cell)
                 if ly > 2 && ly < size.height - 2 {
                     let rect = CGRect(x: lx, y: ly, width: line.length, height: 1.0)
-                    context.fill(Path(rect), with: .color(lineColor.opacity(line.alpha)))
+                    context.fill(Path(rect), with: .color(Color.white.opacity(line.alpha)))
                 }
             }
         }
 
-        // 2. Curved pixel shockwaves on Co-Op Finisher & periodic overdrive / Shield Breaker
+        // 2. Curved pixel shockwaves on a cleared Todo and the periodic crit
         for wave in sim.shockwaves {
             let p = CGFloat(wave.age / wave.duration)
             let fade = Double(1.0 - p) * 0.95
@@ -874,44 +761,6 @@ private struct RailTodoBattleCanvas: View {
             }
         }
 
-        // 2b. Piercing rail beams (Orbital Beam weapon & Sarto Prism Combo superbeam)
-        for beam in sim.beams {
-            let p = beam.age / beam.duration
-            let alpha = max(0, 1.0 - p * p)
-            let halfH = beam.thickness * 0.5 * CGFloat(1.0 - p * 0.35)
-            let rect = CGRect(
-                x: beam.startX,
-                y: beam.y - halfH,
-                width: max(4, beam.endX - beam.startX),
-                height: max(1.4, halfH * 2)
-            )
-            if beam.prismatic {
-                let bands: [Color] = [Color(hex: 0x38BDF8), .white, Color(hex: 0xF472B6)]
-                let bandH = rect.height / 3.0
-                for (idx, col) in bands.enumerated() {
-                    let br = CGRect(x: rect.minX, y: rect.minY + CGFloat(idx) * bandH, width: rect.width, height: max(1.1, bandH))
-                    context.fill(Path(br), with: .color(col.opacity(alpha * 0.92)))
-                }
-            } else {
-                context.fill(Path(rect), with: .color(beam.color.opacity(alpha * 0.65)))
-                let core = rect.insetBy(dx: 0, dy: max(0.4, rect.height * 0.28))
-                context.fill(Path(core), with: .color(Color.white.opacity(alpha)))
-            }
-        }
-
-        // 2c. Jagged pixel lightning arcs (Arc Staff weapon & Chain Arc skill)
-        for arc in sim.lightningArcs {
-            let alpha = max(0, 1.0 - arc.age / arc.duration)
-            guard arc.points.count >= 2 else { continue }
-            var path = Path()
-            path.move(to: arc.points[0])
-            for pt in arc.points.dropFirst() {
-                path.addLine(to: pt)
-            }
-            context.stroke(path, with: .color(arc.color.opacity(alpha * 0.9)), lineWidth: 1.8)
-            context.stroke(path, with: .color(Color.white.opacity(alpha * 0.75)), lineWidth: 0.8)
-        }
-
         // 3. Sarto + Agent co-op sprites gliding together along the left track
         let breatheY: CGFloat = waiting ? 0 : CGFloat(sin(sim.elapsed * 5.2)) * 0.8
         let hopY: CGFloat = sim.celebrateHop > 0 ? -CGFloat(sin(sim.celebrateHop * .pi * 2)) * 3.8 : 0
@@ -926,26 +775,11 @@ private struct RailTodoBattleCanvas: View {
             agentFlash: sim.agentFlash,
             hopY: hopY,
             missing: Set(sim.missingPixels.map(\.cellIndex)),
-            palette: palette,
-            elapsed: sim.elapsed
+            palette: palette
         )
 
-        // 4. Co-op buff link pulse, weapon comets, singularity orbs & starfall meteors
+        // 4. Co-op buff link pulses, support lobs and agent strikes
         for shot in sim.shots {
-            if shot.vortex {
-                let spin = sim.elapsed * 14.0
-                for i in 0..<4 {
-                    let a = spin + Double(i) * (.pi * 0.5)
-                    let ox = snap(shot.x + CGFloat(cos(a)) * 2.6, step: 1.0)
-                    let oy = snap(shot.y + CGFloat(sin(a)) * 2.6, step: 1.0)
-                    guard ox >= 6, ox <= Self.targetX + 2, oy > 1, oy < size.height - 2 else { continue }
-                    let c: Color = i % 2 == 0 ? shot.color : Color(hex: 0xA78BFA)
-                    context.fill(Path(CGRect(x: ox, y: oy, width: 1.9, height: 1.9)), with: .color(c.opacity(0.95)))
-                }
-                context.fill(Path(CGRect(x: shot.x - 1, y: shot.y - 1, width: 2.2, height: 2.2)), with: .color(.white))
-                continue
-            }
-
             let speedMag = max(1, hypot(shot.vx, shot.vy))
             let ux = shot.vx / speedMag
             let uy = shot.vy / speedMag
@@ -974,33 +808,6 @@ private struct RailTodoBattleCanvas: View {
             clearFlashes: sim.clearFlashes
         )
 
-        // 5b. Finisher slash & glitch shatter FX around cleared target node
-        for fx in sim.finisherFX {
-            let p = fx.age / fx.duration
-            let alpha = max(0, 1.0 - p)
-            if fx.isGlitch {
-                for row in 0..<5 {
-                    let jitter = CGFloat(((row * 7 + Int(p * 20)) % 5) - 2) * 3.0
-                    let y = fx.y - 6 + CGFloat(row) * 2.8
-                    let col: Color = row % 2 == 0 ? Color(hex: 0x22D3EE) : Color(hex: 0xF472B6)
-                    let rect = CGRect(x: fx.x - 8 + jitter, y: y, width: 12, height: 1.6)
-                    context.fill(Path(rect), with: .color(col.opacity(alpha * 0.9)))
-                }
-            } else {
-                // Prism X-slash across target node
-                let span: CGFloat = 6.5 + CGFloat(p) * 5.0
-                var s1 = Path()
-                s1.move(to: CGPoint(x: fx.x - span, y: fx.y - span))
-                s1.addLine(to: CGPoint(x: fx.x + span, y: fx.y + span))
-                var s2 = Path()
-                s2.move(to: CGPoint(x: fx.x + span, y: fx.y - span))
-                s2.addLine(to: CGPoint(x: fx.x - span, y: fx.y + span))
-                context.stroke(s1, with: .color(Color(hex: 0x38BDF8).opacity(alpha)), lineWidth: 2.0)
-                context.stroke(s2, with: .color(Color(hex: 0xF472B6).opacity(alpha)), lineWidth: 2.0)
-                context.stroke(s1, with: .color(Color.white.opacity(alpha * 0.85)), lineWidth: 0.9)
-            }
-        }
-
         // 6. Rebounding & celebration sparks (always bounded to the left of Todo text!)
         for spark in sim.sparks {
             let ratio = spark.age / spark.life
@@ -1012,23 +819,6 @@ private struct RailTodoBattleCanvas: View {
                 Path(CGRect(x: px, y: py, width: spark.size, height: spark.size)),
                 with: .color(spark.color.opacity(alpha))
             )
-        }
-
-        // 6b. Floating pixel RPG damage & status popups (Arcade tier only, left of Todo text)
-        if loadout.enabled && loadout.showDamageNumbers {
-            for pop in sim.popups {
-                let p = pop.age / pop.life
-                let alpha = p < 0.2 ? (p / 0.2) : max(0, 1.0 - (p - 0.2) / 0.8)
-                let py = pop.y - CGFloat(p) * 11.5
-                guard py > 4 && py < size.height - 3 else { continue }
-                let fontSize: CGFloat = pop.emphasis ? 9.5 : 8.2
-                let resolved = context.resolve(
-                    Text(pop.text)
-                        .font(.system(size: fontSize, weight: pop.emphasis ? .heavy : .bold, design: .monospaced))
-                        .foregroundStyle(pop.color.opacity(alpha))
-                )
-                context.draw(resolved, at: CGPoint(x: min(Self.targetX - 10, max(20, pop.x)), y: py))
-            }
         }
 
         // 7. Waiting-for-user amber pixel "!" pip bobbing above the squad
@@ -1066,20 +856,8 @@ private struct RailTodoBattleCanvas: View {
         agentFlash: Double,
         hopY: CGFloat,
         missing: Set<Int>,
-        palette: [Color],
-        elapsed: Double
+        palette: [Color]
     ) {
-        // Commander Buff golden squad aura (Arcade mode after approval)
-        if loadout.enabled && loadout.commanderBuffActive {
-            let pulse = 0.25 + 0.20 * sin(elapsed * 10.0)
-            let halo = CGRect(x: Self.sartoX - 8, y: squadY - 10 + hopY * 0.5, width: 38, height: 21)
-            context.stroke(
-                Path(roundedRect: halo, cornerRadius: 9),
-                with: .color(Color(hex: 0xFBBF24).opacity(pulse)),
-                lineWidth: 1.2
-            )
-        }
-
         // Back support: Sarto pixel icon (slightly raised & behind Agent like a squad spotter)
         let sartoSprite = IslandPixelSpriteCache.appSprite
         let sn = CGFloat(sartoSprite.gridSize)
@@ -1120,17 +898,6 @@ private struct RailTodoBattleCanvas: View {
         let aScaleY = CGFloat(1.0 + 0.11 * agentKick)
         let agentCenter = CGPoint(x: Self.agentX + aRecoil, y: squadY + 0.8 + hopY)
 
-        if loadout.enabled {
-            AgentPixelArtRenderer.drawAura(
-                context: &context,
-                aura: loadout.aura,
-                center: agentCenter,
-                spriteSize: Self.agentSize,
-                elapsed: elapsed,
-                palette: palette
-            )
-        }
-
         var aCtx = context
         aCtx.translateBy(x: agentCenter.x, y: agentCenter.y)
         aCtx.scaleBy(x: aScaleX, y: aScaleY)
@@ -1146,23 +913,6 @@ private struct RailTodoBattleCanvas: View {
             aCtx.fill(Path(rect), with: .color(cell.color.opacity(alpha)))
             if agentFlash > 0.04 {
                 aCtx.fill(Path(rect), with: .color(Color.white.opacity(0.58 * agentFlash)))
-            }
-        }
-
-        if loadout.enabled {
-            AgentPixelArtRenderer.drawHeadgear(
-                context: &context,
-                headgear: loadout.headgear,
-                center: agentCenter,
-                spriteSize: Self.agentSize,
-                elapsed: elapsed
-            )
-            if loadout.weapon == .bitDrones {
-                AgentPixelArtRenderer.drawBitDrones(
-                    context: &context,
-                    center: agentCenter,
-                    elapsed: elapsed
-                )
             }
         }
     }
@@ -1235,15 +985,14 @@ private struct RailTodoBattleCanvas: View {
     }
 }
 
-/// Real-time Sarto + Agent co-op pixel combat physics against the active Todo step,
-/// supporting 4-tier degradation from full idle RPG (weapons, skills, damage popups) down to calm/static.
+/// Real-time Sarto + Agent co-op pixel combat physics against the active Todo step. The calm
+/// style fires and sparks less; the still style and Reduce Motion draw the static frame instead.
 @MainActor
 private final class RailTodoBattleSimulation {
     enum ShotKind {
         case buff    // Sarto -> Agent support charge pulse
         case support // Sarto -> active Todo arcing shot
-        case strike  // Agent -> active Todo direct weapon projectile
-        case meteor  // Starfall Strike skill meteor from above
+        case strike  // Agent -> active Todo direct projectile
     }
 
     struct Shot {
@@ -1258,9 +1007,6 @@ private final class RailTodoBattleSimulation {
         var color: Color
         var tailLength: Int
         var thick: Bool
-        var vortex: Bool = false
-        var splitsOnHit: Bool = false
-        var isSkill: Bool = false
     }
 
     struct Spark {
@@ -1284,42 +1030,6 @@ private final class RailTodoBattleSimulation {
         var accent: Color
     }
 
-    struct RailBeam {
-        var startX: CGFloat
-        var endX: CGFloat
-        var y: CGFloat
-        var thickness: CGFloat
-        var age: Double
-        var duration: Double
-        var color: Color
-        var prismatic: Bool
-    }
-
-    struct LightningArc {
-        var points: [CGPoint]
-        var age: Double
-        var duration: Double
-        var color: Color
-    }
-
-    struct FinisherVisual {
-        var x: CGFloat
-        var y: CGFloat
-        var age: Double
-        var duration: Double
-        var isGlitch: Bool
-    }
-
-    struct DamagePopup {
-        var text: String
-        var x: CGFloat
-        var y: CGFloat
-        var age: Double
-        var life: Double
-        var color: Color
-        var emphasis: Bool
-    }
-
     struct SpeedLine {
         var x: CGFloat
         var yOffset: CGFloat
@@ -1336,10 +1046,6 @@ private final class RailTodoBattleSimulation {
     private(set) var shots: [Shot] = []
     private(set) var sparks: [Spark] = []
     private(set) var shockwaves: [Shockwave] = []
-    private(set) var beams: [RailBeam] = []
-    private(set) var lightningArcs: [LightningArc] = []
-    private(set) var finisherFX: [FinisherVisual] = []
-    private(set) var popups: [DamagePopup] = []
     private(set) var speedLines: [SpeedLine] = []
     private(set) var missingPixels: [MissingPixel] = []
     private(set) var clearFlashes: [String: Double] = [:]
@@ -1363,15 +1069,10 @@ private final class RailTodoBattleSimulation {
     private var lastActiveStepID: String?
     private var lastDoneCount: Int?
     private var lastCompletedIDs: Set<String> = []
-    private var lastJustLeveledUp: Bool = false
     private var switchHoldTimer: Double = 0
     private var strikeCarry: Double = 0.7
     private var sartoCarry: Double = 0.4
-    private var shieldBreakerCD: Double = 7.0
-    private var chainArcCD: Double = 3.5
-    private var starfallCD: Double = 9.0
     private var shotCounter: Int = 0
-    private var hitCounter: Int = 0
     private var sartoShotCounter: Int = 0
     private var rngState: UInt64 = 0x5A27_070D_0C0B
 
@@ -1406,7 +1107,6 @@ private final class RailTodoBattleSimulation {
     func step(
         timestamp: Double,
         targetY: CGFloat,
-        nextRowY: CGFloat?,
         stepCount: Int,
         activeStepID: String?,
         doneCount: Int,
@@ -1419,8 +1119,7 @@ private final class RailTodoBattleSimulation {
         phase: String?,
         waiting: Bool,
         intensity: Double,
-        calmMode: Bool,
-        loadout: AgentBattleLoadout
+        calmMode: Bool
     ) {
         let dt: Double
         if let prev = lastTimestamp {
@@ -1440,15 +1139,7 @@ private final class RailTodoBattleSimulation {
             lastActiveStepID = activeStepID
             lastDoneCount = doneCount
             lastCompletedIDs = completedIDs
-            lastJustLeveledUp = loadout.justLeveledUp
         }
-
-        // Level-up banner popup rising above the squad in Arcade mode
-        if loadout.enabled && loadout.justLeveledUp && !lastJustLeveledUp {
-            spawnPopup(text: "LV UP!", x: agentX - 4, y: squadY - 10, color: Color(hex: 0xFBBF24), emphasis: true)
-            celebrateHop = max(celebrateHop, 0.85)
-        }
-        lastJustLeveledUp = loadout.justLeveledUp
 
         // Detect expand/collapse vs genuine Todo completion.
         let prevDone = lastDoneCount ?? doneCount
@@ -1460,8 +1151,6 @@ private final class RailTodoBattleSimulation {
             switchHoldTimer = 0
             shots.removeAll(keepingCapacity: true)
             shockwaves.removeAll(keepingCapacity: true)
-            beams.removeAll(keepingCapacity: true)
-            lightningArcs.removeAll(keepingCapacity: true)
         } else if doneCount > prevDone || !newlyCompleted.isEmpty {
             let burstID = (prevID.flatMap { newlyCompleted.contains($0) ? $0 : nil })
                 ?? newlyCompleted.first
@@ -1471,8 +1160,7 @@ private final class RailTodoBattleSimulation {
                 clearedIDs: newlyCompleted.isEmpty ? (prevID.map { [$0] } ?? []) : newlyCompleted,
                 agentX: agentX,
                 targetX: targetX,
-                y: burstY,
-                loadout: loadout
+                y: burstY
             )
             switchHoldTimer = 0.20
             targetCharge = 0
@@ -1512,26 +1200,15 @@ private final class RailTodoBattleSimulation {
 
         let alignedToTarget = abs(squadY - targetY) < 4.5
         let palette = agentSprite.palette.isEmpty ? [IslandTheme.prismCobalt, IslandTheme.prismIris] : agentSprite.palette
-        let cdrFactor = loadout.enabled ? max(0.55, 1.0 - loadout.stats.eco) : 1.0
 
-        // Spawn Co-Op shots & RPG auto-skills while actively running, not waiting, and aligned
+        // Spawn Co-Op shots while actively running, not waiting, and aligned
         if !waiting && activeStepID != nil && switchHoldTimer <= 0 && alignedToTarget {
             let isThinking = (phase == "think" || phase == "thinking")
             let isScanning = (phase == "read" || phase == "search" || phase == "fetch")
             var strikeRate: Double = isThinking
                 ? (1.9 + 1.1 * intensity)
                 : (isScanning ? (3.0 + 1.6 * intensity) : (3.4 + 2.8 * intensity))
-
-            if loadout.enabled {
-                let spdMult = 1.0 + min(0.55, Double(max(0, loadout.stats.spd - 18)) * 0.0045)
-                strikeRate *= spdMult
-                if loadout.commanderBuffActive {
-                    strikeRate *= 1.35
-                }
-                if loadout.unlockedSkills.contains(.overdriveBarrage), intensity > 0.62 || (!isThinking && !isScanning) {
-                    strikeRate *= 1.22
-                }
-            } else if calmMode {
+            if calmMode {
                 strikeRate *= 0.72
             }
 
@@ -1548,14 +1225,12 @@ private final class RailTodoBattleSimulation {
                     palette: palette,
                     isThinking: isThinking,
                     isScanning: isScanning,
-                    intensity: intensity,
-                    loadout: loadout
+                    intensity: intensity
                 )
             }
 
             // Sarto support rhythm
-            let synBonus = loadout.enabled ? (1.0 + min(0.65, Double(loadout.stats.syn) * 0.004)) : 1.0
-            let sartoRate = (1.1 + 1.0 * intensity) * synBonus * (calmMode ? 0.75 : 1.0)
+            let sartoRate = (1.1 + 1.0 * intensity) * (calmMode ? 0.75 : 1.0)
             sartoCarry += sartoRate * dt
             if sartoCarry >= 1.0 {
                 sartoCarry -= 1.0
@@ -1564,92 +1239,8 @@ private final class RailTodoBattleSimulation {
                     agentX: agentX,
                     targetX: targetX,
                     targetY: targetY,
-                    palette: palette,
-                    intensity: intensity,
-                    loadout: loadout
+                    intensity: intensity
                 )
-            }
-
-            // RPG Auto-Skills (Arcade tier only)
-            if loadout.enabled {
-                if loadout.unlockedSkills.contains(.shieldBreaker) {
-                    shieldBreakerCD -= dt
-                    if shieldBreakerCD <= 0 {
-                        shieldBreakerCD = 14.0 * cdrFactor
-                        shockwaves.append(Shockwave(
-                            originX: agentX + 6,
-                            y: targetY,
-                            age: 0,
-                            duration: 0.32,
-                            color: Color(hex: 0xFBBF24),
-                            accent: .white
-                        ))
-                        handleTargetImpact(
-                            hitX: targetX - 5,
-                            hitY: targetY,
-                            color: Color(hex: 0xFBBF24),
-                            agentX: agentX,
-                            palette: palette,
-                            isHeavy: true,
-                            isSkill: true,
-                            loadout: loadout,
-                            calmMode: false
-                        )
-                    }
-                }
-
-                if loadout.unlockedSkills.contains(.chainArc), let nextY = nextRowY {
-                    chainArcCD -= dt
-                    if chainArcCD <= 0 {
-                        chainArcCD = 5.5 * cdrFactor
-                        spawnLightning(
-                            from: CGPoint(x: targetX, y: targetY),
-                            to: CGPoint(x: targetX, y: nextY),
-                            color: Color(hex: 0x38BDF8)
-                        )
-                        for _ in 0..<2 where sparks.count < 48 {
-                            sparks.append(Spark(
-                                x: targetX - 2,
-                                y: nextY,
-                                vx: nextCGFloat(-48, -16),
-                                vy: nextCGFloat(-28, 28),
-                                gravity: 150,
-                                age: 0,
-                                life: 0.22,
-                                color: Color(hex: 0x67E8F9),
-                                size: 1.7
-                            ))
-                        }
-                    }
-                }
-
-                if loadout.unlockedSkills.contains(.starfallStrike) {
-                    starfallCD -= dt
-                    if starfallCD <= 0 {
-                        starfallCD = 16.0 * cdrFactor
-                        for m in 0..<3 where shots.count < 32 {
-                            let sx = targetX - 24 + CGFloat(m) * 8 + nextCGFloat(-2, 2)
-                            let sy: CGFloat = 2
-                            let destX = targetX - 4
-                            let destY = targetY + nextCGFloat(-2, 2)
-                            let flight: CGFloat = 0.22 + CGFloat(m) * 0.05
-                            shots.append(Shot(
-                                kind: .meteor,
-                                x: sx,
-                                y: sy,
-                                vx: (destX - sx) / flight,
-                                vy: (destY - sy) / flight,
-                                gravity: 0,
-                                targetX: destX,
-                                targetY: destY,
-                                color: m == 1 ? .white : Color(hex: 0xFBBF24),
-                                tailLength: 4,
-                                thick: true,
-                                isSkill: true
-                            ))
-                        }
-                    }
-                }
             }
         }
 
@@ -1661,44 +1252,19 @@ private final class RailTodoBattleSimulation {
             shot.x += shot.vx * CGFloat(dt)
             shot.y += shot.vy * CGFloat(dt)
 
-            let hitTarget: Bool = {
-                if shot.kind == .meteor {
-                    return shot.y >= shot.targetY || shot.x >= shot.targetX
-                }
-                return shot.x >= shot.targetX
-            }()
-
-            if hitTarget {
+            if shot.x >= shot.targetX {
                 switch shot.kind {
                 case .buff:
                     agentFlash = max(agentFlash, 0.52)
                     sartoCharge = min(1.0, sartoCharge + 0.18)
-                case .support, .strike, .meteor:
-                    if shot.splitsOnHit {
-                        for k in 0..<3 where sparks.count < 52 {
-                            let angle = -2.4 + Double(k) * 0.65
-                            sparks.append(Spark(
-                                x: shot.targetX - 1,
-                                y: shot.y,
-                                vx: CGFloat(cos(angle)) * 74,
-                                vy: CGFloat(sin(angle)) * 62,
-                                gravity: 130,
-                                age: 0,
-                                life: 0.26,
-                                color: k == 1 ? .white : Color(hex: 0xF472B6),
-                                size: 2.0
-                            ))
-                        }
-                    }
+                case .support, .strike:
                     handleTargetImpact(
                         hitX: shot.targetX,
-                        hitY: shot.kind == .meteor ? shot.targetY : shot.y,
+                        hitY: shot.y,
                         color: shot.color,
                         agentX: agentX,
                         palette: palette,
-                        isHeavy: shot.thick || shot.kind == .support || shot.vortex,
-                        isSkill: shot.isSkill,
-                        loadout: loadout,
+                        isHeavy: shot.thick || shot.kind == .support,
                         calmMode: calmMode
                     )
                 }
@@ -1719,31 +1285,11 @@ private final class RailTodoBattleSimulation {
             return s
         }
 
-        // Advance shockwaves, beams, lightning arcs, finisher FX & damage popups
+        // Advance shockwaves
         shockwaves = shockwaves.compactMap { w in
             var copy = w
             copy.age += dt
             return copy.age < copy.duration ? copy : nil
-        }
-        beams = beams.compactMap { b in
-            var copy = b
-            copy.age += dt
-            return copy.age < copy.duration ? copy : nil
-        }
-        lightningArcs = lightningArcs.compactMap { a in
-            var copy = a
-            copy.age += dt
-            return copy.age < copy.duration ? copy : nil
-        }
-        finisherFX = finisherFX.compactMap { f in
-            var copy = f
-            copy.age += dt
-            return copy.age < copy.duration ? copy : nil
-        }
-        popups = popups.compactMap { p in
-            var copy = p
-            copy.age += dt
-            return copy.age < copy.life ? copy : nil
         }
 
         // Advance runway speed lines
@@ -1786,8 +1332,7 @@ private final class RailTodoBattleSimulation {
         palette: [Color],
         isThinking: Bool,
         isScanning: Bool,
-        intensity: Double,
-        loadout: AgentBattleLoadout
+        intensity: Double
     ) {
         guard shots.count < 32 else { return }
         shotCounter &+= 1
@@ -1808,112 +1353,9 @@ private final class RailTodoBattleSimulation {
             baseColor = palette[shotCounter % palette.count]
         }
 
-        let weapon: AgentWeaponKind = loadout.enabled ? loadout.weapon : .pulseBlaster
         let destX = targetX - 5.5
         let speed = CGFloat(isThinking ? 135 : (175 + 95 * intensity)) * nextCGFloat(0.92, 1.12)
-
-        switch weapon {
-        case .pulseBlaster:
-            spawnLinearShot(fromX: launchX, fromY: squadY + nextCGFloat(-3.0, 3.0), destX: destX, destY: targetY + nextCGFloat(-2.2, 2.2), speed: speed, color: baseColor, tail: isThinking ? 2 : (intensity > 0.65 ? 4 : 3), thick: isThinking || (shotCounter % 6 == 0 && intensity > 0.55))
-
-        case .twinRepeater:
-            let c = Color(hex: 0x38BDF8)
-            spawnLinearShot(fromX: launchX, fromY: squadY - 2.8, destX: destX, destY: targetY - 1.6, speed: speed * 1.12, color: c, tail: 3, thick: false)
-            spawnLinearShot(fromX: launchX, fromY: squadY + 2.8, destX: destX, destY: targetY + 1.6, speed: speed * 1.12, color: baseColor, tail: 3, thick: false)
-
-        case .prismScatter:
-            let offsets: [CGFloat] = [-4.2, 0, 4.2]
-            for (i, off) in offsets.enumerated() {
-                let col: Color = i == 1 ? .white : (i == 0 ? Color(hex: 0x34D399) : baseColor)
-                spawnLinearShot(fromX: launchX, fromY: squadY + off * 0.5, destX: destX, destY: targetY + off * 0.55, speed: speed * 1.05, color: col, tail: 2, thick: false)
-            }
-
-        case .arcStaff:
-            let col = Color(hex: 0x67E8F9)
-            spawnLightning(from: CGPoint(x: launchX, y: squadY), to: CGPoint(x: destX + 1, y: targetY), color: col)
-            handleTargetImpact(
-                hitX: destX,
-                hitY: targetY,
-                color: col,
-                agentX: agentX,
-                palette: palette,
-                isHeavy: shotCounter % 3 == 0,
-                isSkill: false,
-                loadout: loadout,
-                calmMode: false
-            )
-
-        case .bitDrones:
-            spawnLinearShot(fromX: launchX, fromY: squadY, destX: destX, destY: targetY, speed: speed, color: baseColor, tail: 3, thick: false)
-            let droneY = squadY + (shotCounter % 2 == 0 ? -9.0 : 9.0)
-            spawnLinearShot(fromX: agentX + 3, fromY: droneY, destX: destX, destY: targetY, speed: speed * 1.18, color: Color(hex: 0xA78BFA), tail: 3, thick: false)
-
-        case .orbitalBeam:
-            if shotCounter % 3 == 0 {
-                beams.append(RailBeam(
-                    startX: launchX,
-                    endX: targetX - 3,
-                    y: targetY,
-                    thickness: 4.2,
-                    age: 0,
-                    duration: 0.22,
-                    color: Color(hex: 0xFBBF24),
-                    prismatic: false
-                ))
-                handleTargetImpact(
-                    hitX: destX,
-                    hitY: targetY,
-                    color: Color(hex: 0xFBBF24),
-                    agentX: agentX,
-                    palette: palette,
-                    isHeavy: true,
-                    isSkill: false,
-                    loadout: loadout,
-                    calmMode: false
-                )
-            } else {
-                spawnLinearShot(fromX: launchX, fromY: squadY, destX: destX, destY: targetY, speed: speed * 1.15, color: Color(hex: 0xFBBF24), tail: 4, thick: true)
-            }
-
-        case .quantumSplitter:
-            let launchY = squadY + nextCGFloat(-2.5, 2.5)
-            let dx = max(14, destX - launchX)
-            let flight = dx / speed
-            shots.append(Shot(
-                kind: .strike,
-                x: launchX,
-                y: launchY,
-                vx: speed,
-                vy: (targetY - launchY) / max(0.06, flight),
-                gravity: 0,
-                targetX: destX,
-                targetY: targetY,
-                color: Color(hex: 0xF472B6),
-                tailLength: 4,
-                thick: true,
-                splitsOnHit: true
-            ))
-
-        case .singularityCannon:
-            let launchY = squadY
-            let orbSpeed = speed * 0.78
-            let dx = max(14, destX - launchX)
-            let flight = dx / orbSpeed
-            shots.append(Shot(
-                kind: .strike,
-                x: launchX,
-                y: launchY,
-                vx: orbSpeed,
-                vy: (targetY - launchY) / max(0.08, flight),
-                gravity: 0,
-                targetX: destX,
-                targetY: targetY,
-                color: Color(hex: 0xFB7185),
-                tailLength: 3,
-                thick: true,
-                vortex: true
-            ))
-        }
+        spawnLinearShot(fromX: launchX, fromY: squadY + nextCGFloat(-3.0, 3.0), destX: destX, destY: targetY + nextCGFloat(-2.2, 2.2), speed: speed, color: baseColor, tail: isThinking ? 2 : (intensity > 0.65 ? 4 : 3), thick: isThinking || (shotCounter % 6 == 0 && intensity > 0.55))
     }
 
     private func spawnLinearShot(
@@ -1944,63 +1386,16 @@ private final class RailTodoBattleSimulation {
         ))
     }
 
-    private func spawnLightning(from start: CGPoint, to end: CGPoint, color: Color) {
-        var pts: [CGPoint] = [start]
-        let segments = 5
-        for i in 1..<segments {
-            let t = CGFloat(i) / CGFloat(segments)
-            let bx = start.x + (end.x - start.x) * t
-            let by = start.y + (end.y - start.y) * t
-            let perpX: CGFloat = abs(end.y - start.y) > abs(end.x - start.x) ? nextCGFloat(-4.5, 4.5) : 0
-            let perpY: CGFloat = abs(end.x - start.x) >= abs(end.y - start.y) ? nextCGFloat(-4.5, 4.5) : 0
-            pts.append(CGPoint(x: bx + perpX, y: by + perpY))
-        }
-        pts.append(end)
-        lightningArcs.append(LightningArc(points: pts, age: 0, duration: 0.14, color: color))
-    }
-
     private func fireSartoSupport(
         sartoX: CGFloat,
         agentX: CGFloat,
         targetX: CGFloat,
         targetY: CGFloat,
-        palette: [Color],
-        intensity: Double,
-        loadout: AgentBattleLoadout
+        intensity: Double
     ) {
         guard shots.count < 32 else { return }
         sartoShotCounter &+= 1
         sartoKick = 0.85
-
-        // Bond Lv.3+ Sarto Prism Combo superbeam when fully charged!
-        if loadout.enabled && sartoCharge >= 0.95 && loadout.unlockedSkills.contains(.sartoPrismCombo) {
-            sartoCharge = 0.10
-            sartoFlash = 1.0
-            agentFlash = 1.0
-            celebrateHop = max(celebrateHop, 0.55)
-            beams.append(RailBeam(
-                startX: sartoX + 4,
-                endX: targetX - 3,
-                y: targetY,
-                thickness: 6.2,
-                age: 0,
-                duration: 0.30,
-                color: .white,
-                prismatic: true
-            ))
-            handleTargetImpact(
-                hitX: targetX - 5,
-                hitY: targetY,
-                color: Color(hex: 0x38BDF8),
-                agentX: agentX,
-                palette: palette,
-                isHeavy: true,
-                isSkill: true,
-                loadout: loadout,
-                calmMode: false
-            )
-            return
-        }
 
         // Alternate between buffing the Agent and lobbing an arcing co-op bolt over the Agent
         if sartoShotCounter % 3 == 0 || sartoCharge >= 0.95 {
@@ -2058,11 +1453,8 @@ private final class RailTodoBattleSimulation {
         agentX: CGFloat,
         palette: [Color],
         isHeavy: Bool,
-        isSkill: Bool,
-        loadout: AgentBattleLoadout,
         calmMode: Bool
     ) {
-        hitCounter &+= 1
         targetHitFlash = max(targetHitFlash, isHeavy ? 1.0 : 0.72)
         targetHitRecoil = max(targetHitRecoil, isHeavy ? 1.0 : 0.65)
         targetCharge += isHeavy ? 0.16 : 0.085
@@ -2083,42 +1475,6 @@ private final class RailTodoBattleSimulation {
             ))
         }
 
-        // Floating RPG damage numbers in Arcade mode (bounded cleanly left of Todo text)
-        if loadout.enabled && loadout.showDamageNumbers {
-            let roll = loadout.stats.rollHitDamage(
-                isHeavy: isHeavy,
-                isSkill: isSkill,
-                commanderBuff: loadout.commanderBuffActive,
-                rng: &rngState
-            )
-            let shouldShow = roll.isCrit || isSkill || (hitCounter % 2 == 0)
-            if shouldShow {
-                let text: String
-                let col: Color
-                let emphasis: Bool
-                if roll.isSuperCrit || isSkill {
-                    text = "★\(roll.damage)"
-                    col = Color(hex: 0xFB7185)
-                    emphasis = true
-                } else if roll.isCrit {
-                    text = "\(roll.damage)!"
-                    col = Color(hex: 0xFBBF24)
-                    emphasis = true
-                } else {
-                    text = "\(roll.damage)"
-                    col = Color.white.opacity(0.88)
-                    emphasis = false
-                }
-                spawnPopup(
-                    text: text,
-                    x: hitX - 10 + nextCGFloat(-8, 4),
-                    y: hitY - 4 + nextCGFloat(-2, 2),
-                    color: col,
-                    emphasis: emphasis
-                )
-            }
-        }
-
         // Periodic crit shockwave keeps long single steps feeling lively
         if targetCharge >= 1.0 {
             targetCharge = 0
@@ -2134,27 +1490,11 @@ private final class RailTodoBattleSimulation {
         }
     }
 
-    private func spawnPopup(text: String, x: CGFloat, y: CGFloat, color: Color, emphasis: Bool) {
-        if popups.count >= 5 {
-            popups.removeFirst()
-        }
-        popups.append(DamagePopup(
-            text: text,
-            x: x,
-            y: y,
-            age: 0,
-            life: emphasis ? 0.68 : 0.50,
-            color: color,
-            emphasis: emphasis
-        ))
-    }
-
     private func triggerTodoClearedFinisher(
         clearedIDs: Set<String>,
         agentX: CGFloat,
         targetX: CGFloat,
-        y: CGFloat,
-        loadout: AgentBattleLoadout
+        y: CGFloat
     ) {
         sartoFlash = 1.0
         agentFlash = 1.0
@@ -2167,31 +1507,21 @@ private final class RailTodoBattleSimulation {
             clearFlashes[id] = 1.0
         }
 
-        let finisher: AgentFinisherFX = loadout.enabled ? loadout.finisher : .emeraldWave
-
         shockwaves.append(Shockwave(
             originX: agentX + 6,
             y: y,
             age: 0,
             duration: 0.34,
-            color: finisher == .prismSlash ? Color(hex: 0x38BDF8) : IslandTheme.success,
+            color: IslandTheme.success,
             accent: .white
         ))
 
-        if finisher == .prismSlash {
-            finisherFX.append(FinisherVisual(x: targetX, y: y, age: 0, duration: 0.36, isGlitch: false))
-        } else if finisher == .glitchShatter {
-            finisherFX.append(FinisherVisual(x: targetX, y: y, age: 0, duration: 0.34, isGlitch: true))
-        }
-
-        let burstCount = finisher == .pixelFireworks ? 18 : 10
-        let burstColors: [Color] = finisher == .pixelFireworks
-            ? [Color(hex: 0xFB7185), Color(hex: 0xFBBF24), Color(hex: 0x34D399), Color(hex: 0x38BDF8), Color(hex: 0xC084FC), .white]
-            : [IslandTheme.success, .white, IslandTheme.prismAmber, IslandTheme.prismCobalt]
+        let burstCount = 10
+        let burstColors: [Color] = [IslandTheme.success, .white, IslandTheme.prismAmber, IslandTheme.prismCobalt]
 
         for i in 0..<burstCount where sparks.count < 56 {
             let angle = Double(i) / Double(burstCount) * .pi * 2.0 + nextUnit() * 0.35
-            let spd = nextCGFloat(34, finisher == .pixelFireworks ? 108 : 92)
+            let spd = nextCGFloat(34, 92)
             // Bias slightly leftward so celebration sparks never cover Todo text
             let vx = min(18, CGFloat(cos(angle)) * spd - 22)
             let vy = CGFloat(sin(angle)) * spd - 14
@@ -2206,10 +1536,6 @@ private final class RailTodoBattleSimulation {
                 color: burstColors[i % burstColors.count],
                 size: i % 3 == 0 ? 2.1 : 1.8
             ))
-        }
-
-        if loadout.enabled && loadout.showDamageNumbers {
-            spawnPopup(text: "+XP", x: targetX - 16, y: y - 5, color: IslandTheme.success, emphasis: true)
         }
     }
 }

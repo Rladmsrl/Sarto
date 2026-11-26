@@ -306,6 +306,12 @@ public final class LocalDaemonManager {
         Task { try? await session.daemonGameWatch(watching) }
     }
 
+    /// Turns the idle game on or off for this Mac; nil when the daemon could not be asked.
+    public func setGameEnabled(_ enabled: Bool) async -> GameLinkStatusInfo? {
+        guard let session = syncSession else { return nil }
+        return try? await session.daemonGameSetEnabled(enabled)
+    }
+
     public func sendGameCommand(type: String, args: [String: JSONValue] = [:]) async -> GameCommandOutcome {
         guard let session = syncSession else {
             return GameCommandOutcome(.object(["ok": .bool(false), "error": .string("daemon disconnected")]))

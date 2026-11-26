@@ -3442,8 +3442,6 @@ public enum HostEvent: Sendable, Equatable {
     case hostLinkClosed
     /// Periodic system load sample while watching (`host.load`).
     case hostLoad(HostLoad)
-    /// What the host's own sessions' work came to, for the Agent RPG (`work.facts`).
-    case workFacts([WorkFact])
     /// The daemon's idle game link changed: whether it runs, reaches its service, and what it holds back.
     case gameStatus(GameLinkStatusInfo)
     /// A frame from the game service, as the daemon passed it on: state, live battle events or a notice.
@@ -3661,10 +3659,6 @@ public enum HostEvent: Sendable, Equatable {
             if let env = try? decoder.decode(TypedEnvelope<HostLoadEnvelope>.self, from: data) {
                 return .hostLoad(env.event.load)
             }
-        case "work.facts":
-            if let facts = (try? JSONValue(jsonData: data))?.objectValue?["event"]?.objectValue?["facts"] {
-                return .workFacts(WorkFact.decodeList(facts))
-            }
         case "game.status", "game.frame":
             if let obj = (try? JSONValue(jsonData: data))?.objectValue?["event"]?.objectValue {
                 return Self.gameEvent(type: eventType, obj)
@@ -3804,10 +3798,6 @@ public enum HostEvent: Sendable, Equatable {
         case "host.load":
             if let raw = obj["load"], let decoded = try? raw.decode(HostLoad.self) {
                 return .hostLoad(decoded)
-            }
-        case "work.facts":
-            if let facts = obj["facts"] {
-                return .workFacts(WorkFact.decodeList(facts))
             }
         case "game.status", "game.frame":
             return Self.gameEvent(type: type, obj)

@@ -213,6 +213,11 @@ export interface ControlCalls {
   /** Sends a player's command to the game service and returns its answer. */
   'game.command': { params: GameCommandParams; result: CommandResult }
   /**
+   * Turns the idle game on or off for this computer, as its owner chose in the app; off deletes
+   * the facts not sent yet. Only this socket's clients may: no device reaches it.
+   */
+  'game.setEnabled': { params: { enabled: boolean }; result: GameLinkStatus }
+  /**
    * Starts browser sign-in at the server's sign-in page; the status follows once it comes back. A
    * `serverUrl` other than the current one is taken only while signed out. Pass `openBrowser: false`
    * so a foreground app can open `authUrl` itself instead of the daemon spawning a browser opener.
@@ -473,6 +478,13 @@ const validators: { [M in ControlMethod]: (raw: unknown) => Params<M> } = {
     })
     if (typeof parsed === 'string') throw new ControlError('invalid_params', parsed)
     return { type: parsed.type, args: parsed.args as Record<string, unknown> }
+  },
+  'game.setEnabled': (raw) => {
+    const { enabled } = record(raw)
+    if (typeof enabled !== 'boolean') {
+      throw new ControlError('invalid_params', 'enabled must be a boolean')
+    }
+    return { enabled }
   },
   'account.signIn': (raw) => {
     const { serverUrl, openBrowser } = raw === undefined || raw === null ? {} : record(raw)

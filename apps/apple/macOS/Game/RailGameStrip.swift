@@ -12,6 +12,8 @@ struct RailGameStrip: View {
     var store: GameStore
     var paused: Bool = false
     @State private var hovered = false
+    /// The main window is on screen and Sarto is in front.
+    @State private var onScreen = false
 
     var body: some View {
         if let state = store.state {
@@ -35,8 +37,7 @@ struct RailGameStrip: View {
             .help(l10n.tr("game.strip.openHelp"))
             .accessibilityElement(children: .combine)
             .accessibilityLabel(l10n.tr("game.strip.accessibility", state.version, "\(state.power)", stageText(state)))
-            .onAppear { store.setSurfaceVisible(true) }
-            .onDisappear { store.setSurfaceVisible(false) }
+            .background(GameSurfaceProbe(store: store, requiresActiveApp: true, onScreen: $onScreen))
         }
     }
 
@@ -100,12 +101,13 @@ struct RailGameStrip: View {
             requestedFPS: 20
         )
         let still = reduceMotion || fps <= 0
-        TimelineView(.animation(minimumInterval: 1.0 / Double(max(1, still ? 4 : fps)), paused: paused)) { timeline in
+        TimelineView(.animation(minimumInterval: 1.0 / Double(max(1, still ? 4 : fps)), paused: paused || !onScreen)) { timeline in
+            let display = store.frame(at: timeline.date)
             Canvas(rendersAsynchronously: false) { context, size in
                 GameArenaRenderer.draw(
                     context: &context,
                     size: size,
-                    display: store.frame(at: timeline.date),
+                    display: display,
                     weaponHarness: state.mainWeapon,
                     tokens: tokens,
                     l10n: l10n,

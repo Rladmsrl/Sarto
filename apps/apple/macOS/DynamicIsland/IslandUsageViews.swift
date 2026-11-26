@@ -40,6 +40,9 @@ struct IslandCompactFocus {
 }
 
 enum IslandUsageFocusResolver {
+    /// Quota alerts and brand marks look the same in every palette family.
+    private static let island = PrismIslandTokens.standard
+
     @MainActor
     static func resolve(
         store: PrismUsageStore,
@@ -158,9 +161,7 @@ enum IslandUsageFocusResolver {
         let hints = modelHints.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         func alertColor(_ rem: Double, reset: Bool) -> Color? {
             guard !reset else { return nil }
-            if rem <= 0.10 { return IslandTheme.danger }
-            if rem <= lowThreshold { return IslandTheme.warning }
-            return nil
+            return island.quotaAlert(remaining: rem, low: lowThreshold)
         }
         func makeMeter(tag: String, label: String? = nil, window: QuotaWindow, color: Color) -> IslandCompactWindowMeter {
             IslandCompactWindowMeter(
@@ -223,24 +224,24 @@ enum IslandUsageFocusResolver {
             }) {
                 let scopeName = matched.scope ?? matched.label
                 var meters: [IslandCompactWindowMeter] = []
-                if let session { meters.append(makeMeter(tag: "5h", label: strings.text("usage.window.fiveHour"), window: session, color: Color(hex: 0xE5896B))) }
-                meters.append(makeMeter(tag: strings.text("usage.tag.week"), label: strings.text("usage.window.scopedWeek", ["scope": scopeName]), window: matched, color: Color(hex: 0x8B88FF)))
+                if let session { meters.append(makeMeter(tag: "5h", label: strings.text("usage.window.fiveHour"), window: session, color: PrismProviderBrand.claude.dark)) }
+                meters.append(makeMeter(tag: strings.text("usage.tag.week"), label: strings.text("usage.window.scopedWeek", ["scope": scopeName]), window: matched, color: PrismProviderBrand.claudeModelWeekly.dark))
                 return IslandCompactFocus(
                     provider: provider,
                     identity: scopeName,
-                    brandColor: Color(hex: 0xE5896B),
+                    brandColor: PrismProviderBrand.claude.dark,
                     isLocalActive: isLocalActive,
                     source: source,
                     meters: meters
                 )
             }
             var meters: [IslandCompactWindowMeter] = []
-            if let session { meters.append(makeMeter(tag: "5h", label: strings.text("usage.window.fiveHour"), window: session, color: Color(hex: 0xE5896B))) }
-            if let weekly { meters.append(makeMeter(tag: "7d", label: strings.text("usage.window.thisWeek"), window: weekly, color: Color(hex: 0x48B894))) }
+            if let session { meters.append(makeMeter(tag: "5h", label: strings.text("usage.window.fiveHour"), window: session, color: PrismProviderBrand.claude.dark)) }
+            if let weekly { meters.append(makeMeter(tag: "7d", label: strings.text("usage.window.thisWeek"), window: weekly, color: PrismProviderBrand.claudeWeekly.dark)) }
             return IslandCompactFocus(
                 provider: provider,
                 identity: "Claude",
-                brandColor: Color(hex: 0xE5896B),
+                brandColor: PrismProviderBrand.claude.dark,
                 isLocalActive: isLocalActive,
                 source: source,
                 meters: meters
@@ -256,13 +257,13 @@ enum IslandUsageFocusResolver {
                 let w5 = pool.first { $0.isFiveHour }
                 let w7 = pool.first { !$0.isFiveHour }
                 var meters: [IslandCompactWindowMeter] = []
-                if let w5 { meters.append(makeMeter(tag: "5h", label: "C/G 5h", window: w5, color: Color(hex: 0x2EC4BA))) }
-                if let w7 { meters.append(makeMeter(tag: "7d", label: strings.text("usage.window.groupWeek", ["group": "C/G"]), window: w7, color: Color(hex: 0xE5896B))) }
+                if let w5 { meters.append(makeMeter(tag: "5h", label: strings.text("usage.window.groupFiveHour", ["group": "C/G"]), window: w5, color: PrismProviderBrand.geminiPartnerPool.dark)) }
+                if let w7 { meters.append(makeMeter(tag: "7d", label: strings.text("usage.window.groupWeek", ["group": "C/G"]), window: w7, color: PrismProviderBrand.claude.dark)) }
                 if !meters.isEmpty {
                     return IslandCompactFocus(
                         provider: provider,
                         identity: "C/G",
-                        brandColor: Color(hex: 0x2EC4BA),
+                        brandColor: PrismProviderBrand.geminiPartnerPool.dark,
                         isLocalActive: isLocalActive,
                         source: source,
                         meters: meters
@@ -274,15 +275,15 @@ enum IslandUsageFocusResolver {
                     let meters = pool.prefix(2).enumerated().map { idx, w in
                         makeMeter(
                             tag: w.isFiveHour ? "5h" : "7d",
-                            label: w.isFiveHour ? "Argon 5h" : strings.text("usage.window.groupWeek", ["group": "Argon"]),
+                            label: strings.text(w.isFiveHour ? "usage.window.groupFiveHour" : "usage.window.groupWeek", ["group": "Argon"]),
                             window: w,
-                            color: idx == 0 ? Color(hex: 0x5B9BFF) : Color(hex: 0x9B80FF)
+                            color: idx == 0 ? PrismProviderBrand.gemini.dark : PrismProviderBrand.geminiWeekly.dark
                         )
                     }
                     return IslandCompactFocus(
                         provider: provider,
                         identity: "Argon",
-                        brandColor: Color(hex: 0x5B9BFF),
+                        brandColor: PrismProviderBrand.gemini.dark,
                         isLocalActive: isLocalActive,
                         source: source,
                         meters: meters
@@ -290,12 +291,12 @@ enum IslandUsageFocusResolver {
                 }
             }
             var meters: [IslandCompactWindowMeter] = []
-            if let session { meters.append(makeMeter(tag: "5h", label: strings.text("usage.window.fiveHour"), window: session, color: Color(hex: 0x5B9BFF))) }
-            if let weekly { meters.append(makeMeter(tag: "7d", label: strings.text("usage.window.thisWeek"), window: weekly, color: Color(hex: 0x9B80FF))) }
+            if let session { meters.append(makeMeter(tag: "5h", label: strings.text("usage.window.fiveHour"), window: session, color: PrismProviderBrand.gemini.dark)) }
+            if let weekly { meters.append(makeMeter(tag: "7d", label: strings.text("usage.window.thisWeek"), window: weekly, color: PrismProviderBrand.geminiWeekly.dark)) }
             return IslandCompactFocus(
                 provider: provider,
                 identity: "Gemini",
-                brandColor: Color(hex: 0x5B9BFF),
+                brandColor: PrismProviderBrand.gemini.dark,
                 isLocalActive: isLocalActive,
                 source: source,
                 meters: meters
@@ -303,9 +304,9 @@ enum IslandUsageFocusResolver {
 
         default:
             var meters: [IslandCompactWindowMeter] = []
-            if let session { meters.append(makeMeter(tag: "5h", label: strings.text("usage.window.fiveHour"), window: session, color: Color(hex: 0x7A9DFF))) }
+            if let session { meters.append(makeMeter(tag: "5h", label: strings.text("usage.window.fiveHour"), window: session, color: PrismProviderBrand.codex.dark)) }
             if let weekly {
-                let c = session == nil ? Color(hex: 0x7A9DFF) : Color(hex: 0x38C4AA)
+                let c = session == nil ? PrismProviderBrand.codex.dark : PrismProviderBrand.weekly.dark
                 meters.append(makeMeter(tag: "7d", label: strings.text("usage.window.thisWeek"), window: weekly, color: c))
             }
             if meters.isEmpty, let first = windows.first {
@@ -331,20 +332,21 @@ enum IslandUsageFocusResolver {
     }
 
     private static func darkBrandColor(_ id: String, fallback: Color) -> Color {
-        switch id {
-        case "claude": return Color(hex: 0xE5896B)
-        case "antigravity": return Color(hex: 0x5B9BFF)
-        case "codex": return Color(hex: 0x7A9DFF)
-        default: return fallback
-        }
+        PrismProviderBrand.primary(forProvider: id)?.dark ?? fallback
     }
 
     private static func secondaryDarkColor(_ id: String) -> Color {
-        switch id {
-        case "claude": return Color(hex: 0x48B894)
-        case "antigravity": return Color(hex: 0x9B80FF)
-        default: return Color(hex: 0x38C4AA)
-        }
+        PrismProviderBrand.secondary(forProvider: id).dark
+    }
+}
+
+extension PrismIslandTokens {
+    /// The alert color of a quota with `remaining` left: danger at 10% or less, warning at `low`
+    /// or less, none above.
+    func quotaAlert(remaining: Double, low: Double) -> Color? {
+        if remaining <= 0.10 { return danger }
+        if remaining <= low { return warning }
+        return nil
     }
 }
 
@@ -357,7 +359,8 @@ struct IslandCompactUsageStrip: View {
     var geometry: IslandGeometry? = nil
     var screenID: UInt32? = nil
 
-    private var l10n: PrismL10n { PrismL10n(language: model.strings.isChinese ? .zhHans : .en) }
+    private var l10n: PrismL10n { model.strings.l10n }
+    private var island: PrismIslandTokens { model.prismTokens.island }
 
     var body: some View {
         let g = geometry ?? model.geometry
@@ -414,14 +417,14 @@ struct IslandCompactUsageStrip: View {
                 SartoEmblem(size: 15, active: false)
                 Text(usageStore.connection == .offline ? l10n.tr("usage.daemonOfflineShort") : model.strings.text("usage.loadingShort"))
                     .font(IslandFonts.ui(size, .medium))
-                    .foregroundStyle(Color.white.opacity(0.55))
+                    .foregroundStyle(island.secondary)
             }
         } else if let focus {
             HStack(spacing: 6) {
                 SVGMark(svg: focus.provider.logo, size: hasNotch ? 11 : 12, color: focus.brandColor)
                 Text(focus.identity)
                     .font(IslandFonts.ui(size, .semibold))
-                    .foregroundStyle(Color.white.opacity(0.92))
+                    .foregroundStyle(island.text)
                     .lineLimit(1)
                     .truncationMode(.tail)
             }
@@ -430,7 +433,7 @@ struct IslandCompactUsageStrip: View {
                 SartoEmblem(size: 15, active: false)
                 Text(SartoBrand.name)
                     .font(IslandFonts.ui(size, .medium))
-                    .foregroundStyle(Color.white.opacity(0.75))
+                    .foregroundStyle(island.quote)
             }
         }
     }
@@ -448,7 +451,7 @@ struct IslandCompactUsageStrip: View {
         } else {
             Text(Fmt.tokens(usageStore.todayTokens))
                 .font(IslandFonts.mono(10.5, .semibold))
-                .foregroundStyle(Color.white.opacity(0.82))
+                .foregroundStyle(island.quote)
         }
     }
 
@@ -480,7 +483,7 @@ struct IslandCompactUsageStrip: View {
                 HStack(spacing: 4) {
                     Text(m.tag)
                         .font(IslandFonts.ui(9.5, .medium))
-                        .foregroundStyle(Color.white.opacity(0.46))
+                        .foregroundStyle(island.tertiary)
                     IslandMicroBar(fraction: m.reset ? 0 : m.remaining, color: m.color, height: meters.count == 1 ? 4.0 : 3.5)
                         .frame(width: meters.count == 1 ? 56 : 32)
                     Text(m.reset ? model.strings.text("usage.resetTag") : "\(Int((m.remaining * 100).rounded()))%")
@@ -493,32 +496,86 @@ struct IslandCompactUsageStrip: View {
     }
 
     private func percentColor(_ remaining: Double?, reset: Bool) -> Color {
-        guard !reset, let rem = remaining else { return Color.white.opacity(0.55) }
-        if rem <= 0.10 { return IslandTheme.danger }
-        if rem <= usageStore.lowThreshold { return IslandTheme.warning }
-        return Color.white.opacity(0.92)
+        guard !reset, let rem = remaining else { return island.secondary }
+        return island.quotaAlert(remaining: rem, low: usageStore.lowThreshold) ?? island.text
     }
 }
 
+// MARK: - Meters
+
+/// The island's one fill bar: a capsule track with a capsule fill from the leading edge, for
+/// quotas, the context window and any other share of a whole. It fills the width it is given.
 struct IslandMicroBar: View {
     let fraction: Double
-    let color: Color
-    var height: CGFloat = 3.5
+    let fill: AnyShapeStyle
+    var height: CGFloat
+    /// The track; the translucent `meterTrack` when nil, which reads alike on the chassis and cards.
+    var track: Color?
+    var animates: Bool
+    @Environment(\.prismTokens) private var tokens
+    @Environment(\.prismMotionTier) private var motionTier
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    init(fraction: Double, color: Color, height: CGFloat = 3.5, track: Color? = nil, animates: Bool = true) {
+        self.init(fraction: fraction, fill: color, height: height, track: track, animates: animates)
+    }
+
+    init<Fill: ShapeStyle>(fraction: Double, fill: Fill, height: CGFloat = 3.5, track: Color? = nil, animates: Bool = true) {
+        self.fraction = fraction
+        self.fill = AnyShapeStyle(fill)
+        self.height = height
+        self.track = track
+        self.animates = animates
+    }
 
     var body: some View {
         GeometryReader { geo in
             let clamped = max(0, min(1, fraction))
             ZStack(alignment: .leading) {
-                Capsule().fill(Color.white.opacity(0.14))
+                Capsule().fill(track ?? tokens.island.meterTrack)
                 if clamped > 0.005 {
                     Capsule()
-                        .fill(color)
+                        .fill(fill)
                         .frame(width: max(height, geo.size.width * clamped))
-                        .animation(Motion.fill, value: clamped)
+                        .animation(
+                            animates ? PrismSpringSpec.gentle.animation(tier: motionTier, reduceMotion: reduceMotion) : nil,
+                            value: clamped
+                        )
                 }
             }
         }
         .frame(height: height)
+    }
+}
+
+/// The island's one progress ring, drawn with MenuBarKit's `RingArc` inside its frame: an arc over
+/// the island's track, or over a disc of its own color. Plan, cache, usage and limit rings are all
+/// this view.
+struct IslandMeterRing: View {
+    let progress: Double
+    let color: Color
+    var lineWidth: CGFloat = 2.2
+    var showsTrack = true
+    /// A disc of `color` at this opacity under the ring, filling the frame.
+    var discOpacity: Double? = nil
+    /// Insets the ring, not the disc, from the frame.
+    var inset: CGFloat = 0
+    @Environment(\.prismTokens) private var tokens
+
+    var body: some View {
+        ZStack {
+            if let discOpacity {
+                Circle().fill(color.opacity(discOpacity))
+            }
+            ZStack {
+                if showsTrack {
+                    Circle().strokeBorder(tokens.island.track, lineWidth: lineWidth)
+                }
+                RingArc(progress: max(0, min(1, progress)), lineWidth: lineWidth)
+                    .fill(color)
+            }
+            .padding(inset)
+        }
     }
 }
 
@@ -530,6 +587,11 @@ struct IslandExpandedUsageTab: View {
     @ObservedObject var settingsStore: UsageSettingsStore
     var isMeasuring: Bool = false
     @State private var pinnedProviderId: String?
+    @Environment(\.prismMotionTier) private var motionTier
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+
+    private var island: PrismIslandTokens { model.prismTokens.island }
+    private var reduceMotion: Bool { systemReduceMotion || model.reduceMotion }
 
     var body: some View {
         let visible = settingsStore.visible(usageStore.providers).filter(\.eligible)
@@ -569,7 +631,7 @@ struct IslandExpandedUsageTab: View {
                     lowThreshold: usageStore.lowThreshold,
                     strings: model.strings
                 ) {
-                    withAnimation(.spring(response: 0.34, dampingFraction: 0.88)) {
+                    withAnimation(PrismSpringSpec.snappy.animation(tier: motionTier, reduceMotion: reduceMotion)) {
                         pinnedProviderId = provider.id
                     }
                 }
@@ -589,7 +651,7 @@ struct IslandExpandedUsageTab: View {
 
     /// Today's tokens and requests, or why there are none yet.
     private var summaryDetail: String {
-        let l10n = PrismL10n(language: model.strings.isChinese ? .zhHans : .en)
+        let l10n = model.strings.l10n
         if !usageStore.ready {
             return usageStore.connection == .offline ? l10n.tr("usage.daemonOffline") : l10n.tr("usage.loading")
         }
@@ -605,30 +667,30 @@ struct IslandExpandedUsageTab: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(model.strings.text("usage.todayTitle"))
                     .font(IslandFonts.mono(10, .semibold))
-                    .foregroundStyle(Color.white.opacity(0.42))
+                    .foregroundStyle(island.tertiary)
                 Text(settingsStore.settings.privacy ? "\(Fmt.symbol)••••" : Fmt.money(usageStore.todaySpend))
                     .font(NumFont.font(28))
                     .monospacedDigit()
-                    .foregroundStyle(Color.white.opacity(0.95))
+                    .foregroundStyle(island.text)
                     .contentTransition(.numericText())
-                    .animation(.easeOut(duration: 0.25), value: usageStore.todaySpend)
+                    .animation(PrismSpringSpec.gentle.animation(tier: motionTier, reduceMotion: reduceMotion), value: usageStore.todaySpend)
                 Text(summaryDetail)
                     .font(IslandFonts.ui(10.5))
-                    .foregroundStyle(Color.white.opacity(0.50))
+                    .foregroundStyle(island.secondary)
                     .monospacedDigit()
             }
             Spacer(minLength: 8)
-            IslandHourlyBars(values: usageStore.hourly, highlight: model.prismTokens.primary)
+            IslandHourlyBars(values: usageStore.hourly, highlight: island.accent)
                 .frame(width: 146, height: 38)
         }
         .padding(.horizontal, 13)
         .padding(.vertical, 10)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.white.opacity(0.045))
+                .fill(island.wash)
                 .overlay(
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(Color.white.opacity(0.08), lineWidth: 0.75)
+                        .stroke(island.line, lineWidth: 0.75)
                 )
         )
     }
@@ -637,6 +699,9 @@ struct IslandExpandedUsageTab: View {
 private struct IslandHourlyBars: View {
     let values: [Double]
     let highlight: Color
+    @Environment(\.prismTokens) private var tokens
+    @Environment(\.prismMotionTier) private var motionTier
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         let maxValue = max(values.max() ?? 0, 0.0001)
@@ -644,18 +709,16 @@ private struct IslandHourlyBars: View {
             ForEach(Array(values.enumerated()), id: \.offset) { index, value in
                 let last = index == values.count - 1
                 Capsule()
-                    .fill(last ? highlight : Color.white.opacity(0.28))
+                    .fill(last ? highlight : tokens.island.meterIdle)
                     .frame(height: max(2, CGFloat(value / maxValue) * 38))
                     .frame(maxWidth: .infinity)
             }
         }
-        .animation(.easeOut(duration: 0.3), value: values.last ?? 0)
+        .animation(PrismSpringSpec.gentle.animation(tier: motionTier, reduceMotion: reduceMotion), value: values.last ?? 0)
     }
 }
 
 private enum IslandForecastFmt {
-    static let green = Color(hex: 0x34D399)
-
     static func duration(_ seconds: TimeInterval, strings: IslandStrings) -> String {
         let mins = max(1, Int((seconds / 60).rounded()))
         if mins >= 1440 {
@@ -668,18 +731,20 @@ private enum IslandForecastFmt {
         if mins >= 60 {
             let hrs = mins / 60
             let rem = mins % 60
-            return rem > 0 ? "\(hrs)h \(rem)m" : "\(hrs)h"
+            return rem > 0
+                ? strings.text("duration.hoursMinutes", ["h": "\(hrs)", "m": "\(rem)"])
+                : strings.text("duration.hours", ["h": "\(hrs)"])
         }
         return strings.text("usage.durMins", ["m": "\(mins)"])
     }
 
-    static func quotaSummary(_ meter: IslandCompactWindowMeter?, lowThreshold: Double, strings: IslandStrings) -> (text: String, color: Color, urgent: Bool) {
-        guard let meter else { return (strings.text("usage.collecting"), Color.white.opacity(0.45), false) }
+    static func quotaSummary(_ meter: IslandCompactWindowMeter?, lowThreshold: Double, strings: IslandStrings, island: PrismIslandTokens) -> (text: String, color: Color, urgent: Bool) {
+        guard let meter else { return (strings.text("usage.collecting"), island.tertiary, false) }
         guard let forecast = meter.forecast else {
-            if meter.reset { return (strings.text("usage.resetPending"), Color.white.opacity(0.55), false) }
-            if meter.remaining <= 0.10 { return (strings.text("usage.lowCritical"), IslandTheme.danger, true) }
-            if meter.remaining <= lowThreshold { return (strings.text("usage.lowWarn"), IslandTheme.warning, true) }
-            return (strings.text("usage.collecting"), Color.white.opacity(0.45), false)
+            if meter.reset { return (strings.text("usage.resetPending"), island.secondary, false) }
+            if meter.remaining <= 0.10 { return (strings.text("usage.lowCritical"), island.danger, true) }
+            if meter.remaining <= lowThreshold { return (strings.text("usage.lowWarn"), island.warning, true) }
+            return (strings.text("usage.collecting"), island.tertiary, false)
         }
         switch forecast.status {
         case .exhausts(let seconds):
@@ -687,28 +752,29 @@ private enum IslandForecastFmt {
             let text = seconds < 60
                 ? strings.text("usage.almostEmpty")
                 : strings.text("usage.exhaustsIn", ["time": duration(seconds, strings: strings)])
-            return (text, critical ? IslandTheme.danger : IslandTheme.warning, true)
+            return (text, critical ? island.danger : island.warning, true)
         case .survives(let remAtReset):
             let pct = Int((remAtReset * 100).rounded())
             if meter.remaining <= 0.10 {
-                return (strings.text("usage.criticalRemain", ["pct": "\(pct)"]), IslandTheme.danger, true)
+                return (strings.text("usage.criticalRemain", ["pct": "\(pct)"]), island.danger, true)
             }
-            return (strings.text("usage.survivesRemain", ["pct": "\(pct)"]), green, false)
+            return (strings.text("usage.survivesRemain", ["pct": "\(pct)"]), island.successText, false)
         case .steady:
-            return (strings.text("usage.survives"), green, false)
+            return (strings.text("usage.survives"), island.successText, false)
         case .reset:
-            return (strings.text("usage.resetPending"), Color.white.opacity(0.55), false)
+            return (strings.text("usage.resetPending"), island.secondary, false)
         case .insufficient:
-            return (strings.text("usage.collecting"), Color.white.opacity(0.45), false)
+            return (strings.text("usage.collecting"), island.tertiary, false)
         }
     }
 
-    static func shortPeerQuota(_ meter: IslandCompactWindowMeter?, lowThreshold: Double, strings: IslandStrings) -> (text: String, color: Color, urgent: Bool) {
-        guard let meter else { return (strings.text("usage.noQuota"), Color.white.opacity(0.42), false) }
+    static func shortPeerQuota(_ meter: IslandCompactWindowMeter?, lowThreshold: Double, strings: IslandStrings, island: PrismIslandTokens) -> (text: String, color: Color, urgent: Bool) {
+        guard let meter else { return (strings.text("usage.noQuota"), island.tertiary, false) }
         let label = (meter.tag == strings.text("usage.tag.week") || meter.fullLabel.hasPrefix("C/G") || meter.fullLabel.hasPrefix("Argon")) ? meter.fullLabel : meter.tag
-        if meter.reset { return (strings.text("usage.peerReset", ["label": label]), Color.white.opacity(0.55), false) }
+        if meter.reset { return (strings.text("usage.peerReset", ["label": label]), island.secondary, false) }
         let pct = "\(Int((meter.remaining * 100).rounded()))%"
         let prefix = "\(label) \(pct)"
+        let color = island.quotaAlert(remaining: meter.remaining, low: lowThreshold) ?? island.quote
         if let forecast = meter.forecast {
             switch forecast.status {
             case .exhausts(let seconds):
@@ -716,27 +782,23 @@ private enum IslandForecastFmt {
                 let text = seconds < 60
                     ? strings.text("usage.peerAlmostEmpty", ["prefix": prefix])
                     : strings.text("usage.peerExhausts", ["prefix": prefix, "time": duration(seconds, strings: strings)])
-                return (text, critical ? IslandTheme.danger : IslandTheme.warning, true)
+                return (text, critical ? island.danger : island.warning, true)
             case .survives, .steady:
-                let urgent = meter.remaining <= lowThreshold
-                let c: Color = meter.remaining <= 0.10 ? IslandTheme.danger : (urgent ? IslandTheme.warning : Color.white.opacity(0.65))
-                return (strings.text("usage.peerSurvives", ["prefix": prefix]), c, urgent)
+                return (strings.text("usage.peerSurvives", ["prefix": prefix]), color, meter.remaining <= lowThreshold)
             case .reset:
-                return (strings.text("usage.peerReset", ["label": label]), Color.white.opacity(0.55), false)
+                return (strings.text("usage.peerReset", ["label": label]), island.secondary, false)
             case .insufficient:
                 break
             }
         }
-        let urgent = meter.remaining <= lowThreshold
-        let c: Color = meter.remaining <= 0.10 ? IslandTheme.danger : (urgent ? IslandTheme.warning : Color.white.opacity(0.65))
-        return (prefix, c, urgent)
+        return (prefix, color, meter.remaining <= lowThreshold)
     }
 
     static func remainingTokens(_ meter: IslandCompactWindowMeter?, strings: IslandStrings) -> (text: String, muted: Bool) {
         guard let est = meter?.forecast?.estimatedRemainingTokens else {
             return (strings.text("usage.collecting"), true)
         }
-        return ("≈\(Fmt.tokens(est)) tokens", false)
+        return (strings.text("usage.estTokens", ["tokens": Fmt.tokens(est)]), false)
     }
 }
 
@@ -747,10 +809,12 @@ private struct IslandActiveForecastCard: View {
     let strings: IslandStrings
     let openDetail: () -> Void
     @State private var hoveringHeader = false
+    @Environment(\.prismTokens) private var tokens
 
     var body: some View {
+        let island = tokens.island
         let bottleneck = focus.bottleneck
-        let qSummary = IslandForecastFmt.quotaSummary(bottleneck, lowThreshold: lowThreshold, strings: strings)
+        let qSummary = IslandForecastFmt.quotaSummary(bottleneck, lowThreshold: lowThreshold, strings: strings, island: island)
         let tokEst = IslandForecastFmt.remainingTokens(bottleneck, strings: strings)
         let borderColor: Color = qSummary.urgent ? qSummary.color.opacity(0.38) : focus.brandColor.opacity(0.30)
         let badgeLabel: String = {
@@ -769,7 +833,7 @@ private struct IslandActiveForecastCard: View {
                     SVGMark(svg: focus.provider.logo, size: 12, color: focus.brandColor)
                     Text(focus.provider.name)
                         .font(IslandFonts.ui(12.5, .semibold))
-                        .foregroundStyle(Color.white.opacity(0.94))
+                        .foregroundStyle(island.text)
                         .lineLimit(1)
                     Text(badgeLabel)
                         .font(IslandFonts.ui(9.5, .semibold))
@@ -781,11 +845,11 @@ private struct IslandActiveForecastCard: View {
                     Spacer(minLength: 6)
                     Text(strings.text("usage.todayTokens", ["tokens": Fmt.tokens(focus.provider.todayTokens)]))
                         .font(IslandFonts.mono(10.5, .medium))
-                        .foregroundStyle(Color.white.opacity(hoveringHeader ? 0.88 : 0.55))
+                        .foregroundStyle(hoveringHeader ? island.text : island.secondary)
                         .lineLimit(1)
                     Image(systemName: "chevron.right")
                         .font(.system(size: 8.5, weight: .semibold))
-                        .foregroundStyle(Color.white.opacity(hoveringHeader ? 0.72 : 0.28))
+                        .foregroundStyle(hoveringHeader ? island.quote : island.faint)
                 }
                 .contentShape(Rectangle())
             }
@@ -799,19 +863,19 @@ private struct IslandActiveForecastCard: View {
                             HStack(alignment: .firstTextBaseline, spacing: 4) {
                                 Text(m.fullLabel)
                                     .font(IslandFonts.ui(10, .medium))
-                                    .foregroundStyle(Color.white.opacity(0.58))
+                                    .foregroundStyle(island.secondary)
                                     .lineLimit(1)
                                 Spacer(minLength: 2)
                                 if let resetsAt = m.resetsAt, !m.reset {
-                                    Text(UsageCountdown.shortCountdown(to: resetsAt, l10n: PrismL10n(language: strings.isChinese ? .zhHans : .en)))
+                                    Text(UsageCountdown.shortCountdown(to: resetsAt, l10n: strings.l10n))
                                         .font(IslandFonts.ui(9))
-                                        .foregroundStyle(Color.white.opacity(0.32))
+                                        .foregroundStyle(island.tertiary)
                                         .monospacedDigit()
                                         .lineLimit(1)
                                 }
                                 Text(m.reset ? strings.text("usage.resetTag") : "\(Int((m.remaining * 100).rounded()))%")
                                     .font(IslandFonts.mono(11, .semibold))
-                                    .foregroundStyle(m.reset ? Color.white.opacity(0.5) : (m.remaining <= 0.10 ? IslandTheme.danger : (m.remaining <= lowThreshold ? IslandTheme.warning : Color.white.opacity(0.92))))
+                                    .foregroundStyle(m.reset ? island.secondary : (island.quotaAlert(remaining: m.remaining, low: lowThreshold) ?? island.text))
                                     .lineLimit(1)
                                     .fixedSize()
                             }
@@ -823,15 +887,16 @@ private struct IslandActiveForecastCard: View {
             } else {
                 Text(focus.provider.note ?? strings.text("usage.noQuotaFallback"))
                     .font(IslandFonts.ui(10.5))
-                    .foregroundStyle(Color.white.opacity(0.46))
+                    .foregroundStyle(island.tertiary)
                     .lineLimit(1)
             }
 
             HStack(spacing: 8) {
                 VStack(alignment: .leading, spacing: 2) {
+                    // A tinted well lifts its background, so its caption takes the next ink up.
                     Text(strings.text("usage.forecastTitle"))
                         .font(IslandFonts.ui(9, .medium))
-                        .foregroundStyle(Color.white.opacity(0.42))
+                        .foregroundStyle(qSummary.urgent ? island.secondary : island.tertiary)
                     Text(qSummary.text)
                         .font(IslandFonts.mono(11, .semibold))
                         .foregroundStyle(qSummary.color)
@@ -843,16 +908,16 @@ private struct IslandActiveForecastCard: View {
                 .padding(.vertical, 6)
                 .background(
                     RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        .fill(qSummary.urgent ? qSummary.color.opacity(0.12) : Color.white.opacity(0.045))
+                        .fill(qSummary.urgent ? qSummary.color.opacity(0.10) : island.wash)
                 )
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(strings.text("usage.estRemainingTitle"))
                         .font(IslandFonts.ui(9, .medium))
-                        .foregroundStyle(Color.white.opacity(0.42))
+                        .foregroundStyle(island.tertiary)
                     Text(tokEst.text)
                         .font(IslandFonts.mono(11, .semibold))
-                        .foregroundStyle(tokEst.muted ? Color.white.opacity(0.45) : Color.white.opacity(0.92))
+                        .foregroundStyle(tokEst.muted ? island.tertiary : island.text)
                         .lineLimit(1)
                         .minimumScaleFactor(0.85)
                 }
@@ -861,7 +926,7 @@ private struct IslandActiveForecastCard: View {
                 .padding(.vertical, 6)
                 .background(
                     RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        .fill(Color.white.opacity(0.045))
+                        .fill(island.wash)
                 )
             }
         }
@@ -870,7 +935,7 @@ private struct IslandActiveForecastCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 13, style: .continuous)
-                .fill(Color.white.opacity(0.06))
+                .fill(island.washRaised)
                 .overlay(RoundedRectangle(cornerRadius: 13, style: .continuous).stroke(borderColor, lineWidth: 0.9))
         )
     }
@@ -882,20 +947,24 @@ private struct IslandPeerForecastRow: View {
     let strings: IslandStrings
     let onSelect: () -> Void
     @State private var hovered = false
+    @Environment(\.prismTokens) private var tokens
+    @Environment(\.prismMotionTier) private var motionTier
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        let summary = IslandForecastFmt.shortPeerQuota(focus.bottleneck, lowThreshold: lowThreshold, strings: strings)
-        let strokeColor: Color = summary.urgent ? summary.color.opacity(0.32) : (hovered ? Color.white.opacity(0.12) : .clear)
+        let island = tokens.island
+        let summary = IslandForecastFmt.shortPeerQuota(focus.bottleneck, lowThreshold: lowThreshold, strings: strings, island: island)
+        let strokeColor: Color = summary.urgent ? summary.color.opacity(0.32) : (hovered ? island.lineStrong : .clear)
         Button(action: onSelect) {
             HStack(spacing: 8) {
                 SVGMark(svg: focus.provider.logo, size: 11, color: focus.brandColor)
                 Text(focus.provider.name)
                     .font(IslandFonts.ui(11.5, .semibold))
-                    .foregroundStyle(Color.white.opacity(0.86))
+                    .foregroundStyle(island.text)
                     .lineLimit(1)
-                Text("\(Fmt.tokens(focus.provider.todayTokens)) tok")
+                Text(strings.text("usage.tokensShort", ["tokens": Fmt.tokens(focus.provider.todayTokens)]))
                     .font(IslandFonts.mono(10))
-                    .foregroundStyle(Color.white.opacity(0.40))
+                    .foregroundStyle(island.tertiary)
                     .lineLimit(1)
                 Spacer(minLength: 6)
                 Text(summary.text)
@@ -908,13 +977,13 @@ private struct IslandPeerForecastRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color.white.opacity(hovered ? 0.075 : 0.035))
+                    .fill(hovered ? island.washHover : island.washQuiet)
                     .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(strokeColor, lineWidth: 0.9))
             )
             .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
         .buttonStyle(.plain)
         .onHover { hovered = $0 }
-        .animation(.easeOut(duration: 0.12), value: hovered)
+        .animation(PrismSpringSpec.micro.animation(tier: motionTier, reduceMotion: reduceMotion), value: hovered)
     }
 }

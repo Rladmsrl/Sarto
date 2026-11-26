@@ -77,18 +77,6 @@ export interface SettingsFile {
     fonts: UserFonts // replaced whole; a role left out keeps the theme's face
     effortControl: 'dial' | 'segments' // how the model and agent menus show the effort levels
   }
-  notifications: {
-    permission: boolean
-    turnEnded: boolean
-    error: boolean
-    routines: boolean // a routine's run ended, or its routines paused at a plan limit
-    planLimits: boolean // a plan limit window at 90%, used up, or reset after it was used up
-    sound: boolean
-    badge: boolean // the Dock icon on macOS, the taskbar button on Windows
-    // macOS: the notch island shows what needs the user, in place of the notifications of the
-    // kinds it shows, while it runs
-    island: boolean
-  }
   // Keyed by harness: the program picked for it, and its default agent's folder and visibility.
   // configDir: a folder picked before agents could be added, which the default agent keeps.
   // autoUpdate: false when Sarto's own install no longer follows the Registry's versions by itself.
@@ -295,16 +283,6 @@ export const DEFAULT_SETTINGS: SettingsFile = {
     fonts: {},
     effortControl: 'dial',
   },
-  notifications: {
-    permission: true,
-    turnEnded: true,
-    error: true,
-    routines: true,
-    planLimits: true,
-    sound: false,
-    badge: true,
-    island: true,
-  },
   agents: {},
   addedAgents: [],
   disabledAgents: [],
@@ -371,7 +349,6 @@ export interface SettingsPatch {
   general?: Partial<SettingsFile['general']>
   thread?: Partial<SettingsFile['thread']>
   appearance?: Partial<SettingsFile['appearance']>
-  notifications?: Partial<SettingsFile['notifications']>
   agents?: Partial<
     Record<
       HarnessId,

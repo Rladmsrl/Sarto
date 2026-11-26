@@ -33,6 +33,15 @@ public struct PrismSpringSpec: Sendable, Equatable {
     public static let micro = PrismSpringSpec(stiffness: 440, damping: 24, mass: 0.85)
     public static let indicator = PrismSpringSpec(stiffness: 430, damping: 32, mass: 0.9)
 
+    // The Dynamic Island's chassis. The lively ones overshoot slightly as the island grows (a
+    // damping ratio of 0.86, 0.92 settling back); the calm ones are critically damped.
+    public static let islandOpenLively = PrismSpringSpec(stiffness: 341.5, damping: 31.8, mass: 1.0)
+    public static let islandOpenCalm = PrismSpringSpec(stiffness: 341.5, damping: 37.0, mass: 1.0)
+    public static let islandGrowLively = PrismSpringSpec(stiffness: 246.7, damping: 27.0, mass: 1.0)
+    public static let islandGrowCalm = PrismSpringSpec(stiffness: 246.7, damping: 31.4, mass: 1.0)
+    public static let islandSettleLively = PrismSpringSpec(stiffness: 385.5, damping: 36.1, mass: 1.0)
+    public static let islandSettleCalm = PrismSpringSpec(stiffness: 385.5, damping: 39.3, mass: 1.0)
+
     /// Returns a SwiftUI Animation respecting the active motion tier and reduce-motion setting.
     public func animation(tier: PrismMotionTier, reduceMotion: Bool = false) -> Animation? {
         let effective: PrismMotionTier = reduceMotion ? .off : tier

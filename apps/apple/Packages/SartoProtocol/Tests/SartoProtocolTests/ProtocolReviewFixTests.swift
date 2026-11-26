@@ -556,4 +556,31 @@ struct ProtocolReviewFixTests {
         #expect(try await present.value == ["a", "b"])
         await session.close()
     }
+
+    @Test("Game states that differ only in the server clock are equal, so a frame re-renders nothing")
+    func gameStateEqualityIgnoresTheClock() {
+        func state(serverNow: Double, kills: Double) -> GameStateInfo? {
+            let event = HostEvent.decode(from: .object([
+                "type": .string("game.frame"),
+                "frame": .object([
+                    "type": .string("state"),
+                    "state": .object([
+                        "revision": .number(3),
+                        "serverNow": .number(serverNow),
+                        "hero": .object(["name": .string("Vibe Coder")]),
+                        "stage": .object(["kills": .number(kills)]),
+                    ]),
+                ]),
+            ]))
+            guard case .gameFrame(.state(let decoded)) = event else { return nil }
+            return decoded
+        }
+        let first = state(serverNow: 1_000, kills: 4)
+        let later = state(serverNow: 1_200, kills: 4)
+        let changed = state(serverNow: 1_200, kills: 5)
+        #expect(first != nil)
+        #expect(first == later)
+        #expect(later?.serverNow == 1_200)
+        #expect(later != changed)
+    }
 }

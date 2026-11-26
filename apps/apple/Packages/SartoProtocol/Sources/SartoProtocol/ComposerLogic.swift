@@ -66,14 +66,93 @@ public enum ComposerPathMatcher {
         Array(query.lowercased().filter { !$0.isWhitespace })
     }
 
-    /// Fzf-style forward-then-backward shortest-stretch scoring with bonuses for consecutive matches,
-    /// word boundaries and filename matches.
-    public static func scorePath(query: String, path: String) -> (score: Double, positions: [Int])? {
-        let q = normalizeQuery(query)
-        guard !q.isEmpty else { return (0, []) }
+    private static func normalizeASCIIQuery(_ query: String) -> [UInt8]? {
+        var bytes: [UInt8] = []
+        bytes.reserveCapacity(query.utf8.count)
+        for b in query.utf8 {
+            if b >= 0x80 { return nil }
+            if b == 32 || b == 9 || b == 10 || b == 13 { continue }
+            bytes.append(b >= 65 && b <= 90 ? b + 32 : b)
+        }
+        return bytes
+    }
+
+    @inline(__always)
+    private static func isASCIISeparator(_ b: UInt8) -> Bool {
+        b == 47 || b == 45 || b == 95 || b == 46 || b == 32
+    }
+
+    /// Zero-allocation ASCII fast path for fzf-style scoring when both query and path are pure ASCII.
+    /// Returns `.some(result)` when handled in ASCII (including `nil` for no match), or `.none`
+    /// when `path` contains non-ASCII bytes and needs the Unicode fallback.
+    private static func scoreASCIIPath(queryBytes q: [UInt8], path: String) -> (score: Double, positions: [Int])?? {
+        let utf8 = path.utf8
+        let count = utf8.count
+        guard count > 0 else { return .some(nil) }
+
+        var raw: [UInt8] = []
+        raw.reserveCapacity(count)
+        var nameStart = 0
+        var idx = 0
+        for b in utf8 {
+            if b >= 0x80 { return .none }
+            if b == 47 && idx < count - 1 {
+                nameStart = idx + 1
+            }
+            raw.append(b)
+            idx += 1
+        }
+
+        // Forward scan to end of first full subsequence match.
+        var at = 0
+        for qb in q {
+            var found = false
+            while at < count {
+                let rb = raw[at]
+                let lb = rb >= 65 && rb <= 90 ? rb + 32 : rb
+                if lb == qb {
+                    found = true
+                    at += 1
+                    break
+                }
+                at += 1
+            }
+            if !found { return .some(nil) }
+        }
+        at -= 1
+
+        // Backward scan to tighten onto the shortest stretch ending at `at`.
+        var positions = Array(repeating: 0, count: q.count)
+        for i in stride(from: q.count - 1, through: 0, by: -1) {
+            let qb = q[i]
+            while true {
+                let rb = raw[at]
+                let lb = rb >= 65 && rb <= 90 ? rb + 32 : rb
+                if lb == qb { break }
+                at -= 1
+            }
+            positions[i] = at
+            at -= 1
+        }
+
+        var score = 0.0
+        for i in 0..<q.count {
+            let pos = positions[i]
+            score += 1
+            if i > 0 && positions[i - 1] == pos - 1 { score += 5 }
+            if pos == 0 || isASCIISeparator(raw[pos - 1]) { score += 4 }
+            if pos >= nameStart { score += 2 }
+        }
+        return .some((score - Double(count) / 1000.0, positions))
+    }
+
+    private static func scoreUnicodePath(queryChars q: [Character], path: String) -> (score: Double, positions: [Int])? {
         let chars = Array(path)
-        let lower = chars.map { Character(String($0).lowercased()) }
         guard !chars.isEmpty else { return nil }
+        let loweredAll = Array(path.lowercased())
+        let lower: [Character] = loweredAll.count == chars.count
+            ? loweredAll
+            : chars.map { Character(String($0).lowercased()) }
 
         // Last '/' before the final character (ignoring a folder's trailing '/').
         var nameStart = 0
@@ -123,6 +202,20 @@ public enum ComposerPathMatcher {
         return (score - Double(chars.count) / 1000.0, positions)
     }
 
+    /// Fzf-style forward-then-backward shortest-stretch scoring with bonuses for consecutive matches,
+    /// word boundaries and filename matches.
+    public static func scorePath(query: String, path: String) -> (score: Double, positions: [Int])? {
+        if let qBytes = normalizeASCIIQuery(query) {
+            if qBytes.isEmpty { return (0, []) }
+            if let asciiResult = scoreASCIIPath(queryBytes: qBytes, path: path) {
+                return asciiResult
+            }
+        }
+        let q = normalizeQuery(query)
+        guard !q.isEmpty else { return (0, []) }
+        return scoreUnicodePath(queryChars: q, path: path)
+    }
+
     /// Best matching project files and folders for `query`, sorted by score descending then path ascending.
     public static func matchMentions(
         query: String,
@@ -132,15 +225,22 @@ public enum ComposerPathMatcher {
     ) -> [ComposerMentionRow] {
         guard limit > 0 else { return [] }
         let folderList = folders ?? Self.folders(of: files)
-        let q = normalizeQuery(query)
+        let qBytes = normalizeASCIIQuery(query)
+        let qChars = normalizeQuery(query)
         var best: [ScoredPath] = []
         best.reserveCapacity(min(limit + 1, 64))
 
         func consider(_ rawPath: String, isFolder: Bool) {
             let scored: (score: Double, positions: [Int])
-            if q.isEmpty {
+            if qChars.isEmpty {
+                if best.count == limit, let tail = best.last, rawPath >= tail.path {
+                    return
+                }
                 scored = (0, [])
-            } else if let hit = scorePath(query: query, path: rawPath) {
+            } else if let qBytes, let asciiResult = scoreASCIIPath(queryBytes: qBytes, path: rawPath) {
+                guard let hit = asciiResult else { return }
+                scored = hit
+            } else if let hit = scoreUnicodePath(queryChars: qChars, path: rawPath) {
                 scored = hit
             } else {
                 return

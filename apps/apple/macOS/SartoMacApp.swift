@@ -26,7 +26,8 @@ final class PrismMacAppDelegate: NSObject, NSApplicationDelegate {
 
     /// Whether a window of Sarto's is open, minimized ones included.
     var showsWindows: Bool { hasAnyOpenStandardWindow() }
-    var onEnsureMenuBarVisible: (() -> Void)?
+    /// True while no window is open: the menu bar item must show then, as the way back.
+    var onMenuBarResidentChange: ((Bool) -> Void)?
     var makeQuitCopy: (() -> QuitDialogCopy)?
     var onSystemAppearanceChanged: ((Bool) -> Void)?
 
@@ -124,7 +125,7 @@ final class PrismMacAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func hideToMenuBarResident() {
-        onEnsureMenuBarVisible?()
+        onMenuBarResidentChange?(true)
         for win in NSApp.windows where isStandardAppWindow(win) && (win.isVisible || win.isMiniaturized) {
             if win.isMiniaturized { win.deminiaturize(nil) }
             win.close()
@@ -137,8 +138,8 @@ final class PrismMacAppDelegate: NSObject, NSApplicationDelegate {
     func syncActivationPolicyForOpenWindows() {
         guard !confirmedCompleteQuit else { return }
         let hasOpenWindow = hasAnyOpenStandardWindow()
+        onMenuBarResidentChange?(!hasOpenWindow)
         if !hasOpenWindow {
-            onEnsureMenuBarVisible?()
             if NSApp.activationPolicy() != .accessory {
                 _ = NSApp.setActivationPolicy(.accessory)
             }
@@ -350,13 +351,16 @@ struct SartoMacApp: App {
                 }
                 .keyboardShortcut("k", modifiers: .command)
 
-                Button(appState.l10n.tr("game.menu.open")) {
-                    wireAppLifecycle()
-                    appDelegate.restoreRegularDockPresence()
-                    openWindow(id: "expedition")
-                    NSApp.activate(ignoringOtherApps: true)
+                // Nothing of the idle game shows while it is off on this Mac.
+                if islandCoordinator.gameStore.isOn {
+                    Button(appState.l10n.tr("game.menu.open")) {
+                        wireAppLifecycle()
+                        appDelegate.restoreRegularDockPresence()
+                        openWindow(id: "expedition")
+                        NSApp.activate(ignoringOtherApps: true)
+                    }
+                    .keyboardShortcut("e", modifiers: [.command, .shift])
                 }
-                .keyboardShortcut("e", modifiers: [.command, .shift])
             }
             CommandGroup(replacing: .help) {
                 Button(appState.l10n.tr("report.menuItem")) {
@@ -448,10 +452,8 @@ struct SartoMacApp: App {
             }
         }
         appDelegate.onReopenMainWindow = reopenMain
-        appDelegate.onEnsureMenuBarVisible = { [islandCoordinator] in
-            if !islandCoordinator.isMenuBarEnabled {
-                islandCoordinator.isMenuBarEnabled = true
-            }
+        appDelegate.onMenuBarResidentChange = { [islandCoordinator] resident in
+            islandCoordinator.setMenuBarResident(resident)
         }
         appDelegate.onWillTerminate = { [daemonManager, appState, updater, problemReport] in
             problemReport.removeCrashMarkerOnCleanQuit()
@@ -569,6 +571,9 @@ struct SartoMacApp: App {
         islandCoordinator.gameStore.onSendCommand = { [daemonManager] type, args in
             await daemonManager.sendGameCommand(type: type, args: args)
         }
+        islandCoordinator.gameStore.onSetEnabled = { [daemonManager] enabled in
+            await daemonManager.setGameEnabled(enabled)
+        }
         islandCoordinator.gameStore.onOpenExpedition = { [appDelegate, openWindow] in
             appDelegate.restoreRegularDockPresence()
             openWindow(id: "expedition")
@@ -659,36 +664,14 @@ struct SartoMacApp: App {
                 }
             }
 
-            if let e = prefs["islandEnabled"], shouldAdopt("islandEnabled", e), let b = e.value.boolValue {
-                next.islandEnabled = b
-                record("islandEnabled", e)
-            }
-            if let e = prefs["islandSessionStack"], shouldAdopt("islandSessionStack", e), let b = e.value.boolValue {
-                next.islandSessionStack = b
-                record("islandSessionStack", e)
-            }
-            if let e = prefs["islandMaxRows"], shouldAdopt("islandMaxRows", e), let d = e.value.doubleValue {
-                if let val = Int.wholePart(of: d), IslandStackOptions.rowChoices.contains(val) {
-                    next.islandMaxRows = val
-                }
-                record("islandMaxRows", e)
-            }
-            if let e = prefs["islandShowQuota"], shouldAdopt("islandShowQuota", e), let b = e.value.boolValue {
-                next.islandShowQuota = b
-                record("islandShowQuota", e)
-            }
             if let e = prefs["islandMotion"], shouldAdopt("islandMotion", e),
-               let s = e.value.stringValue, let m = IslandMotionStyle(rawValue: s) {
+               let s = e.value.stringValue, let m = IslandMotionStyle(storedValue: s) {
                 next.islandMotion = m
                 record("islandMotion", e)
             }
             if let e = prefs["subtleReminders"], shouldAdopt("subtleReminders", e), let b = e.value.boolValue {
                 next.subtleReminders = b
                 record("subtleReminders", e)
-            }
-            if let e = prefs["menubarEnabled"], shouldAdopt("menubarEnabled", e), let b = e.value.boolValue {
-                next.menubarEnabled = b
-                record("menubarEnabled", e)
             }
             if let e = prefs["statusText"], shouldAdopt("statusText", e),
                let s = e.value.stringValue, let m = StatusTextMode(rawValue: s) {
@@ -749,13 +732,8 @@ struct SartoMacApp: App {
             let prev = lastObservedIslandSettings ?? UsageIslandSettings()
             lastObservedIslandSettings = next
             var changed: [String] = []
-            if prev.islandEnabled != next.islandEnabled { changed.append("islandEnabled") }
-            if prev.islandSessionStack != next.islandSessionStack { changed.append("islandSessionStack") }
-            if prev.islandMaxRows != next.islandMaxRows { changed.append("islandMaxRows") }
-            if prev.islandShowQuota != next.islandShowQuota { changed.append("islandShowQuota") }
             if prev.islandMotion != next.islandMotion { changed.append("islandMotion") }
             if prev.subtleReminders != next.subtleReminders { changed.append("subtleReminders") }
-            if prev.menubarEnabled != next.menubarEnabled { changed.append("menubarEnabled") }
             if prev.statusText != next.statusText { changed.append("statusText") }
             if prev.order != next.order { changed.append("providerOrder") }
             if prev.hidden != next.hidden { changed.append("providerHidden") }
@@ -788,14 +766,10 @@ struct SartoMacApp: App {
 
     private func pushLocalClientStateToDaemon() async {
         let s = islandCoordinator.settingsStore.settings
+        // Whether the island and the menu bar item show, and on which displays, stay with each Mac.
         let extraPrefs: [String: JSONValue] = [
-            "islandEnabled": .bool(s.islandEnabled),
-            "islandSessionStack": .bool(s.islandSessionStack),
-            "islandMaxRows": .number(Double(s.islandMaxRows)),
-            "islandShowQuota": .bool(s.islandShowQuota),
             "islandMotion": .string(s.islandMotion.rawValue),
             "subtleReminders": .bool(s.subtleReminders),
-            "menubarEnabled": .bool(s.menubarEnabled),
             "statusText": .string(s.statusText.rawValue),
             "providerOrder": .array(s.order.map(JSONValue.string)),
             "providerHidden": .array(s.hidden.map(JSONValue.string)),

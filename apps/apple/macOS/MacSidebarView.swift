@@ -2695,11 +2695,11 @@ struct SidebarSessionHoverCardView: View {
                     }
                 }
 
-                if let modelHost = summary.modelHost {
+                if summary.agentId == "claude-code", let modelHost = summary.modelHost {
                     HStack(spacing: 4) {
                         Image(systemName: "desktopcomputer")
                             .font(.system(size: 9.5, weight: .medium))
-                        Text(l10n.tr("remoteClaude.sidebarModelOn", modelHost.hostName))
+                        Text(l10n.tr("remoteClaude.sidebarModelOn", SartoState.cleanHostDisplayName(modelHost.hostName)))
                             .font(.system(size: 10.5, weight: .medium))
                             .lineLimit(1)
                     }

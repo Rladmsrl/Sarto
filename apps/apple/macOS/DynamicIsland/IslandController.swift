@@ -1,5 +1,6 @@
 import AppKit
 import Observation
+import PrismDesign
 import SwiftUI
 
 /// Caches physical hardware notch metrics per `CGDirectDisplayID` whenever `safeAreaInsets.top > 0`
@@ -89,6 +90,13 @@ final class PrismIslandPanelController {
     private var hideWork: DispatchWorkItem?
     /// The window that was key before a click opened the panel, given key status back on collapse.
     private weak var previousKeyWindow: NSWindow?
+    /// Whether the last pointer pass was over this display's island.
+    private var pointerOver = false
+    /// The display shows another app's fullscreen Space, as the hub last read it.
+    private var overFullscreenSpace = false
+    /// The resting island is faded out over that Space; it takes no pointer while it is.
+    private var concealed = false
+    private var concealWork: DispatchWorkItem?
 
     init(
         screenID: UInt32,
@@ -192,7 +200,6 @@ final class PrismIslandPanelController {
 
         let width = max(
             model.openWidth(for: g),
-            model.stackWidth(for: g),
             model.collapsedWidth(for: g),
             IslandMetrics.grownWidth
         ) + 2 * IslandMetrics.margin
@@ -206,16 +213,24 @@ final class PrismIslandPanelController {
             ),
             display: false
         )
+        updateConcealment(after: 0)
     }
 
-    /// Whether a point over the island lies in its notch-high top band.
-    func isInBand(_ point: NSPoint) -> Bool {
-        point.y >= topAnchor.y - geometryBox.geometry.notchHeight
+    /// How far past each side of a hardware notch a resting pointer opens the island.
+    static let notchHoverReach: CGFloat = 36
+
+    /// Around a notch, only the notch and a little either side open the resting island on hover;
+    /// its wings still take clicks, but a pointer passing along the menu bar's status items
+    /// does not open it.
+    func isInHoverZone(_ point: NSPoint) -> Bool {
+        let g = geometryBox.geometry
+        guard g.hasNotch else { return true }
+        return abs(point.x - topAnchor.x) <= g.notchWidth / 2 + Self.notchHoverReach
     }
 
     func hitRect() -> NSRect {
         let m = model.effectiveMode(for: screenID)
-        if m == .hidden || (m == .collapsed && model.collapsedQuiet && !geometryBox.geometry.hasNotch) {
+        if m == .hidden || concealed || (m == .collapsed && model.collapsedQuiet && !geometryBox.geometry.hasNotch) {
             return .zero
         }
         let size = model.frameSize(for: geometryBox.geometry, mode: m, screenID: screenID)
@@ -228,13 +243,7 @@ final class PrismIslandPanelController {
     }
 
     var topBandMinY: CGFloat {
-        let bandHeight: CGFloat
-        if model.effectiveMode(for: screenID) == .collapsed && model.isSessionStackActive {
-            bandHeight = model.frameSize(for: geometryBox.geometry, mode: .collapsed, screenID: screenID).height
-        } else {
-            bandHeight = max(geometryBox.geometry.notchHeight, 44)
-        }
-        return topAnchor.y - bandHeight - 18
+        topAnchor.y - max(geometryBox.geometry.notchHeight, 44) - 18
     }
 
     func setIgnoresMouseEvents(_ ignore: Bool) {
@@ -268,19 +277,46 @@ final class PrismIslandPanelController {
         }
 
         if localMode == .open && model.openedByClick {
-            if !panel.isKeyWindow {
-                let current = NSApp.keyWindow
-                previousKeyWindow = current is PrismIslandPanel ? nil : current
-            }
-            panel.keyable = true
-            panel.makeKey()
+            takeKeyFocus()
         } else if localMode != .open {
-            panel.keyable = false
-            if panel.isKeyWindow {
-                releaseKeyFocus()
-            } else {
-                previousKeyWindow = nil
-            }
+            yieldKeyFocus()
+        }
+        // From a pop or the open panel, the chassis shrinks back before it fades.
+        updateConcealment(after: localMode == .collapsed ? 0.45 : 0)
+    }
+
+    /// The hub reports every pointer pass. A click-opened panel is key only while the pointer is
+    /// over it: the panel does not activate Sarto, so the window the user types into still looks
+    /// frontmost, and its keys must not answer the island's cards. Only a crossing counts, so a
+    /// panel opened from the keyboard keeps its keys until the pointer has been over it and left.
+    func pointerOverChanged(_ over: Bool) {
+        guard over != pointerOver else { return }
+        // A menu or drag the panel started tracks outside it; the crossing is taken after it ends.
+        if !over, panel.isKeyWindow, RunLoop.current.currentMode == .eventTracking { return }
+        pointerOver = over
+        guard model.effectiveMode(for: screenID) == .open, model.openedByClick else { return }
+        if over {
+            takeKeyFocus()
+        } else {
+            yieldKeyFocus()
+        }
+    }
+
+    private func takeKeyFocus() {
+        if !panel.isKeyWindow {
+            let current = NSApp.keyWindow
+            previousKeyWindow = current is PrismIslandPanel ? nil : current
+        }
+        panel.keyable = true
+        panel.makeKey()
+    }
+
+    private func yieldKeyFocus() {
+        panel.keyable = false
+        if panel.isKeyWindow {
+            releaseKeyFocus()
+        } else {
+            previousKeyWindow = nil
         }
     }
 
@@ -310,10 +346,52 @@ final class PrismIslandPanelController {
         )
     }
 
+    func setOverFullscreenSpace(_ on: Bool) {
+        guard overFullscreenSpace != on else { return }
+        overFullscreenSpace = on
+        updateConcealment(after: 0)
+    }
+
+    /// On a display without a notch the resting island would float over another app's fullscreen
+    /// Space, so it fades out there; pops, the open panel and pending approvals still show.
+    private func updateConcealment(after delay: TimeInterval) {
+        let conceal = overFullscreenSpace
+            && !geometryBox.geometry.hasNotch
+            && model.effectiveMode(for: screenID) == .collapsed
+            && model.requests.isEmpty
+        guard conceal != concealed else { return }
+        concealed = conceal
+        concealWork?.cancel()
+        concealWork = nil
+        guard conceal else {
+            fadePanel(to: 1, duration: 0)
+            return
+        }
+        let work = DispatchWorkItem { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self, self.concealed else { return }
+                let still = self.model.reduceMotion || self.model.motionTier == .off
+                self.fadePanel(to: 0, duration: still ? 0 : 0.18)
+            }
+        }
+        concealWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    /// Through the animator either way, so revealing replaces a fade still running.
+    private func fadePanel(to alpha: CGFloat, duration: TimeInterval) {
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = duration
+            panel.animator().alphaValue = alpha
+        }
+    }
+
     func tearDown() {
         hideWork?.cancel()
         hideWork = nil
-        panel.keyable = false
+        concealWork?.cancel()
+        concealWork = nil
+        yieldKeyFocus()
         panel.ignoresMouseEvents = true
         panel.orderOut(nil)
         panel.close()
@@ -321,12 +399,14 @@ final class PrismIslandPanelController {
 }
 
 /// Thread-safe synchronous pre-filter state for `NSEvent` mouse monitors so 1000Hz mice never
-/// allocate `Task` closures while moving below the top menu-bar band in `.collapsed` mode.
+/// allocate `Task` closures while moving anywhere but near the resting island, such as over the
+/// tabs and toolbars along the rest of the top edge.
 private final class PointerPreFilter: @unchecked Sendable {
     struct Band {
         let minX: CGFloat
         let maxX: CGFloat
         let minY: CGFloat
+        let maxY: CGFloat
     }
 
     private let lock = NSLock()
@@ -348,7 +428,7 @@ private final class PointerPreFilter: @unchecked Sendable {
         guard enabled else { return false }
         if needsFullCheck { return true }
         for band in bands {
-            if point.y >= band.minY && point.x >= band.minX && point.x <= band.maxX {
+            if point.y >= band.minY && point.y <= band.maxY && point.x >= band.minX && point.x <= band.maxX {
                 return true
             }
         }
@@ -371,24 +451,40 @@ final class PrismIslandHub {
     private var controllers: [UInt32: PrismIslandPanelController] = [:]
     private let preFilter = PointerPreFilter()
     private nonisolated(unsafe) var monitors: [Any] = []
+    /// Workspace, default and distributed centers alike; each token is removed from its own.
     private nonisolated(unsafe) var observers: [(NotificationCenter, NSObjectProtocol)] = []
-    private nonisolated(unsafe) var distributedObservers: [NSObjectProtocol] = []
 
     private nonisolated(unsafe) var hoverTimer: Timer?
     private nonisolated(unsafe) var leaveTimer: Timer?
     private nonisolated(unsafe) var wakeHoldTimer: Timer?
+    private nonisolated(unsafe) var fullscreenRecheckTimer: Timer?
     private var wakeSuppressed = false
     private var hoveredScreenID: UInt32?
+    /// The dwell has passed and `expand` is measuring the panel before it opens.
+    private var hoverOpenPending = false
     private var lastPoint: CGPoint?
     private var lastMoveTime: TimeInterval = 0
     private var smoothedSpeed: Double = 0
     private var collapsedAt: TimeInterval = 0
 
+    private var screensAsleep = false
+    private var sessionInactive = false
+    private var screenLocked = false
+
+    private var fullscreenScreenIDs: Set<UInt32> = []
+    private var fullscreenCheckGeneration = 0
+
     /// Pointer dwell threshold (120ms, < 1.2 pt/ms) so casual menu-bar sweeps never misfire.
     private static let dwellDelay: TimeInterval = 0.12
+    /// `expand` mounts the measuring pass and opens this long after it, so the dwell is checked
+    /// this much early and the panel still opens at `dwellDelay`.
+    private static let measureLead: TimeInterval = 0.03
     private static let slowSpeedThreshold: Double = 1.2
     private static let leaveGraceDelay: TimeInterval = 0.40
     private static let hoverCooldown: TimeInterval = 0.30
+    /// Room either side of the resting island in which pointer moves are still followed, so its
+    /// speed is known by the time the pointer reaches it.
+    private static let bandMargin: CGFloat = 48
 
     var isVisible: Bool {
         enabled && !controllers.isEmpty && model.mode != .hidden
@@ -417,21 +513,20 @@ final class PrismIslandHub {
         }
 
         installNotificationObservers()
+        screenLocked = Self.isScreenLocked()
+        if screenLocked { model.suspended = true }
     }
 
     deinit {
         hoverTimer?.invalidate()
         leaveTimer?.invalidate()
         wakeHoldTimer?.invalidate()
+        fullscreenRecheckTimer?.invalidate()
         for monitor in monitors {
             NSEvent.removeMonitor(monitor)
         }
         for (center, token) in observers {
             center.removeObserver(token)
-        }
-        let dnc = DistributedNotificationCenter.default()
-        for token in distributedObservers {
-            dnc.removeObserver(token)
         }
     }
 
@@ -450,6 +545,8 @@ final class PrismIslandHub {
             tearDownAllControllers()
             model.leave()
             refreshPreFilter()
+            fullscreenRecheckTimer?.invalidate()
+            fullscreenRecheckTimer = nil
             return
         }
 
@@ -457,6 +554,7 @@ final class PrismIslandHub {
         installEventMonitors()
         refreshPreFilter()
         pointerMoved()
+        checkFullscreenSpaces()
     }
 
     func relocateAll() {
@@ -464,6 +562,7 @@ final class PrismIslandHub {
         let activeScreens = Displays.screens(for: settingsStore.settings.islandDisplays)
         guard !activeScreens.isEmpty else {
             tearDownAllControllers()
+            if model.mode == .open || model.mode == .grown { model.collapse() }
             refreshPreFilter()
             return
         }
@@ -479,11 +578,16 @@ final class PrismIslandHub {
         let liveScreens = screens.filter { connectedIDs.contains(Displays.id(of: $0)) }
         let desiredIDs = Set(liveScreens.map(Displays.id(of:)))
 
+        var lostHovered = false
+        var lostActive = false
         for (sid, controller) in controllers where !desiredIDs.contains(sid) {
-            controller.panel.orderOut(nil)
             controller.tearDown()
             controllers.removeValue(forKey: sid)
-            if hoveredScreenID == sid { hoveredScreenID = nil }
+            if hoveredScreenID == sid {
+                hoveredScreenID = nil
+                lostHovered = true
+            }
+            if model.activeScreenID == sid || model.measuringScreenID == sid { lostActive = true }
         }
 
         for screen in liveScreens {
@@ -499,9 +603,56 @@ final class PrismIslandHub {
                     gameStore: gameStore
                 )
                 controllers[sid] = controller
+                controller.setOverFullscreenSpace(fullscreenScreenIDs.contains(sid))
                 controller.handleModeChange(model.mode)
             }
         }
+
+        if lostHovered || lostActive {
+            resetAfterLosingScreen(lostActive: lostActive)
+        }
+    }
+
+    /// The display under the pointer, or the one the panel opened or measures on, went away, so
+    /// no pass will ever report the pointer leaving it: the island is reset as if it had left.
+    private func resetAfterLosingScreen(lostActive: Bool) {
+        hoverTimer?.invalidate()
+        hoverTimer = nil
+        let pendingHoverOpen = hoverOpenPending
+        hoverOpenPending = false
+        switch model.mode {
+        case .open:
+            if lostActive, model.opener == .request, let target = islandDisplayNearUser() {
+                // A pending approval moves to a display that still shows the island.
+                model.activeScreenID = target
+                handleModeChange(.open)
+            } else if lostActive || model.opener == .hover {
+                model.collapse()
+            }
+        case .grown, .collapsed:
+            if pendingHoverOpen || lostActive { model.cancelMeasurement() }
+            if model.mode == .grown { model.holdPop(paused: false) }
+        case .hidden:
+            break
+        }
+    }
+
+    /// Among the displays that show the island: the one under the pointer, else the one with the
+    /// key window, else the first chosen.
+    private func islandDisplayNearUser() -> UInt32? {
+        let point = NSEvent.mouseLocation
+        if let screen = NSScreen.screens.first(where: { NSMouseInRect(point, $0.frame, false) }),
+           controllers[Displays.id(of: screen)] != nil
+        {
+            return Displays.id(of: screen)
+        }
+        if let main = NSScreen.main, controllers[Displays.id(of: main)] != nil {
+            return Displays.id(of: main)
+        }
+        return Displays.screens(for: settingsStore.settings.islandDisplays)
+            .map(Displays.id(of:))
+            .first { controllers[$0] != nil }
+            ?? controllers.keys.min()
     }
 
     private func tearDownAllControllers() {
@@ -513,6 +664,7 @@ final class PrismIslandHub {
         wakeHoldTimer = nil
         wakeSuppressed = false
         hoveredScreenID = nil
+        hoverOpenPending = false
         for controller in controllers.values {
             controller.tearDown()
         }
@@ -524,12 +676,16 @@ final class PrismIslandHub {
             || model.pointerInside
             || model.mode == .open
             || model.mode == .grown
+        // Only the island's own extent and a margin either side, never the whole top edge, and
+        // only up to the top of its display, never over a display arranged above it.
         let bands = controllers.values.compactMap { c -> PointerPreFilter.Band? in
-            guard c.screenFrame.width > 0 else { return nil }
+            let rect = c.hitRect()
+            guard c.screenFrame.width > 0, !rect.isEmpty else { return nil }
             return PointerPreFilter.Band(
-                minX: c.screenFrame.minX,
-                maxX: c.screenFrame.maxX,
-                minY: c.topBandMinY
+                minX: rect.minX - Self.bandMargin,
+                maxX: rect.maxX + Self.bandMargin,
+                minY: c.topBandMinY,
+                maxY: c.screenFrame.maxY
             )
         }
         preFilter.update(
@@ -553,7 +709,10 @@ final class PrismIslandHub {
                 object: nil,
                 queue: .main
             ) { [weak self] _ in
-                Task { @MainActor [weak self] in self?.relocateAll() }
+                Task { @MainActor [weak self] in
+                    self?.relocateAll()
+                    self?.scheduleFullscreenCheck()
+                }
             }
         ))
 
@@ -565,7 +724,9 @@ final class PrismIslandHub {
                 workspace,
                 workspace.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
                     Task { @MainActor [weak self] in
-                        guard let self, self.enabled, self.model.mode != .open else { return }
+                        guard let self, self.enabled else { return }
+                        self.scheduleFullscreenCheck()
+                        guard self.model.mode != .open else { return }
                         self.relocateAll()
                     }
                 }
@@ -585,55 +746,145 @@ final class PrismIslandHub {
             }
         ))
 
-        // Pause island optical animations when display sleeps or session locks (0% idle background power).
-        for name in [
-            NSWorkspace.screensDidSleepNotification,
-            NSWorkspace.sessionDidResignActiveNotification,
-        ] {
+        // Pause island optical animations while the displays sleep, the session is switched away
+        // or the screen is locked (0% idle background power).
+        let power: [(NotificationCenter, Notification.Name, PowerChange)] = [
+            (workspace, NSWorkspace.screensDidSleepNotification, .screensSlept),
+            (workspace, NSWorkspace.screensDidWakeNotification, .screensWoke),
+            (workspace, NSWorkspace.sessionDidResignActiveNotification, .sessionResigned),
+            (workspace, NSWorkspace.sessionDidBecomeActiveNotification, .sessionActivated),
+            (dnc, Notification.Name("com.apple.screenIsLocked"), .locked),
+            (dnc, Notification.Name("com.apple.screenIsUnlocked"), .unlocked),
+        ]
+        for (center, name, change) in power {
             observers.append((
-                workspace,
-                workspace.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                    Task { @MainActor [weak self] in
-                        self?.model.suspended = true
-                        self?.wakeHoldTimer?.invalidate()
-                        self?.wakeHoldTimer = nil
-                    }
+                center,
+                center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                    Task { @MainActor [weak self] in self?.powerChanged(change) }
                 }
             ))
         }
-        for name in [
-            NSWorkspace.screensDidWakeNotification,
-            NSWorkspace.sessionDidBecomeActiveNotification,
-        ] {
-            observers.append((
-                workspace,
-                workspace.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                    Task { @MainActor [weak self] in
-                        guard let self else { return }
-                        self.model.suspended = false
-                        self.wakeSuppressed = true
-                        self.wakeHoldTimer?.invalidate()
-                        self.wakeHoldTimer = Timer.scheduledTimer(withTimeInterval: 0.35, repeats: false) { [weak self] _ in
-                            Task { @MainActor [weak self] in
-                                self?.wakeSuppressed = false
-                                self?.wakeHoldTimer = nil
-                            }
-                        }
-                        if self.enabled { self.relocateAll() }
-                    }
-                }
-            ))
+    }
+
+    private enum PowerChange: Sendable {
+        case screensSlept, screensWoke, sessionResigned, sessionActivated, locked, unlocked
+    }
+
+    /// Displays wake behind the lock screen, so waking resumes nothing until the screen is also
+    /// unlocked; the lock state is read again on every wake in case its notification was missed.
+    private func powerChanged(_ change: PowerChange) {
+        switch change {
+        case .screensSlept: screensAsleep = true
+        case .screensWoke:
+            screensAsleep = false
+            screenLocked = Self.isScreenLocked()
+        case .sessionResigned: sessionInactive = true
+        case .sessionActivated:
+            sessionInactive = false
+            screenLocked = Self.isScreenLocked()
+        case .locked: screenLocked = true
+        case .unlocked:
+            screenLocked = false
+            screensAsleep = false
         }
-        distributedObservers.append(
-            dnc.addObserver(forName: Notification.Name("com.apple.screenIsLocked"), object: nil, queue: .main) { [weak self] _ in
-                Task { @MainActor [weak self] in self?.model.suspended = true }
+        let suspend = screensAsleep || sessionInactive || screenLocked
+        if model.suspended != suspend { model.suspended = suspend }
+        if suspend {
+            wakeHoldTimer?.invalidate()
+            wakeHoldTimer = nil
+            return
+        }
+        // The pointer may rest over the island as the displays come back; give it a moment
+        // before hovering opens anything.
+        wakeSuppressed = true
+        wakeHoldTimer?.invalidate()
+        wakeHoldTimer = Timer.scheduledTimer(withTimeInterval: 0.35, repeats: false) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.wakeSuppressed = false
+                self?.wakeHoldTimer = nil
             }
-        )
-        distributedObservers.append(
-            dnc.addObserver(forName: Notification.Name("com.apple.screenIsUnlocked"), object: nil, queue: .main) { [weak self] _ in
-                Task { @MainActor [weak self] in self?.model.suspended = false }
+        }
+        if enabled {
+            relocateAll()
+            scheduleFullscreenCheck()
+        }
+    }
+
+    private static func isScreenLocked() -> Bool {
+        guard let session = CGSessionCopyCurrentDictionary() as NSDictionary? else { return false }
+        return (session["CGSSessionScreenIsLocked"] as? NSNumber)?.boolValue ?? false
+    }
+
+    // MARK: - Fullscreen Spaces
+
+    /// Reads which displays show another app's fullscreen Space now, and again once the Space
+    /// transition has settled, since a window entering fullscreen is still resizing when the
+    /// active Space changes.
+    private func scheduleFullscreenCheck() {
+        checkFullscreenSpaces()
+        fullscreenRecheckTimer?.invalidate()
+        fullscreenRecheckTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: false) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.fullscreenRecheckTimer = nil
+                self?.checkFullscreenSpaces()
             }
-        )
+        }
+    }
+
+    /// Only displays without a notch are read; there the window list is walked off the main actor.
+    private func checkFullscreenSpaces() {
+        fullscreenCheckGeneration &+= 1
+        let generation = fullscreenCheckGeneration
+        let candidates = controllers.values.filter { !$0.geometryBox.geometry.hasNotch }.map(\.screenID)
+        guard enabled, !candidates.isEmpty else {
+            applyFullscreenSpaces([], generation: generation)
+            return
+        }
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+        Task.detached(priority: .utility) { [weak self] in
+            let covered = PrismIslandHub.displaysCoveredByOtherApps(candidates, excluding: ownPID)
+            await self?.applyFullscreenSpaces(covered, generation: generation)
+        }
+    }
+
+    private func applyFullscreenSpaces(_ ids: Set<UInt32>, generation: Int) {
+        guard generation == fullscreenCheckGeneration, ids != fullscreenScreenIDs else { return }
+        fullscreenScreenIDs = ids
+        for (sid, controller) in controllers {
+            controller.setOverFullscreenSpace(ids.contains(sid))
+        }
+        refreshPreFilter()
+        pointerMoved()
+    }
+
+    /// A display shows a fullscreen Space when an on-screen window at the normal level, owned by
+    /// another app, covers all of it, menu bar strip included, which ordinary windows cannot
+    /// while the menu bar shows. Bounds, level and owner need no screen recording permission.
+    private nonisolated static func displaysCoveredByOtherApps(
+        _ displayIDs: [UInt32],
+        excluding ownPID: pid_t
+    ) -> Set<UInt32> {
+        guard let windows = CGWindowListCopyWindowInfo(
+            [.optionOnScreenOnly, .excludeDesktopElements],
+            kCGNullWindowID
+        ) as? [[String: Any]] else { return [] }
+        let displays = displayIDs.map { ($0, CGDisplayBounds($0)) }
+        var covered = Set<UInt32>()
+        for info in windows {
+            guard (info[kCGWindowLayer as String] as? NSNumber)?.intValue == 0,
+                  let pid = (info[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value,
+                  pid != ownPID,
+                  ((info[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 1) > 0,
+                  let boundsInfo = info[kCGWindowBounds as String] as? NSDictionary,
+                  let bounds = CGRect(dictionaryRepresentation: boundsInfo as CFDictionary)
+            else { continue }
+            let reach = bounds.insetBy(dx: -1, dy: -1)
+            for (id, display) in displays where !covered.contains(id) && reach.contains(display) {
+                covered.insert(id)
+            }
+            if covered.count == displays.count { break }
+        }
+        return covered
     }
 
     private func installEventMonitors() {
@@ -699,7 +950,10 @@ final class PrismIslandHub {
 
     private func pointerMoved(at overridePoint: CGPoint? = nil) {
         guard enabled, !controllers.isEmpty, model.mode != .hidden else {
-            for controller in controllers.values { controller.setIgnoresMouseEvents(true) }
+            for controller in controllers.values {
+                controller.setIgnoresMouseEvents(true)
+                controller.pointerOverChanged(false)
+            }
             if model.pointerInside { model.pointerInside = false }
             refreshPreFilter()
             return
@@ -708,8 +962,15 @@ final class PrismIslandHub {
         let point = overridePoint ?? NSEvent.mouseLocation
         let nowTime = ProcessInfo.processInfo.systemUptime
         if let last = lastPoint, nowTime > lastMoveTime {
-            let instantSpeed = hypot(point.x - last.x, point.y - last.y) / ((nowTime - lastMoveTime) * 1000)
-            smoothedSpeed = 0.6 * instantSpeed + 0.4 * smoothedSpeed
+            let elapsed = nowTime - lastMoveTime
+            if elapsed > 0.1 {
+                // Moves away from the island are filtered out, so a point this old says nothing
+                // about how fast the pointer comes in now.
+                smoothedSpeed = 0
+            } else {
+                let instantSpeed = hypot(point.x - last.x, point.y - last.y) / (elapsed * 1000)
+                smoothedSpeed = 0.6 * instantSpeed + 0.4 * smoothedSpeed
+            }
         }
         lastPoint = point
         lastMoveTime = nowTime
@@ -718,6 +979,7 @@ final class PrismIslandHub {
         for (sid, controller) in controllers {
             let hit = controller.hitRect().insetBy(dx: -2, dy: -2).contains(point)
             controller.setIgnoresMouseEvents(!hit)
+            controller.pointerOverChanged(hit)
             if hit { hitScreenID = sid }
         }
 
@@ -726,12 +988,9 @@ final class PrismIslandHub {
             model.pointerInside = over
         }
 
-        // Over the running session stack only its top band opens the panel on hover, so the
-        // session rows below stay where the pointer can click them.
         if let sid = hitScreenID,
            model.mode == .collapsed,
-           model.isSessionStackActive,
-           controllers[sid]?.isInBand(point) == false
+           controllers[sid]?.isInHoverZone(point) == false
         {
             hitScreenID = nil
         }
@@ -757,8 +1016,8 @@ final class PrismIslandHub {
         guard model.mode == .collapsed || model.mode == .grown else { return }
         if ProcessInfo.processInfo.systemUptime - collapsedAt < Self.hoverCooldown { return }
         model.holdPop(paused: true)
-        model.prepare(onScreen: screenID)
-        armHoverTimer(after: Self.dwellDelay, screenID: screenID)
+        // The hidden full panel is measured only once the dwell holds, never on a passing sweep.
+        armHoverTimer(after: Self.dwellDelay - Self.measureLead, screenID: screenID)
     }
 
     private func armHoverTimer(after seconds: TimeInterval, screenID: UInt32) {
@@ -768,6 +1027,8 @@ final class PrismIslandHub {
                 guard let self, self.hoveredScreenID == screenID else { return }
                 let still = ProcessInfo.processInfo.systemUptime - self.lastMoveTime > 0.05
                 if still || self.smoothedSpeed < Self.slowSpeedThreshold {
+                    self.hoverTimer = nil
+                    self.hoverOpenPending = true
                     self.model.expand(by: .hover, onScreen: screenID)
                 } else {
                     self.armHoverTimer(after: 0.04, screenID: screenID)
@@ -780,7 +1041,11 @@ final class PrismIslandHub {
         hoverTimer?.invalidate()
         hoverTimer = nil
         if model.mode == .grown { model.holdPop(paused: false) }
-        if model.mode == .collapsed { model.cancelMeasurement() }
+        // Leaving while `expand` measures stops the open; an open the user clicked goes ahead.
+        if hoverOpenPending {
+            hoverOpenPending = false
+            if model.mode != .open { model.cancelMeasurement() }
+        }
         if model.mode == .open && model.opener == .hover {
             leaveTimer?.invalidate()
             leaveTimer = Timer.scheduledTimer(withTimeInterval: Self.leaveGraceDelay, repeats: false) { [weak self] _ in
@@ -829,6 +1094,14 @@ final class PrismIslandHub {
     // MARK: - Broadcast Mode & Accessibility
 
     private func handleModeChange(_ mode: IslandMode) {
+        hoverOpenPending = false
+        // Requests and the keyboard toggle open on `Displays.preferredScreen()`, which need not
+        // show the island; left there, the model would stay open with no panel showing it.
+        if mode == .open, let active = model.activeScreenID, controllers[active] == nil,
+           let target = islandDisplayNearUser()
+        {
+            model.activeScreenID = target
+        }
         if mode == .collapsed {
             collapsedAt = ProcessInfo.processInfo.systemUptime
             leaveTimer?.invalidate()

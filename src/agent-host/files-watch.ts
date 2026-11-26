@@ -3,14 +3,20 @@
 // edit or another program's.
 
 import { watch as fsWatch, type FSWatcher } from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import type { FileList } from '@shared/files'
 import type { Platform } from '@shared/platform'
+import { isBroadRoot, protectedRelativePrefixes } from './files'
 import type { WatchFn } from './git/watch'
 import { pathKey } from './paths'
 
 export interface FilesWatchesOptions {
   platform: Platform
+  /** User home directory used to avoid recursive watching of broad roots and `~/Library`. */
+  homeDir?: string
+  /** Extra absolute paths (such as Sarto's own data folder) whose events are always ignored. */
+  ignorePaths?: readonly string[]
   /** Tells a port that the project it named `projectPath` changed on disk. */
   changed(portId: string, projectPath: string): void
   log(level: 'warn', message: string): void
@@ -91,9 +97,24 @@ export class FilesWatches {
 
   private start(key: string, root: string, before?: FolderWatch): FolderWatch {
     const { platform } = this.options
+    const homeDir = this.options.homeDir ?? os.homedir()
+    const broad = isBroadRoot(root, platform, homeDir)
+    const protectedPrefixes = protectedRelativePrefixes(
+      root,
+      platform,
+      homeDir,
+      this.options.ignorePaths,
+    )
     const watch = new FolderWatch({
       root,
-      recursive: this.options.recursive ?? (platform === 'darwin' || platform === 'win32'),
+      platform,
+      // Broad roots like `$HOME` or `/` must never hold a recursive FSEvents stream: system writes
+      // under `~/Library` (including Sarto's own daemon data) would fire `files.changed` non-stop.
+      recursive: broad
+        ? false
+        : (this.options.recursive ?? (platform === 'darwin' || platform === 'win32')),
+      shallowOnly: broad,
+      protectedPrefixes,
       debounceMs: this.options.debounceMs ?? DEBOUNCE_MS,
       intervalMs: this.options.intervalMs ?? INTERVAL_MS,
       folderLimit: this.options.folderLimit ?? FOLDER_LIMIT,
@@ -113,7 +134,10 @@ export class FilesWatches {
 
 interface FolderWatchOptions {
   root: string
+  platform: Platform
   recursive: boolean
+  shallowOnly: boolean
+  protectedPrefixes: readonly string[]
   debounceMs: number
   intervalMs: number
   folderLimit: number
@@ -125,6 +149,8 @@ interface FolderWatchOptions {
 /** One project folder's watchers and the rules for which of their changes count. */
 class FolderWatch {
   private readonly watchers = new Map<string, FSWatcher>()
+  private readonly protectedPrefixes: ReadonlySet<string>
+  private readonly caseInsensitive: boolean
   private recursive: boolean
   private closed = false
   private dead = false
@@ -139,6 +165,12 @@ class FolderWatch {
   private readonly readFolders = new Set<string>()
 
   constructor(private readonly options: FolderWatchOptions) {
+    this.caseInsensitive = options.platform === 'darwin' || options.platform === 'win32'
+    this.protectedPrefixes = new Set(
+      options.protectedPrefixes.map((prefix) =>
+        this.caseInsensitive ? prefix.toLowerCase() : prefix,
+      ),
+    )
     this.recursive = options.recursive
     if (this.recursive) {
       try {
@@ -204,15 +236,32 @@ class FolderWatch {
     this.watchers.clear()
   }
 
+  /** Whether a path matches any protected directory that must never trigger refreshes. */
+  private isProtected(segments: string[]): boolean {
+    if (this.options.platform === 'darwin' && segments.includes('.Trash')) return true
+    if (this.protectedPrefixes.size === 0) return false
+    let prefix = ''
+    for (const segment of segments) {
+      const normalized = this.caseInsensitive ? segment.toLowerCase() : segment
+      prefix = prefix === '' ? normalized : `${prefix}/${normalized}`
+      if (this.protectedPrefixes.has(prefix)) return true
+    }
+    return false
+  }
+
   /** Whether a change to the entry at `relative` can change what the tree lists or shows. */
   private counts(relative: string): boolean {
     const segments = relative.split(/[\\/]/).filter((s) => s !== '' && s !== '.')
-    return segments.length === 0 || this.shows(segments.slice(0, -1))
+    if (segments.length === 0) return true
+    if (this.isProtected(segments)) return false
+    if (this.options.shallowOnly && segments.length > 1) return false
+    return this.shows(segments.slice(0, -1))
   }
 
   /** Whether the tree shows what is directly in the folder of these segments. */
   private shows(folder: string[]): boolean {
     if (folder.includes('.git')) return false
+    if (this.isProtected(folder)) return false
     if (this.readFolders.has(folder.join('/'))) return true
     if (folder.includes('node_modules')) return false
     let prefix = ''
@@ -225,6 +274,7 @@ class FolderWatch {
 
   /** In a watcher per folder: the folders the tree shows, shallow first, as many as allowed. */
   private wanted(): string[] {
+    if (this.options.shallowOnly) return ['']
     const candidates = new Set<string>([''])
     for (const folder of this.listedFolders ?? []) candidates.add(folder)
     for (const folder of this.readFolders) candidates.add(folder)

@@ -27,6 +27,7 @@
 		5915C1703CCD8B3E87B2082E /* SessionMarkdownExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A13A053ABC104FF18DA711D /* SessionMarkdownExporter.swift */; };
 		5B10054F5ABEF726B43867BE /* SartoState+AgentAvailability.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85C2A422633CB24769BDDF5C /* SartoState+AgentAvailability.swift */; };
 		5B42EF668C5ADFD683A0591F /* ComposerAttachments.swift in Sources */ = {isa = PBXBuildFile; fileRef = A25E840CE058002EEEDF82DA /* ComposerAttachments.swift */; };
+		5B7F4DE1DE8B1F727245A907 /* SystemAlertNotifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA8F345C445D1DF70DCBEE63 /* SystemAlertNotifier.swift */; };
 		5CF281ECBC24026BF24A428C /* GlobalSessionSearchSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 780A6AFEAD08EC9B71588407 /* GlobalSessionSearchSheet.swift */; };
 		6054F04722CD4A7578B03989 /* NewSessionStageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97EF65BB06EE0343203E4769 /* NewSessionStageView.swift */; };
 		61B394BD6EDA67D5D81F69D2 /* MacSidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38942CAD0CE394A2CDE7A56D /* MacSidebarView.swift */; };
@@ -49,10 +50,8 @@
 		8FA9BA0C168259B14439B2D9 /* SessionThreadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D88DFC685E7A0F2274AD0CEB /* SessionThreadView.swift */; };
 		903625ACFC070358C073B5CE /* MenuBarPanelViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F44B8A9AF9026D530B937926 /* MenuBarPanelViews.swift */; };
 		9508E55FFEF66943F14B7BE5 /* ComposerOverlaysAndPreviews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96E80FD288C519E51AD8D86C /* ComposerOverlaysAndPreviews.swift */; };
-		954AF266491D75E0EA2D3D9F /* AgentRPGCharacterPopover.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77DE437D5FA0433BFD01B6A9 /* AgentRPGCharacterPopover.swift */; };
 		98A07F97597C47985446E12C /* IslandLocalization.swift in Sources */ = {isa = PBXBuildFile; fileRef = E94215AF7808E5564055272C /* IslandLocalization.swift */; };
 		9E2F70A1994BC4DED337F8AB /* IslandModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E923628483BC400FCE16D7F /* IslandModels.swift */; };
-		A15BC0133B58D26CA8B2E1A8 /* AgentRPGModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 473DBA9B121DF86F1817513D /* AgentRPGModels.swift */; };
 		A2E3DDFE1D2880B8604ACDE1 /* MarkdownHTMLPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1EAD0A984A098F76C6D042C8 /* MarkdownHTMLPreview.swift */; };
 		A34A9999A6AD4548AF67D2D3 /* IslandProjection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85B7FDC05E4823D967460825 /* IslandProjection.swift */; };
 		A6407B1050B32003A9EACB26 /* ImportCLISessionsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D53724818126E257758F3376 /* ImportCLISessionsSheet.swift */; };
@@ -61,6 +60,7 @@
 		ACFD06FCC8D0113D8F97BADD /* WorkspaceController+GitFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7E010ED9790E15599D83589 /* WorkspaceController+GitFlow.swift */; };
 		AF6DBD51E61D346A89C920CC /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F93282751CCEB90CE1D71427 /* Assets.xcassets */; };
 		B2FFF932DB8D22DF0BEBD940 /* SartoMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1D753FDC726C09F4AB3CA9 /* SartoMacApp.swift */; };
+		B3CC3B02E00D4C18E0B12BAD /* GameSettingsSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA5B1D02F02DBCA8FEBCB232 /* GameSettingsSection.swift */; };
 		BFCF7CB00EA122739F9B52C4 /* ComposerTextEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA1C9A93192EC5719BA1C7B9 /* ComposerTextEditor.swift */; };
 		C4F3201A9EEED7035841FD28 /* PrismBrowserEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCB0CBD9D94ADC69A968A020 /* PrismBrowserEngine.swift */; };
 		C80EB2BA65065A37E796A618 /* PrismBrowserPaneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8992E1D1C10EA5BBED6C3C0F /* PrismBrowserPaneView.swift */; };
@@ -72,7 +72,6 @@
 		D3E49CE373C2E2E81F39A5B3 /* IslandAssets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9AB6944800D65D863968370A /* IslandAssets.swift */; };
 		D584712B6F794EE895CE2491 /* GameStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EFAE74C5A4D5705FB81D7F4 /* GameStore.swift */; };
 		D9CF872CAB78B4AF9D7D2E12 /* DisplayMapPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 733B4B70F2EAE1560AAB417A /* DisplayMapPicker.swift */; };
-		DF919AB9AC36E48BD460B978 /* AgentRPGStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60BD2F5CAD7B326506141950 /* AgentRPGStore.swift */; };
 		E50502C9907BC3C83D72A16F /* IslandUsageViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4ABC19CF9AAEFCEF9877C2C7 /* IslandUsageViews.swift */; };
 		E8E925A5A256B6B7B5D97B9D /* QuitCountdown.swift in Sources */ = {isa = PBXBuildFile; fileRef = 286F49D38195DD675CA2CAF4 /* QuitCountdown.swift */; };
 		E92893E2BCD51CC09577B2B2 /* SartoUpdater.swift in Sources */ = {isa = PBXBuildFile; fileRef = A35A780F27808B934EAC09A6 /* SartoUpdater.swift */; };
@@ -104,19 +103,16 @@
 		3C30A38C1EB0C1227F36F8CD /* WorkbenchPanes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkbenchPanes.swift; sourceTree = "<group>"; };
 		3EE22AE96A054D5D660C2D38 /* SettingsNetworkAndSystemView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsNetworkAndSystemView.swift; sourceTree = "<group>"; };
 		40243CE65AE343967F5231A4 /* DaemonRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaemonRuntime.swift; sourceTree = "<group>"; };
-		473DBA9B121DF86F1817513D /* AgentRPGModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentRPGModels.swift; sourceTree = "<group>"; };
 		4787016FCA61C9367790DD97 /* IslandController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IslandController.swift; sourceTree = "<group>"; };
 		4ABC19CF9AAEFCEF9877C2C7 /* IslandUsageViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IslandUsageViews.swift; sourceTree = "<group>"; };
 		57911F287D767C7028EA8A51 /* SartoState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SartoState.swift; sourceTree = "<group>"; };
 		592032CA7B05DB2AF7078ADE /* UpdateInstallFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateInstallFlow.swift; sourceTree = "<group>"; };
 		5A13A053ABC104FF18DA711D /* SessionMarkdownExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionMarkdownExporter.swift; sourceTree = "<group>"; };
-		60BD2F5CAD7B326506141950 /* AgentRPGStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentRPGStore.swift; sourceTree = "<group>"; };
 		60CB420A93F43011A3FA6C09 /* PrismDeviceController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrismDeviceController.swift; sourceTree = "<group>"; };
 		6712122435D26B2E54B63ED2 /* NewSessionSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewSessionSheet.swift; sourceTree = "<group>"; };
 		6B748B129F3FA2A2C7B95F84 /* SyncApprovalPanelController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncApprovalPanelController.swift; sourceTree = "<group>"; };
 		70F21ACDBB51B4C78F02C882 /* SartoAppPaths.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SartoAppPaths.swift; sourceTree = "<group>"; };
 		733B4B70F2EAE1560AAB417A /* DisplayMapPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayMapPicker.swift; sourceTree = "<group>"; };
-		77DE437D5FA0433BFD01B6A9 /* AgentRPGCharacterPopover.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentRPGCharacterPopover.swift; sourceTree = "<group>"; };
 		780A6AFEAD08EC9B71588407 /* GlobalSessionSearchSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalSessionSearchSheet.swift; sourceTree = "<group>"; };
 		7CED7A7ED2873BB603608356 /* ProblemReportCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProblemReportCoordinator.swift; sourceTree = "<group>"; };
 		81E1A3C0B06A944F8CABC182 /* UpdatesSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdatesSettingsView.swift; sourceTree = "<group>"; };
@@ -141,11 +137,13 @@
 		A7E010ED9790E15599D83589 /* WorkspaceController+GitFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "WorkspaceController+GitFlow.swift"; sourceTree = "<group>"; };
 		AA1D753FDC726C09F4AB3CA9 /* SartoMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SartoMacApp.swift; sourceTree = "<group>"; };
 		AE2C17D8FF7A1DEB504A406F /* SidebarTreeModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarTreeModel.swift; sourceTree = "<group>"; };
+		BA8F345C445D1DF70DCBEE63 /* SystemAlertNotifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemAlertNotifier.swift; sourceTree = "<group>"; };
 		BC8B1C288F030BC639CB1CFB /* SettingsExtensionsSectionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsExtensionsSectionView.swift; sourceTree = "<group>"; };
 		BFC492F881F8815831132C89 /* PrismDesign */ = {isa = PBXFileReference; lastKnownFileType = folder; name = PrismDesign; path = Packages/PrismDesign; sourceTree = SOURCE_ROOT; };
 		C22F2123D08D4044AD5B3BA0 /* AgentInstallSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentInstallSheet.swift; sourceTree = "<group>"; };
 		C6A5916E183DA224F2D8574F /* ThreadRichContentViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadRichContentViews.swift; sourceTree = "<group>"; };
 		CA1C9A93192EC5719BA1C7B9 /* ComposerTextEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerTextEditor.swift; sourceTree = "<group>"; };
+		CA5B1D02F02DBCA8FEBCB232 /* GameSettingsSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameSettingsSection.swift; sourceTree = "<group>"; };
 		CCB0CBD9D94ADC69A968A020 /* PrismBrowserEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrismBrowserEngine.swift; sourceTree = "<group>"; };
 		CD76702D5535D4CAD90FCE65 /* AppIconManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppIconManager.swift; sourceTree = "<group>"; };
 		D06BC03D60916F0B4C66377B /* PrismPreviewStageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrismPreviewStageView.swift; sourceTree = "<group>"; };
@@ -180,16 +178,6 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		0B79C01641B9F036D9E3A1A2 /* AgentRPG */ = {
-			isa = PBXGroup;
-			children = (
-				77DE437D5FA0433BFD01B6A9 /* AgentRPGCharacterPopover.swift */,
-				473DBA9B121DF86F1817513D /* AgentRPGModels.swift */,
-				60BD2F5CAD7B326506141950 /* AgentRPGStore.swift */,
-			);
-			path = AgentRPG;
-			sourceTree = "<group>";
-		};
 		2B0CF18C90777DCE206E054E /* Settings */ = {
 			isa = PBXGroup;
 			children = (
@@ -235,6 +223,7 @@
 			isa = PBXGroup;
 			children = (
 				8669843EA2D75ED074B91131 /* ExpeditionWindowView.swift */,
+				CA5B1D02F02DBCA8FEBCB232 /* GameSettingsSection.swift */,
 				8EFAE74C5A4D5705FB81D7F4 /* GameStore.swift */,
 				05FC5E2493CA6F5A2189B434 /* RailGameStrip.swift */,
 			);
@@ -253,6 +242,7 @@
 				3BC497E33D5236CDDE9FFDE8 /* IslandSignals.swift */,
 				4ABC19CF9AAEFCEF9877C2C7 /* IslandUsageViews.swift */,
 				1DFA362578C4452E75E6D340 /* IslandViews.swift */,
+				BA8F345C445D1DF70DCBEE63 /* SystemAlertNotifier.swift */,
 			);
 			path = DynamicIsland;
 			sourceTree = "<group>";
@@ -278,7 +268,6 @@
 				70F21ACDBB51B4C78F02C882 /* SartoAppPaths.swift */,
 				AA1D753FDC726C09F4AB3CA9 /* SartoMacApp.swift */,
 				6B748B129F3FA2A2C7B95F84 /* SyncApprovalPanelController.swift */,
-				0B79C01641B9F036D9E3A1A2 /* AgentRPG */,
 				A426059FD80B245979239C90 /* DynamicIsland */,
 				772C2E16A1906CFB3F90A4B9 /* Game */,
 				F23F8E0205D449304D062BF5 /* MenuBar */,
@@ -458,9 +447,6 @@
 			files = (
 				16A692DB09F289AFAE7C0DB4 /* AgentAvailability.swift in Sources */,
 				7D5018586192D9CBE8E65EF7 /* AgentInstallSheet.swift in Sources */,
-				954AF266491D75E0EA2D3D9F /* AgentRPGCharacterPopover.swift in Sources */,
-				A15BC0133B58D26CA8B2E1A8 /* AgentRPGModels.swift in Sources */,
-				DF919AB9AC36E48BD460B978 /* AgentRPGStore.swift in Sources */,
 				8AB4C7A5963A0464CFDF2764 /* AppIconManager.swift in Sources */,
 				5B42EF668C5ADFD683A0591F /* ComposerAttachments.swift in Sources */,
 				9508E55FFEF66943F14B7BE5 /* ComposerOverlaysAndPreviews.swift in Sources */,
@@ -471,6 +457,7 @@
 				D9CF872CAB78B4AF9D7D2E12 /* DisplayMapPicker.swift in Sources */,
 				2CCCDC1B40C85C5E87C23D43 /* ExpeditionWindowView.swift in Sources */,
 				F9856275D611EC9FD300670B /* FileDownload.swift in Sources */,
+				B3CC3B02E00D4C18E0B12BAD /* GameSettingsSection.swift in Sources */,
 				D584712B6F794EE895CE2491 /* GameStore.swift in Sources */,
 				7F1A0DD5EC9599986F4C584D /* GitFlowViews.swift in Sources */,
 				5CF281ECBC24026BF24A428C /* GlobalSessionSearchSheet.swift in Sources */,
@@ -516,6 +503,7 @@
 				EB76CED5658DF26EABFE0D28 /* SettingsNetworkAndSystemView.swift in Sources */,
 				07ECB6489628855792DF74D9 /* SidebarTreeModel.swift in Sources */,
 				F00E6F448C8232D9AE584AFB /* SyncApprovalPanelController.swift in Sources */,
+				5B7F4DE1DE8B1F727245A907 /* SystemAlertNotifier.swift in Sources */,
 				3E78179362D653E9D48FDC05 /* ThreadEntryCardsView.swift in Sources */,
 				54681CF48E18C0017AC97EB6 /* ThreadRichContentViews.swift in Sources */,
 				1D6F9737EB949294ECD6127E /* ThreadTimelineModel.swift in Sources */,

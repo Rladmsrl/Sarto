@@ -66,13 +66,8 @@ struct IslandShape: Shape {
 }
 
 private func islandSwapTransition(_ reduceMotion: Bool) -> AnyTransition {
+    if reduceMotion { return .identity }
     let removal = AnyTransition.opacity.animation(.easeOut(duration: 0.09))
-    if reduceMotion {
-        return .asymmetric(
-            insertion: .opacity.animation(.easeOut(duration: 0.15)),
-            removal: removal
-        )
-    }
     return .asymmetric(
         insertion: .opacity
             .combined(with: .offset(y: 6))
@@ -92,10 +87,7 @@ struct PrismIslandRootView: View {
     var geometryBox: ScreenGeometryBox
 
     private var chassisFill: Color {
-        switch model.prismTokens.palette {
-        case .warm, .alabaster: return Color(hex: 0x0C0B0A)
-        case .obsidian, .crystal: return Color(hex: 0x050508)
-        }
+        model.prismTokens.island.surface
     }
 
     var body: some View {
@@ -123,9 +115,7 @@ struct PrismIslandRootView: View {
                     shoulderWidth: shoulder,
                     aura: aura,
                     tokens: model.prismTokens,
-                    isOpen: mode == .open,
-                    paused: model.suspended,
-                    reduceMotion: model.reduceMotion
+                    isOpen: mode == .open
                 )
 
                 // Mode-switched content clipped cleanly to inner silhouette
@@ -144,14 +134,14 @@ struct PrismIslandRootView: View {
                                 geometry: g,
                                 screenID: screenID
                             )
-                            .transition(islandSwapTransition(model.reduceMotion))
+                            .transition(islandSwapTransition(model.reduceMotion || model.motionTier == .off))
                         } else {
                             IslandCollapsedContent(model: model, geometry: g, screenID: screenID)
-                                .transition(islandSwapTransition(model.reduceMotion))
+                                .transition(islandSwapTransition(model.reduceMotion || model.motionTier == .off))
                         }
                     case .grown:
                         IslandGrownContent(model: model, geometry: g, screenID: screenID)
-                            .transition(islandSwapTransition(model.reduceMotion))
+                            .transition(islandSwapTransition(model.reduceMotion || model.motionTier == .off))
                     case .open:
                         IslandPanelContent(
                             model: model,
@@ -161,7 +151,7 @@ struct PrismIslandRootView: View {
                             geometry: g,
                             screenID: screenID
                         )
-                        .transition(islandSwapTransition(model.reduceMotion))
+                        .transition(islandSwapTransition(model.reduceMotion || model.motionTier == .off))
                     }
                 }
                 .frame(width: size.width, height: size.height, alignment: .top)
@@ -174,7 +164,6 @@ struct PrismIslandRootView: View {
             }
             .animation(model.animation(to: .collapsed), value: model.isIdleForUsage)
             .animation(model.animation(to: .collapsed), value: model.collapsedQuiet)
-            .animation(model.animation(to: .collapsed), value: model.isSessionStackActive ? model.stackBodyHeight : -1)
             .animation(model.animation(to: .open), value: model.panelHeight(for: screenID))
             .animation(model.animation(to: mode), value: mode)
 
@@ -210,6 +199,8 @@ struct PrismIslandRootView: View {
             }
         }
         .environment(\.colorScheme, .dark)
+        .environment(\.prismTokens, model.prismTokens)
+        .environment(\.prismMotionTier, model.motionTier)
     }
 }
 
@@ -230,6 +221,16 @@ private struct IslandContextMenuItems: View {
         }
         Divider()
         Menu(model.strings.text("menu.displays")) {
+            Button {
+                model.actionSink?.islandUseAutomaticDisplays()
+            } label: {
+                if model.displaysAutomatic {
+                    Label(model.strings.text("menu.displaysAutomatic"), systemImage: "checkmark")
+                } else {
+                    Text(model.strings.text("menu.displaysAutomatic"))
+                }
+            }
+            Divider()
             ForEach(model.displayMenuItems) { item in
                 Button {
                     model.toggleDisplay(item.display)
@@ -241,13 +242,6 @@ private struct IslandContextMenuItems: View {
                     }
                 }
             }
-        }
-        Divider()
-        Button(model.strings.text("menu.testPop")) {
-            model.actionSink?.islandTriggerDemoPop()
-        }
-        Button(model.strings.text("menu.testApproval")) {
-            model.actionSink?.islandTriggerDemoApproval()
         }
         Divider()
         Button(model.strings.text("menu.hideIsland")) {
@@ -305,21 +299,6 @@ private struct IslandLeadMarks: View {
     }
 }
 
-private struct IslandCountBadge: View {
-    let count: Int
-
-    var body: some View {
-        Text("\(count)")
-            .font(IslandFonts.ui(11.5, .semibold))
-            .monospacedDigit()
-            .foregroundStyle(IslandTheme.quote)
-            .padding(.horizontal, 6)
-            .frame(minWidth: 20, minHeight: 20)
-            .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(IslandTheme.button))
-            .fixedSize()
-    }
-}
-
 private struct IslandFactView: View {
     let fact: IslandCollapsedFact
     var strings = IslandStrings(language: .system)
@@ -335,9 +314,14 @@ private struct IslandFactView: View {
             }
         case .resumeAt(let resetsAt):
             IslandStatePill(tint: IslandTheme.danger) {
-                TimelineView(.periodic(from: .now, by: 1)) { context in
-                    Text(strings.text("fact.resume", ["time": Self.countdown(to: resetsAt, from: context.date)]))
+                if paused {
+                    Text(strings.text("fact.resume", ["time": Self.countdown(to: resetsAt, from: Date())]))
                         .monospacedDigit()
+                } else {
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        Text(strings.text("fact.resume", ["time": Self.countdown(to: resetsAt, from: context.date)]))
+                            .monospacedDigit()
+                    }
                 }
             }
         case .failed:
@@ -350,7 +334,7 @@ private struct IslandFactView: View {
                 Text("\(count)").monospacedDigit()
             }
         case .running(let count, let since):
-            IslandStatePill(tint: IslandTheme.quote, fill: Color.white.opacity(0.08)) {
+            IslandStatePill(tint: IslandTheme.quote, fill: IslandTheme.line) {
                 Circle()
                     .fill(IslandTheme.running)
                     .frame(width: 6, height: 6)
@@ -362,42 +346,6 @@ private struct IslandFactView: View {
                     IslandRunningElapsedLabel(sinceMs: since, strings: strings, paused: paused)
                 }
             }
-        case .quota(let window, let agent, let reset):
-            HStack(spacing: 5) {
-                IslandMarkView(agent: agent, size: 12)
-                ClampedWidthLayout(maxWidth: 54) {
-                    Text(window.label)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
-                ZStack(alignment: .leading) {
-                    Capsule().fill(IslandTheme.track)
-                    Capsule()
-                        .fill(Self.quotaTint(window.remaining))
-                        .frame(width: max(2, 24 * window.remaining))
-                }
-                .frame(width: 24, height: 4)
-                Text("\(Int((window.remaining * 100).rounded()))%")
-                    .monospacedDigit()
-                    .foregroundStyle(window.remaining <= 0.3 ? Self.quotaTint(window.remaining) : IslandTheme.text)
-                    .fixedSize()
-                if let reset {
-                    Text("· \(reset)")
-                        .fixedSize()
-                }
-            }
-            .font(IslandFonts.ui(11.5, .semibold))
-            .foregroundStyle(IslandTheme.quote)
-            .lineLimit(1)
-        case .count(let count):
-            IslandCountBadge(count: count)
-        case .plan(let done, let total):
-            HStack(spacing: 5) {
-                IslandPlanRing(done: done, total: total, size: 13)
-                Text("\(done)/\(total)")
-            }
-            .font(IslandFonts.ui(12.5, .semibold))
-            .foregroundStyle(IslandTheme.text)
         case .cache(let text, let ending):
             HStack(spacing: 4) {
                 Image(systemName: "timer")
@@ -406,25 +354,7 @@ private struct IslandFactView: View {
             }
             .font(IslandFonts.ui(11.5, .semibold))
             .foregroundStyle(ending ? IslandTheme.warning : IslandTheme.secondary)
-        case .speed(let text):
-            Text(text)
-                .font(IslandFonts.mono(11, .semibold))
-                .foregroundStyle(
-                    LinearGradient(
-                        colors: [IslandTheme.prismCobalt, IslandTheme.prismIris],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                )
-        case .word(let text):
-            Text(text)
-                .font(IslandFonts.ui(12.5, .semibold))
-                .foregroundStyle(IslandTheme.text)
         }
-    }
-
-    static func quotaTint(_ remaining: Double) -> Color {
-        remaining <= 0.1 ? IslandTheme.danger : (remaining <= 0.3 ? IslandTheme.warning : IslandTheme.prismCobalt)
     }
 
     /// "1:42:00" past an hour, "42:00" under it.
@@ -485,23 +415,19 @@ private struct IslandCollapsedContent: View {
         let g = geometry
         let c = model.collapsed
 
-        if model.isSessionStackActive {
-            IslandSessionStack(model: model, geometry: g, screenID: screenID)
-        } else {
-            Group {
-                if model.isRunningStrikeActive {
-                    runningStrikeBar(geometry: g, collapsed: c)
-                } else {
-                    standardCollapsedBar(geometry: g, collapsed: c)
-                }
+        Group {
+            if model.isRunningStrikeActive {
+                runningStrikeBar(geometry: g, collapsed: c)
+            } else {
+                standardCollapsedBar(geometry: g, collapsed: c)
             }
-            .frame(height: g.notchHeight)
-            .contentShape(Rectangle())
-            .onTapGesture { model.expand(by: .click, onScreen: screenID) }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(model.islandAccessibilityLabel)
-            .accessibilityAddTraits(.isButton)
         }
+        .frame(height: g.notchHeight)
+        .contentShape(Rectangle())
+        .onTapGesture { model.expand(by: .click, onScreen: screenID) }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(model.islandAccessibilityLabel)
+        .accessibilityAddTraits(.isButton)
     }
 
     private func runningStrikeBar(
@@ -512,15 +438,14 @@ private struct IslandCollapsedContent: View {
         let paused = model.suspended || model.effectiveMode(for: screenID) != .collapsed
 
         return HStack(spacing: 0) {
-            IslandPixelStrikeStage(
+            IslandLiveStrikeStage(
+                model: model,
                 agents: c?.agents ?? [],
-                tps: model.telemetry?.tps,
-                runningCount: max(1, model.snapshot.summary.running),
+                sessionId: nil,
+                runningCount: max(1, model.summary.running),
                 notchGapWidth: g.hasNotch ? g.notchWidth : 0,
                 leftWingWidth: wing,
-                paused: paused,
-                reduceMotion: !model.animatesStrikes,
-                framesPerSecond: model.stackOptions.motion.framesPerSecond
+                paused: paused
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -564,21 +489,8 @@ private struct IslandCollapsedContent: View {
     ) -> some View {
         let wing = model.collapsedWingWidth(for: g)
         return HStack(spacing: 0) {
-            Group {
-                if case .quota(let window, let agent, _) = c?.fact {
-                    HStack(spacing: 5) {
-                        IslandMarkView(agent: agent, size: 12)
-                        Text(window.label)
-                            .font(IslandFonts.ui(11, .semibold))
-                            .foregroundStyle(IslandTheme.quote)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                    }
-                } else {
-                    IslandLeadMarks(collapsed: c, aura: model.auraState)
-                        .fixedSize()
-                }
-            }
+            IslandLeadMarks(collapsed: c, aura: model.auraState)
+                .fixedSize()
             .padding(.leading, 12)
             .padding(.trailing, 4)
             .frame(width: wing, alignment: .leading)
@@ -586,37 +498,14 @@ private struct IslandCollapsedContent: View {
             Color.clear
                 .frame(width: g.notchWidth)
 
-            Group {
-                if case .quota(let window, _, _) = c?.fact {
-                    HStack(spacing: 5) {
-                        ZStack(alignment: .leading) {
-                            Capsule().fill(IslandTheme.track)
-                            Capsule()
-                                .fill(IslandFactView.quotaTint(window.remaining))
-                                .frame(width: max(2, 28 * window.remaining))
-                        }
-                        .frame(width: 28, height: 4)
-                        Text("\(Int((window.remaining * 100).rounded()))%")
-                            .font(IslandFonts.ui(11.5, .semibold))
-                            .monospacedDigit()
-                            .foregroundStyle(
-                                window.remaining <= 0.3
-                                    ? IslandFactView.quotaTint(window.remaining)
-                                    : IslandTheme.text
-                            )
-                            .lineLimit(1)
-                    }
-                } else {
-                    HStack(spacing: 6) {
-                        if let signal = c?.signal, c?.fact?.isPill != true {
-                            IslandSignalView(signal: signal, reduceMotion: model.reduceMotion, paused: model.suspended)
-                        }
-                        if let fact = c?.fact {
-                            IslandFactView(fact: fact, strings: model.strings, animates: model.animatesStrikes, paused: model.suspended)
-                                .monospacedDigit()
-                                .lineLimit(1)
-                        }
-                    }
+            HStack(spacing: 6) {
+                if let signal = c?.signal, c?.fact?.isPill != true {
+                    IslandSignalView(signal: signal, reduceMotion: model.reduceMotion, paused: model.suspended)
+                }
+                if let fact = c?.fact {
+                    IslandFactView(fact: fact, strings: model.strings, animates: model.animatesStrikes, paused: model.suspended)
+                        .monospacedDigit()
+                        .lineLimit(1)
                 }
             }
             .padding(.leading, 4)
@@ -657,6 +546,33 @@ private struct IslandCollapsedContent: View {
         }
         .padding(.leading, 10)
         .padding(.trailing, 12)
+    }
+}
+
+/// The strike stage with the live speed read here, so a token-rate change redraws only the
+/// stage and not the bar around it. With a session id it follows that session's speed only.
+private struct IslandLiveStrikeStage: View {
+    var model: PrismIslandModel
+    let agents: [IslandAgentIdentity]
+    let sessionId: String?
+    let runningCount: Int
+    let notchGapWidth: CGFloat
+    let leftWingWidth: CGFloat
+    let paused: Bool
+
+    var body: some View {
+        let telemetry = model.telemetry
+        let tps = sessionId == nil || telemetry?.sessionId == sessionId ? telemetry?.tps : nil
+        IslandPixelStrikeStage(
+            agents: agents,
+            tps: tps,
+            runningCount: runningCount,
+            notchGapWidth: notchGapWidth,
+            leftWingWidth: leftWingWidth,
+            paused: paused,
+            reduceMotion: !model.animatesStrikes,
+            framesPerSecond: model.strikeFramesPerSecond
+        )
     }
 }
 
@@ -777,64 +693,67 @@ private struct IslandPanelContent: View {
     var body: some View {
         let g = geometry
         let activeTab = model.effectiveExpandedTab
-        let hasSessionActivity = model.snapshot.summary.running > 0
-            || model.snapshot.summary.waiting > 0
-            || model.snapshot.summary.failed > 0
+        let hasSessionActivity = model.summary.running > 0
+            || model.summary.waiting > 0
+            || model.summary.failed > 0
             || model.collapsed?.signal == .unread
-        let sessionDotColor: Color = model.snapshot.summary.waiting > 0
+        let sessionDotColor: Color = model.summary.waiting > 0
             ? IslandTheme.attention
-            : (model.snapshot.summary.failed > 0 ? IslandTheme.danger : model.prismTokens.primary)
+            : (model.summary.failed > 0 ? IslandTheme.danger : model.prismTokens.island.accent)
 
         VStack(spacing: 0) {
-            // Top header band: Approval identity when asking, otherwise light `Sessions | Usage` tab switcher + quick actions
-            HStack(spacing: 6) {
-                if model.asking {
-                    if model.note == nil, let req = model.requests.first {
-                        if let row = model.row(for: req.rowKey) {
-                            IslandMarkView(agent: row.agent, size: IslandMetrics.wingMark)
+            // Top header band: Approval identity when asking, otherwise light `Sessions | Usage` tab
+            // switcher + quick actions. Around a notch each side keeps to its wing, so nothing
+            // slides under the notch however long the summary or the tab names get.
+            IslandNotchColumns(geometry: g, totalWidth: model.openWidth(for: g), padding: 12) {
+                HStack(spacing: 6) {
+                    if model.asking {
+                        if model.note == nil, let req = model.requests.first {
+                            if let row = model.row(for: req.rowKey) {
+                                IslandMarkView(agent: row.agent, size: IslandMetrics.wingMark)
+                            } else {
+                                SartoEmblem(size: IslandMetrics.wingMark, active: true).padding(2)
+                            }
                         } else {
-                            SartoEmblem(size: IslandMetrics.wingMark, active: true).padding(2)
+                            IslandLeadMarks(collapsed: model.collapsed, aura: model.auraState)
+                        }
+                        if let signal = model.collapsed?.signal {
+                            IslandSignalView(signal: signal, reduceMotion: model.reduceMotion, paused: model.suspended)
                         }
                     } else {
-                        IslandLeadMarks(collapsed: model.collapsed, aura: model.auraState)
-                    }
-                    if let signal = model.collapsed?.signal {
-                        IslandSignalView(signal: signal, reduceMotion: model.reduceMotion, paused: model.suspended)
-                    }
-                } else {
-                    HStack(spacing: 3) {
-                        IslandHeaderTabPill(
-                            title: model.strings.text("tab.sessions"),
-                            active: activeTab == .sessions,
-                            accent: model.prismTokens.primary,
-                            dotColor: hasSessionActivity ? sessionDotColor : nil
-                        ) {
-                            withAnimation(model.animation(to: .open)) {
-                                model.selectTab(.sessions)
+                        HStack(spacing: 3) {
+                            IslandHeaderTabPill(
+                                title: model.strings.text("tab.sessions"),
+                                active: activeTab == .sessions,
+                                accent: model.prismTokens.island.accent,
+                                dotColor: hasSessionActivity ? sessionDotColor : nil
+                            ) {
+                                withAnimation(model.animation(to: .open)) {
+                                    model.selectTab(.sessions)
+                                }
+                            }
+                            IslandHeaderTabPill(
+                                title: model.strings.text("tab.usage"),
+                                active: activeTab == .usage,
+                                accent: model.prismTokens.island.accent,
+                                dotColor: model.hasLowUsageAlert ? IslandTheme.warning : nil
+                            ) {
+                                withAnimation(model.animation(to: .open)) {
+                                    model.selectTab(.usage)
+                                }
                             }
                         }
-                        IslandHeaderTabPill(
-                            title: model.strings.text("tab.usage"),
-                            active: activeTab == .usage,
-                            accent: model.prismTokens.primary,
-                            dotColor: model.hasLowUsageAlert ? IslandTheme.warning : nil
-                        ) {
-                            withAnimation(model.animation(to: .open)) {
-                                model.selectTab(.usage)
-                            }
-                        }
+                        .padding(2)
+                        .background(Capsule().fill(model.prismTokens.island.washRaised))
                     }
-                    .padding(2)
-                    .background(Capsule().fill(Color.white.opacity(0.06)))
                 }
-
-                Spacer(minLength: g.hasNotch ? g.notchWidth : 8)
-
+            } trailing: {
                 if model.asking {
                     Text(model.summaryText)
                         .font(IslandFonts.ui(11.5, .medium))
                         .foregroundStyle(IslandTheme.secondary)
                         .lineLimit(1)
+                        .truncationMode(.tail)
                 } else {
                     HStack(spacing: 4) {
                         IslandHeaderIconButton(
@@ -858,8 +777,6 @@ private struct IslandPanelContent: View {
                     }
                 }
             }
-            .padding(.leading, 12)
-            .padding(.trailing, 12)
             .frame(height: g.notchHeight)
 
             // Subtle Prism spectral hairline under header when running
@@ -867,9 +784,9 @@ private struct IslandPanelContent: View {
                 LinearGradient(
                     colors: [
                         Color.clear,
-                        model.prismTokens.primary.opacity(0.72),
-                        model.prismTokens.prismIris.opacity(0.66),
-                        model.prismTokens.prismCoral.opacity(0.45),
+                        model.prismTokens.island.accent.opacity(0.72),
+                        model.prismTokens.island.iris.opacity(0.66),
+                        model.prismTokens.island.coral.opacity(0.45),
                         Color.clear,
                     ],
                     startPoint: .leading,
@@ -903,6 +820,39 @@ private struct IslandPanelContent: View {
     }
 }
 
+/// A leading and a trailing part on either side of the hardware notch, each kept to its own wing
+/// so neither can slide under the notch; without a notch they sit at the two ends.
+private struct IslandNotchColumns<Leading: View, Trailing: View>: View {
+    let geometry: IslandGeometry
+    let totalWidth: CGFloat
+    let padding: CGFloat
+    @ViewBuilder let leading: () -> Leading
+    @ViewBuilder let trailing: () -> Trailing
+
+    var body: some View {
+        if geometry.hasNotch {
+            let wing = max(0, (totalWidth - geometry.notchWidth) / 2 - padding)
+            HStack(spacing: 0) {
+                leading()
+                    .frame(width: wing, alignment: .leading)
+                    .clipped()
+                Color.clear.frame(width: geometry.notchWidth)
+                trailing()
+                    .frame(width: wing, alignment: .trailing)
+                    .clipped()
+            }
+            .padding(.horizontal, padding)
+        } else {
+            HStack(spacing: 6) {
+                leading()
+                Spacer(minLength: 8)
+                trailing()
+            }
+            .padding(.horizontal, padding)
+        }
+    }
+}
+
 private struct IslandHeaderTabPill: View {
     let title: String
     let active: Bool
@@ -910,6 +860,7 @@ private struct IslandHeaderTabPill: View {
     let dotColor: Color?
     let action: () -> Void
     @State private var hover = false
+    @Environment(\.prismTokens) private var tokens
 
     var body: some View {
         Button(action: action) {
@@ -921,14 +872,15 @@ private struct IslandHeaderTabPill: View {
                 }
                 Text(title)
                     .font(IslandFonts.ui(11, active ? .semibold : .medium))
-                    .foregroundStyle(active ? Color.white : (hover ? Color.white.opacity(0.85) : IslandTheme.secondary))
+                    .foregroundStyle(active || hover ? tokens.island.text : tokens.island.secondary)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.85)
             }
-            .padding(.horizontal, 9)
+            .padding(.horizontal, 8)
             .frame(height: 20)
             .background(
                 Capsule()
-                    .fill(active ? accent.opacity(0.24) : (hover ? Color.white.opacity(0.06) : Color.clear))
+                    .fill(active ? accent.opacity(0.24) : (hover ? tokens.island.washRaised : Color.clear))
             )
             .overlay(
                 Capsule()
@@ -938,6 +890,7 @@ private struct IslandHeaderTabPill: View {
         }
         .buttonStyle(.plain)
         .onHover { hover = $0 }
+        .accessibilityAddTraits(active ? .isSelected : [])
     }
 }
 
@@ -946,19 +899,21 @@ private struct IslandHeaderIconButton: View {
     let help: String
     let action: () -> Void
     @State private var hover = false
+    @Environment(\.prismTokens) private var tokens
 
     var body: some View {
         Button(action: action) {
             Image(systemName: systemName)
                 .font(.system(size: 10.5, weight: .semibold))
-                .foregroundStyle(hover ? Color.white : IslandTheme.secondary)
+                .foregroundStyle(hover ? tokens.island.text : tokens.island.secondary)
                 .frame(width: 22, height: 22)
-                .background(Circle().fill(hover ? Color.white.opacity(0.12) : Color.clear))
+                .background(Circle().fill(hover ? tokens.island.lineStrong : Color.clear))
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
         .onHover { hover = $0 }
         .help(help)
+        .accessibilityLabel(help)
     }
 }
 
@@ -1046,7 +1001,7 @@ private struct IslandExpeditionRow: View {
                 Text(state.version)
                     .font(IslandFonts.mono(10.5, .bold))
                     .foregroundStyle(IslandTheme.prismAmber)
-                Text(state.bossReady ? "Boss" : "\(state.chapter)-\(state.stage) · \(state.kills)/\(state.killsNeeded)")
+                Text(state.bossReady ? model.strings.l10n.tr("game.stage.boss") : "\(state.chapter)-\(state.stage) · \(state.kills)/\(state.killsNeeded)")
                     .font(IslandFonts.mono(10.5, .medium))
                     .foregroundStyle(IslandTheme.text)
                     .lineLimit(1)
@@ -1087,7 +1042,7 @@ private struct IslandTelemetryStrip: View {
                     Circle()
                         .fill(telemetry.isStreaming ? IslandTheme.prismCobalt : IslandTheme.tertiary)
                         .frame(width: 5, height: 5)
-                    Text("\(String(format: "%.1f", tps)) tok/s")
+                    Text(strings.text("unit.tokensPerSecond", ["value": String(format: "%.1f", tps)]))
                         .font(IslandFonts.mono(10.5, .semibold))
                         .foregroundStyle(telemetry.isStreaming ? IslandTheme.text : IslandTheme.secondary)
                 }
@@ -1112,21 +1067,18 @@ private struct IslandTelemetryStrip: View {
                     Text("\(strings.text("telemetry.context")) \(Int(round(fill * 100)))%")
                         .font(IslandFonts.mono(10.5, .medium))
                         .foregroundStyle(IslandTheme.secondary)
-                    GeometryReader { geo in
-                        ZStack(alignment: .leading) {
-                            Capsule().fill(IslandTheme.track)
-                            Capsule()
-                                .fill(
-                                    LinearGradient(
-                                        colors: [IslandTheme.prismCobalt, IslandTheme.prismIris],
-                                        startPoint: .leading,
-                                        endPoint: .trailing
-                                    )
-                                )
-                                .frame(width: max(3, geo.size.width * fill))
-                        }
-                    }
-                    .frame(width: 48, height: 4)
+                    IslandMicroBar(
+                        fraction: fill,
+                        fill: LinearGradient(
+                            colors: [IslandTheme.prismCobalt, IslandTheme.prismIris],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        ),
+                        height: 4,
+                        track: IslandTheme.track,
+                        animates: false
+                    )
+                    .frame(width: 48)
                 }
             }
         }
@@ -1199,7 +1151,9 @@ private struct IslandSessionRow: View {
         )
         .contentShape(Rectangle())
         .onHover { hover = $0 }
-        .onTapGesture { model.openRow(row.key) }
+        .islandTappable { model.openRow(row.key) }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
     }
 
     @ViewBuilder
@@ -1324,7 +1278,9 @@ private struct IslandMoreRow: View {
         )
         .contentShape(Rectangle())
         .onHover { hover = $0 }
-        .onTapGesture { model.openRow(nil) }
+        .islandTappable { model.openRow(nil) }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
     }
 }
 
@@ -1382,20 +1338,45 @@ private struct IslandNoticeRow: View {
         )
         .contentShape(Rectangle())
         .onHover { hover = $0 }
-        .onTapGesture { model.openRow(nil) }
+        .islandTappable { model.openRow(nil) }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
     }
 }
 
+private extension View {
+    /// A tap target that dims while pressed, like a button, without a button's own styling.
+    func islandTappable(_ action: @escaping () -> Void) -> some View {
+        modifier(IslandTappable(action: action))
+    }
+}
+
+private struct IslandTappable: ViewModifier {
+    let action: () -> Void
+    @GestureState private var pressed = false
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(pressed ? 0.72 : 1)
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 0)
+                    .updating($pressed) { _, state, _ in state = true }
+            )
+            .onTapGesture(perform: action)
+    }
+}
+
+/// No sessions to list: either none yet, or no connection to the daemon to know.
 private struct IslandEmptyPanel: View {
     var model: PrismIslandModel
 
     var body: some View {
         VStack(spacing: 6) {
             SartoEmblem(size: 28, active: false)
-            Text(model.strings.text("empty.title"))
+            Text(model.strings.text(model.hostOffline ? "empty.offlineTitle" : "empty.title"))
                 .font(IslandFonts.ui(13, .semibold))
                 .foregroundStyle(IslandTheme.text)
-            Text(model.strings.text("empty.body"))
+            Text(model.strings.text(model.hostOffline ? "empty.offlineBody" : "empty.body"))
                 .font(IslandFonts.ui(12))
                 .foregroundStyle(IslandTheme.secondary)
         }
@@ -1552,17 +1533,17 @@ private struct IslandRequestCard: View {
                     HStack(spacing: 8) {
                         cardFooter
                         Spacer(minLength: 8)
-                        cardButtons
+                        cardButtons(fill: false)
                     }
                     VStack(alignment: .trailing, spacing: 8) {
-                        HStack(spacing: 8) { cardButtons }
+                        HStack(spacing: 8) { cardButtons(fill: false) }
                         HStack {
                             cardFooter
                             Spacer(minLength: 0)
                         }
                     }
                     VStack(alignment: .leading, spacing: 6) {
-                        cardButtons
+                        cardButtons(fill: true)
                         cardFooter
                     }
                 }
@@ -1579,15 +1560,17 @@ private struct IslandRequestCard: View {
         .opacity(pending ? 0.6 : 1)
     }
 
+    /// `fill` stacks the buttons full width with labels that may wrap, the fallback for labels
+    /// too long for a row, such as an "always allow" naming a long command.
     @ViewBuilder
-    private var cardButtons: some View {
+    private func cardButtons(fill: Bool) -> some View {
         if request.options.isEmpty {
-            IslandActionButton(label: model.strings.text("answerInSarto") + " ↗", style: "open") {
+            IslandActionButton(label: model.strings.text("answerInSarto") + " ↗", style: "open", fill: fill) {
                 model.openRequest(request)
             }
         } else {
             ForEach(request.options) { option in
-                IslandActionButton(label: option.label, style: option.style) {
+                IslandActionButton(label: option.label, style: option.style, fill: fill) {
                     model.answer(request, option: option)
                 }
             }
@@ -1595,7 +1578,7 @@ private struct IslandRequestCard: View {
     }
 
     private func subtitle(_ row: IslandRowItem?) -> String {
-        guard let row else { return request.isDemo ? "Sarto · Demo" : "" }
+        guard let row else { return request.isDemo ? model.strings.text("demo.subtitle") : "" }
         return [row.project, row.agent.name].filter { !$0.isEmpty }.joined(separator: " · ")
     }
 
@@ -1603,6 +1586,11 @@ private struct IslandRequestCard: View {
     private var cardFooter: some View {
         let more = model.requests.count - 1
         HStack(spacing: 0) {
+            if model.pendingRequestKeys.contains(request.key) {
+                ProgressView()
+                    .controlSize(.mini)
+                    .padding(.trailing, 6)
+            }
             if more > 0 {
                 Text(model.strings.counted("moreWaiting", more) + " · ")
                     .foregroundStyle(IslandTheme.tertiary)
@@ -1661,8 +1649,10 @@ private struct IslandOptionRow: View {
 private struct IslandActionButton: View {
     let label: String
     let style: String
+    var fill = false
     let action: () -> Void
     @State private var hover = false
+    @Environment(\.prismTokens) private var tokens
 
     private var isPrimary: Bool {
         ["allow_once", "recommended", "open"].contains(style)
@@ -1678,7 +1668,7 @@ private struct IslandActionButton: View {
                         .frame(width: 9, height: 9)
                 case "allow_once", "recommended":
                     IslandCheckShape()
-                        .stroke(Color.black, style: StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round))
+                        .stroke(tokens.island.onPrimaryButton, style: StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round))
                         .frame(width: 11, height: 9)
                 case "allow_always":
                     IslandDoubleCheckShape()
@@ -1687,25 +1677,39 @@ private struct IslandActionButton: View {
                 default:
                     EmptyView()
                 }
-                Text(label).lineLimit(1)
+                Text(label)
+                    .lineLimit(fill ? 2 : 1)
+                    .truncationMode(.middle)
+                    .multilineTextAlignment(.leading)
+                if fill { Spacer(minLength: 0) }
             }
             .font(IslandFonts.ui(12.5, .semibold))
-            .foregroundStyle(isPrimary ? Color.black : IslandTheme.text)
+            .foregroundStyle(isPrimary ? tokens.island.onPrimaryButton : tokens.island.text)
             .padding(.horizontal, 12)
-            .frame(height: 30)
+            .padding(.vertical, fill ? 6 : 0)
+            .frame(minHeight: 30)
+            .frame(maxWidth: fill ? .infinity : nil, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .fill(
                         isPrimary
-                            ? (hover ? Color.white : IslandTheme.primaryButton)
-                            : (hover ? IslandTheme.buttonHover : IslandTheme.button)
+                            ? (hover ? tokens.island.primaryButtonHover : tokens.island.primaryButton)
+                            : (hover ? tokens.island.buttonHover : tokens.island.button)
                     )
             )
             .contentShape(Rectangle())
-            .fixedSize()
+            .fixedSize(horizontal: !fill, vertical: true)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(IslandPressStyle())
         .onHover { hover = $0 }
+    }
+}
+
+/// Dims a button while it is held down, the pressed state the island's plain buttons lack.
+private struct IslandPressStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.72 : 1)
     }
 }
 
@@ -1744,179 +1748,7 @@ private struct IslandDoubleCheckShape: Shape {
     }
 }
 
-// MARK: - 4. Running Session Stack (one animated row per running session, grouped by agent)
-
-/// While sessions run, the collapsed island drops below the notch into one row per session: the
-/// app-to-agent strike animation, the title and how long the turn has run, then the session's
-/// todos. Rows group by agent under a header with that agent's plan windows; past
-/// `IslandStackOptions.maxRows` the rest fold into one line.
-struct IslandSessionStack: View {
-    var model: PrismIslandModel
-    let geometry: IslandGeometry
-    let screenID: UInt32
-
-    var body: some View {
-        let g = geometry
-        let groups = model.stackGroups
-        let hidden = model.stackHiddenCount
-        let paused = model.suspended || model.effectiveMode(for: screenID) != .collapsed
-
-        VStack(spacing: 0) {
-            IslandStackBand(model: model, geometry: g)
-                .contentShape(Rectangle())
-                .onTapGesture { model.expand(by: .click, onScreen: screenID) }
-
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(groups) { group in
-                    IslandStackGroupHeader(
-                        agent: group.agent,
-                        windows: model.stackQuota(for: group.agent),
-                        animates: model.animatesStrikes
-                    )
-                    .transition(stackTransition)
-
-                    ForEach(group.rows) { row in
-                        IslandStackRow(model: model, row: row, paused: paused)
-                            .transition(stackTransition)
-                    }
-                }
-
-                if hidden > 0 {
-                    IslandStackFoldRow(text: model.strings.text("stack.more", ["count": "\(hidden)"]))
-                        .contentShape(Rectangle())
-                        .onTapGesture { model.expand(by: .click, onScreen: screenID) }
-                        .transition(.opacity)
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.top, IslandStackMetrics.topPadding)
-            .padding(.bottom, IslandStackMetrics.bottomPadding)
-            .animation(model.animation(to: .collapsed), value: model.stackBodyHeight)
-        }
-        .frame(maxWidth: .infinity, alignment: .top)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(model.islandAccessibilityLabel)
-    }
-
-    private var stackTransition: AnyTransition {
-        guard model.animatesStrikes else { return .opacity }
-        return .asymmetric(
-            insertion: .opacity
-                .combined(with: .offset(y: -8))
-                .combined(with: .scale(scale: 0.97, anchor: .top)),
-            removal: .opacity.combined(with: .scale(scale: 0.98, anchor: .top))
-        )
-    }
-}
-
-/// The notch-high top of the stack: the app's mark on the left wing, the running count and the
-/// live speed on the right.
-private struct IslandStackBand: View {
-    var model: PrismIslandModel
-    let geometry: IslandGeometry
-
-    var body: some View {
-        let count = model.stackRunningRows.count
-        HStack(spacing: 0) {
-            SartoEmblem(size: 16, active: true)
-                .padding(.leading, 16)
-
-            Spacer(minLength: 8)
-            Color.clear.frame(width: geometry.hasNotch ? geometry.notchWidth : 0)
-            Spacer(minLength: 8)
-
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(IslandTheme.running)
-                    .frame(width: 6, height: 6)
-                    .modifier(IslandBreathing(active: model.animatesStrikes))
-                Text(model.strings.text("summary.running", ["count": "\(count)"]))
-                    .font(IslandFonts.ui(11.5, .semibold))
-                    .foregroundStyle(IslandTheme.quote)
-                    .contentTransition(.numericText())
-                    .animation(model.animation(to: .collapsed), value: count)
-                if let tps = model.telemetry?.tps, tps > 0 {
-                    Text(String(format: "%.0f tok/s", tps))
-                        .font(IslandFonts.mono(10.5, .semibold))
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: [IslandTheme.prismCobalt, IslandTheme.prismIris],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
-                }
-            }
-            .lineLimit(1)
-            .fixedSize()
-            .padding(.trailing, 16)
-        }
-        .frame(height: geometry.notchHeight)
-    }
-}
-
-/// An agent's mark and name, with what is left of its plan windows.
-private struct IslandStackGroupHeader: View {
-    let agent: IslandAgentIdentity
-    let windows: [IslandQuotaWindow]
-    let animates: Bool
-
-    var body: some View {
-        HStack(spacing: 6) {
-            IslandMarkView(agent: agent, size: 13)
-            Text(agent.name)
-                .font(IslandFonts.ui(11, .semibold))
-                .foregroundStyle(IslandTheme.secondary)
-                .lineLimit(1)
-                .layoutPriority(1)
-
-            Spacer(minLength: 8)
-
-            HStack(spacing: 10) {
-                ForEach(windows) { window in
-                    IslandQuotaMeter(window: window, animates: animates)
-                }
-            }
-        }
-        .frame(height: IslandStackMetrics.groupHeader)
-    }
-}
-
-private struct IslandQuotaMeter: View {
-    let window: IslandQuotaWindow
-    let animates: Bool
-
-    private var tint: Color {
-        if window.remaining <= 0.1 { return IslandTheme.danger }
-        if window.remaining <= 0.3 { return IslandTheme.warning }
-        return IslandTheme.prismCobalt
-    }
-
-    var body: some View {
-        HStack(spacing: 5) {
-            Text(window.label)
-                .font(IslandFonts.ui(10, .medium))
-                .foregroundStyle(IslandTheme.tertiary)
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .frame(maxWidth: 74, alignment: .trailing)
-            ZStack(alignment: .leading) {
-                Capsule().fill(IslandTheme.track)
-                Capsule()
-                    .fill(tint)
-                    .frame(width: max(2, 34 * window.remaining))
-            }
-            .frame(width: 34, height: 4)
-            .animation(animates ? .spring(response: 0.5, dampingFraction: 0.9) : nil, value: window.remaining)
-            Text("\(Int((window.remaining * 100).rounded()))%")
-                .font(IslandFonts.mono(10, .semibold))
-                .foregroundStyle(window.remaining <= 0.3 ? tint : IslandTheme.quote)
-                .monospacedDigit()
-                .contentTransition(.numericText())
-        }
-        .fixedSize()
-    }
-}
+// MARK: - 4. Strike Lane (the window's running rail)
 
 /// The app-to-agent strike animation across the full width, with the session's title centred on
 /// a band of the island's black the pixel streams fade into. The island's stack and the window's
@@ -1926,21 +1758,20 @@ struct IslandStrikeLane: View {
     let row: IslandRowItem
     let paused: Bool
     var showsElapsed = true
+    @Environment(\.prismTokens) private var tokens
 
     var body: some View {
-        let tps = model.telemetry?.sessionId == row.sessionId ? model.telemetry?.tps : nil
         let title = model.title(of: row)
 
         ZStack {
-            IslandPixelStrikeStage(
+            IslandLiveStrikeStage(
+                model: model,
                 agents: [row.agent],
-                tps: tps,
+                sessionId: row.sessionId,
                 runningCount: 1,
                 notchGapWidth: 0,
                 leftWingWidth: 0,
-                paused: paused,
-                reduceMotion: !model.animatesStrikes,
-                framesPerSecond: model.stackOptions.motion.framesPerSecond
+                paused: paused
             )
 
             HStack(spacing: 7) {
@@ -1959,64 +1790,18 @@ struct IslandStrikeLane: View {
             .background(
                 LinearGradient(
                     stops: [
-                        .init(color: IslandTheme.surface.opacity(0), location: 0),
-                        .init(color: IslandTheme.surface.opacity(0.94), location: 0.22),
-                        .init(color: IslandTheme.surface.opacity(0.94), location: 0.78),
-                        .init(color: IslandTheme.surface.opacity(0), location: 1),
+                        .init(color: tokens.island.surface.opacity(0), location: 0),
+                        .init(color: tokens.island.surface.opacity(0.94), location: 0.22),
+                        .init(color: tokens.island.surface.opacity(0.94), location: 0.78),
+                        .init(color: tokens.island.surface.opacity(0), location: 1),
                     ],
                     startPoint: .leading,
                     endPoint: .trailing
                 )
             )
-            .frame(maxWidth: IslandStackMetrics.titleWidth)
+            .frame(maxWidth: IslandLaneMetrics.titleWidth)
             .animation(model.animatesStrikes ? .easeInOut(duration: 0.3) : nil, value: title)
         }
-    }
-}
-
-/// One running session in one line: the strike animation runs the row's full width between the
-/// app on the left and its agent on the right, and the title sits in the middle on a band of the
-/// island's black that the pixel streams fade into.
-private struct IslandStackRow: View {
-    var model: PrismIslandModel
-    let row: IslandRowItem
-    let paused: Bool
-
-    @State private var hovered = false
-
-    var body: some View {
-        let title = model.title(of: row)
-        IslandStrikeLane(model: model, row: row, paused: paused)
-        .frame(height: IslandStackMetrics.row)
-        .background(
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(hovered ? IslandTheme.rowHover : Color.clear)
-        )
-        .contentShape(Rectangle())
-        .onHover { hovered = $0 }
-        .onTapGesture { model.openRow(row.key) }
-        .help(row.project.isEmpty ? title : "\(title) · \(row.project)")
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(title)
-        .accessibilityAddTraits(.isButton)
-    }
-}
-
-private struct IslandStackFoldRow: View {
-    let text: String
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "chevron.down")
-                .font(.system(size: 9, weight: .bold))
-            Text(text)
-                .font(IslandFonts.ui(11, .medium))
-                .lineLimit(1)
-            Spacer(minLength: 0)
-        }
-        .foregroundStyle(IslandTheme.secondary)
-        .padding(.leading, 4)
-        .frame(height: IslandStackMetrics.foldRow)
     }
 }
 
@@ -2051,11 +1836,10 @@ private struct IslandTurnDurationLabel: View {
     let paused: Bool
 
     var body: some View {
-        let underOneMinute = (Date().timeIntervalSince1970 - sinceMs / 1000) < 60
         if paused {
             label(at: Date())
         } else {
-            TimelineView(.periodic(from: .now, by: underOneMinute ? 1 : 15)) { context in
+            TimelineView(IslandElapsedSchedule(sinceMs: sinceMs)) { context in
                 label(at: context.date)
             }
         }
@@ -2084,25 +1868,42 @@ private struct IslandTurnDurationLabel: View {
     }
 }
 
-/// A slow scale-and-fade breath for a live dot; still with reduce motion or the still style.
+/// Ticks each second for the first minute of a turn, then every 15 seconds once it shows minutes.
+private struct IslandElapsedSchedule: TimelineSchedule {
+    let sinceMs: Double
+
+    func entries(from startDate: Date, mode: TimelineScheduleMode) -> AnyIterator<Date> {
+        let minuteMark = Date(timeIntervalSince1970: sinceMs / 1000 + 60)
+        var next = startDate
+        return AnyIterator {
+            let current = next
+            next = current.addingTimeInterval(current < minuteMark ? 1 : 15)
+            return current
+        }
+    }
+}
+
+/// A slow scale-and-fade breath for a live dot, drawn at the energy policy's ambient rate (none
+/// in Low Power Mode or under thermal pressure); still with reduce motion or the still style.
 private struct IslandBreathing: ViewModifier {
     let active: Bool
-    @State private var phase = false
 
     func body(content: Content) -> some View {
-        content
-            .scaleEffect(active && phase ? 1.35 : 1)
-            .opacity(active && phase ? 0.55 : 1)
-            .onAppear {
-                guard active else { return }
-                withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) { phase = true }
+        let fps = PrismEnergyPolicy.framesPerSecond(
+            for: .ambient,
+            displayMaxFPS: 60,
+            conditions: PrismEnergyMonitor.shared.conditions
+        )
+        if active && fps > 0 {
+            TimelineView(.animation(minimumInterval: 1.0 / Double(fps))) { context in
+                let t = context.date.timeIntervalSinceReferenceDate
+                let breath = (1 - cos(t * .pi / 1.1)) / 2
+                content
+                    .scaleEffect(1 + 0.35 * breath)
+                    .opacity(1 - 0.45 * breath)
             }
-            .onChange(of: active) { _, on in
-                if on {
-                    withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) { phase = true }
-                } else {
-                    phase = false
-                }
-            }
+        } else {
+            content
+        }
     }
 }

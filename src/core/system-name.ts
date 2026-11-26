@@ -1,6 +1,9 @@
+import { execFile } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
 import os from 'node:os'
 import type { Platform } from '@shared/platform'
+
+const COMPUTER_NAME_TIMEOUT_MS = 2_000
 
 /** A `PRETTY_NAME` line's value, quoted or bare. */
 function prettyName(text: string): string | null {
@@ -81,4 +84,20 @@ async function readOsRelease(): Promise<string | null> {
     }
   }
   return osRelease
+}
+
+/**
+ * The name the owner gave this computer, as Sharing settings shows it on macOS, where the host
+ * name drops its spaces and letters outside ASCII; the host name elsewhere, or when it has none.
+ */
+export function computerName(): Promise<string> {
+  if (process.platform !== 'darwin') return Promise.resolve(os.hostname())
+  return new Promise((resolve) => {
+    execFile(
+      '/usr/sbin/scutil',
+      ['--get', 'ComputerName'],
+      { timeout: COMPUTER_NAME_TIMEOUT_MS },
+      (error, stdout) => resolve((!error && stdout.trim()) || os.hostname()),
+    )
+  })
 }

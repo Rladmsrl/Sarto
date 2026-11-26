@@ -19,6 +19,7 @@ import { portPair } from '../../remote-host/host-sockets'
 import type {
   AgentConnection,
   AgentInit,
+  McpServer,
   OpenedSession,
   PromptResult,
   SessionOptions,
@@ -632,6 +633,23 @@ describe('RemoteClaudeHost <-> RemoteClaudeConnection end-to-end hosted flow', (
     const targets = new Map<string, SessionTarget>()
     const sessionMcp = new Map<string, { url: string; token: string }>()
     const sessionCwds = new Map<string, string>()
+    // Claude Code connects a hosted run's MCP servers before its session opens, as
+    // ClaudeConnection awaits them, and leaves out a server that does not answer in time.
+    const handshakes: string[] = []
+    const connectMcp = async (server: McpServer | undefined): Promise<void> => {
+      if (server?.type !== 'http') return
+      const auth = server.headers.find((h) => h.name === 'Authorization')?.value ?? ''
+      const status = await fetch(server.url, {
+        method: 'POST',
+        headers: { authorization: auth, 'content-type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 0, method: 'initialize', params: {} }),
+        signal: AbortSignal.timeout(1_000),
+      }).then(
+        (res) => String(res.status),
+        (error: unknown) => (error as Error).name,
+      )
+      handshakes.push(status)
+    }
     const fakeClaude: AgentConnection = {
       closed: new Promise(() => {}),
       isClosed: false,
@@ -676,6 +694,7 @@ describe('RemoteClaudeHost <-> RemoteClaudeConnection end-to-end hosted flow', (
           const auth = execServer.headers.find((h) => h.name === 'Authorization')?.value ?? ''
           sessionMcp.set(id, { url: execServer.url, token: auth.replace(/^Bearer /, '') })
         }
+        await connectMcp(execServer)
         return {
           sessionId: id,
           config: [
@@ -714,6 +733,7 @@ describe('RemoteClaudeHost <-> RemoteClaudeConnection end-to-end hosted flow', (
           const auth = execServer.headers.find((h) => h.name === 'Authorization')?.value ?? ''
           sessionMcp.set(sessionId, { url: execServer.url, token: auth.replace(/^Bearer /, '') })
         }
+        await connectMcp(execServer)
         return { config: [] }
       },
       async forkSession() {
@@ -966,6 +986,8 @@ describe('RemoteClaudeHost <-> RemoteClaudeConnection end-to-end hosted flow', (
     expect(turn2.stopReason).toBe('end_turn')
     expect(openedCount).toBe(3)
     expect(JSON.stringify(receivedPatches)).toContain('updated-after-reclaim')
+    // The controller answered the handshake of the first run and of the one that resumed it.
+    expect(handshakes).toEqual(['200', '200'])
 
     // 5. Turning setting off immediately disconnects active runs
     hostSettings = { ...hostSettings, enabled: false }
@@ -975,5 +997,57 @@ describe('RemoteClaudeHost <-> RemoteClaudeConnection end-to-end hosted flow', (
 
     conn.close()
     await host.shutdown()
+  })
+
+  it('skips ~/Library, .Trash and macOS bundle directories in Remote Claude Glob and Grep', async () => {
+    const home = await makeTempDir('sarto-rc-home-')
+    await mkdir(path.join(home, 'Library', 'Group Containers', 'app'), { recursive: true })
+    await mkdir(path.join(home, '.Trash'), { recursive: true })
+    await mkdir(path.join(home, 'Pictures', 'Photos Library.photoslibrary'), { recursive: true })
+    await mkdir(path.join(home, 'proj'), { recursive: true })
+    await writeFile(path.join(home, 'Library', 'Group Containers', 'app', 'secret.txt'), 'needle')
+    await writeFile(path.join(home, '.Trash', 'gone.txt'), 'needle')
+    await writeFile(
+      path.join(home, 'Pictures', 'Photos Library.photoslibrary', 'meta.txt'),
+      'needle',
+    )
+    await writeFile(path.join(home, 'proj', 'keep.txt'), 'needle')
+
+    const exec = new LocalExecMcp({
+      mapper: createWorkspaceMapper({
+        localRoot: home,
+        remoteRoot: '/shadow/fs',
+        localPlatform: process.platform === 'win32' ? 'win32' : 'darwin',
+        remotePlatform: 'darwin',
+      }),
+      hostName: 'Mac Studio',
+      homeDir: home,
+      permissionMode: () => 'acceptEdits',
+      requestPermission: async () => ({ optionId: 'allow_once' }),
+    })
+
+    const callTool = async (name: string, args: Record<string, unknown>) => {
+      const res = await exec.handle({
+        runId: 'r-home',
+        callId: 1,
+        server: 'sarto_exec',
+        headers: [],
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'tools/call',
+          params: { name, arguments: args },
+        }),
+      })
+      return JSON.parse(res.body).result as { content: { text: string }[]; isError?: boolean }
+    }
+
+    const globRes = await callTool('Glob', { pattern: '**/*.txt' })
+    expect(globRes.isError).toBeUndefined()
+    expect(globRes.content[0]?.text).toBe('/shadow/fs/proj/keep.txt')
+
+    const grepRes = await callTool('Grep', { pattern: 'needle', output_mode: 'files_with_matches' })
+    expect(grepRes.isError).toBeUndefined()
+    expect(grepRes.content[0]?.text).toBe('/shadow/fs/proj/keep.txt')
   })
 })

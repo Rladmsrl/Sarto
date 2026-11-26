@@ -890,6 +890,7 @@ private final class FileTreeBuilderNode {
     var isFolder: Bool
     var isIgnored: Bool
     var children: [String: FileTreeBuilderNode] = [:]
+    private var sortedCache: [FileTreeBuilderNode]? = nil
 
     init(name: String, path: String, isFolder: Bool, isIgnored: Bool) {
         self.name = name
@@ -897,70 +898,110 @@ private final class FileTreeBuilderNode {
         self.isFolder = isFolder
         self.isIgnored = isIgnored
     }
-}
 
-private final class DroppedFileURLCollector: @unchecked Sendable {
-    private let lock = NSLock()
-    private var urls: [URL] = []
-
-    func append(_ url: URL) {
-        lock.withLock { urls.append(url) }
-    }
-
-    func snapshot() -> [URL] {
-        lock.withLock { urls }
-    }
-}
-
-public enum MarkdownPreviewMode: String, CaseIterable, Identifiable, Sendable {
-    case preview
-    case source
-
-    public var id: String { rawValue }
-}
-
-public struct FilesWorkbenchView: View {
-    @Environment(\.prismTokens) private var tokens
-    @Environment(\.prismL10n) private var l10n
-    @Bindable public var workspace: WorkspaceController
-    public var onPreviewHTML: ((String) -> Void)?
-    public var onQuoteToComposer: ((String) -> Void)?
-
-    @AppStorage("sarto.files.markdownMode") private var markdownModeRaw: String = MarkdownPreviewMode.preview.rawValue
-    @State private var expandedFolders: Set<String> = []
-    @State private var isRootDropTargeted: Bool = false
-    @State private var dropTargetedFolder: String? = nil
-    @State private var selectedPreviewPassage: String = ""
-    @State private var previewImageItem: PrismImagePreviewItem? = nil
-
-    private var markdownMode: MarkdownPreviewMode {
-        MarkdownPreviewMode(rawValue: markdownModeRaw) ?? .preview
-    }
-    @State private var selectedPreviewLineRange: ClosedRange<Int>? = nil
-    @State private var editorSelection: TextSelection? = nil
-
-    public init(
-        workspace: WorkspaceController,
-        onPreviewHTML: ((String) -> Void)? = nil,
-        onQuoteToComposer: ((String) -> Void)? = nil
-    ) {
-        self.workspace = workspace
-        self.onPreviewHTML = onPreviewHTML
-        self.onQuoteToComposer = onQuoteToComposer
-    }
-
-    private var hasActiveFilter: Bool {
-        !workspace.fileFilter.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
-    private var totalDisplayedFileCount: Int {
-        if workspace.showIgnoredFiles {
-            return workspace.filePaths.count + workspace.ignoredPaths.count
+    func sortedChildren() -> [FileTreeBuilderNode] {
+        if let sortedCache { return sortedCache }
+        let sorted = children.values.sorted { lhs, rhs in
+            if lhs.isFolder != rhs.isFolder {
+                return lhs.isFolder && !rhs.isFolder
+            }
+            return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
         }
-        return workspace.filePaths.count
+        sortedCache = sorted
+        return sorted
+    }
+}
+
+/// Caches the built file tree trie and flattened visible rows so SwiftUI body re-evaluations
+/// (hover, editor typing, file selection) never rebuild a 50k-node trie on the main actor.
+@MainActor
+private final class FileTreeRowsCache {
+    private var treeKey: (generation: UInt64, revision: UInt64)? = nil
+    private var rootNode = FileTreeBuilderNode(name: "", path: "", isFolder: true, isIgnored: false)
+    private var rowsKey: (generation: UInt64, revision: UInt64, expanded: Set<String>, loadingLabel: String, emptyLabel: String)? = nil
+    private var cachedRows: [FileTreeRow] = []
+
+    func rows(
+        workspace: WorkspaceController,
+        expandedFolders: Set<String>,
+        loadingLabel: String,
+        emptyLabel: String
+    ) -> [FileTreeRow] {
+        let gen = workspace.projectGeneration
+        let rev = workspace.fileTreeRevision
+        if let rowsKey,
+           rowsKey.generation == gen,
+           rowsKey.revision == rev,
+           rowsKey.expanded == expandedFolders,
+           rowsKey.loadingLabel == loadingLabel,
+           rowsKey.emptyLabel == emptyLabel {
+            return cachedRows
+        }
+
+        if treeKey?.generation != gen || treeKey?.revision != rev {
+            rootNode = Self.buildTree(workspace: workspace)
+            treeKey = (gen, rev)
+        }
+
+        var rows: [FileTreeRow] = []
+
+        func appendChildren(of node: FileTreeBuilderNode, depth: Int) {
+            for child in node.sortedChildren() {
+                if child.isFolder {
+                    let expanded = expandedFolders.contains(child.path)
+                    rows.append(FileTreeRow(
+                        id: "dir:\(child.path)",
+                        path: child.path,
+                        name: child.name,
+                        depth: depth,
+                        isIgnored: child.isIgnored,
+                        kind: .folder(isExpanded: expanded)
+                    ))
+                    if expanded {
+                        if workspace.loadingIgnoredFolders.contains(child.path) {
+                            rows.append(FileTreeRow(
+                                id: "loading:\(child.path)",
+                                path: child.path,
+                                name: loadingLabel,
+                                depth: depth + 1,
+                                isIgnored: true,
+                                kind: .loading
+                            ))
+                        } else if child.children.isEmpty,
+                                  child.isIgnored,
+                                  workspace.loadedIgnoredFolders[child.path] != nil {
+                            rows.append(FileTreeRow(
+                                id: "empty:\(child.path)",
+                                path: child.path,
+                                name: emptyLabel,
+                                depth: depth + 1,
+                                isIgnored: true,
+                                kind: .emptyIgnored
+                            ))
+                        } else {
+                            appendChildren(of: child, depth: depth + 1)
+                        }
+                    }
+                } else {
+                    rows.append(FileTreeRow(
+                        id: "file:\(child.path)",
+                        path: child.path,
+                        name: child.name,
+                        depth: depth,
+                        isIgnored: child.isIgnored,
+                        kind: .file
+                    ))
+                }
+            }
+        }
+
+        appendChildren(of: rootNode, depth: 0)
+        cachedRows = rows
+        rowsKey = (gen, rev, expandedFolders, loadingLabel, emptyLabel)
+        return rows
     }
 
-    private var visibleTreeRows: [FileTreeRow] {
+    private static func buildTree(workspace: WorkspaceController) -> FileTreeBuilderNode {
         let root = FileTreeBuilderNode(name: "", path: "", isFolder: true, isIgnored: false)
 
         func insert(path rawPath: String, isFolder: Bool, isIgnored: Bool) {
@@ -1004,67 +1045,79 @@ public struct FilesWorkbenchView: View {
                 insert(path: folder, isFolder: true, isIgnored: true)
             }
         }
+        return root
+    }
+}
 
-        var rows: [FileTreeRow] = []
+private final class DroppedFileURLCollector: @unchecked Sendable {
+    private let lock = NSLock()
+    private var urls: [URL] = []
 
-        func appendChildren(of node: FileTreeBuilderNode, depth: Int) {
-            let sorted = node.children.values.sorted { lhs, rhs in
-                if lhs.isFolder != rhs.isFolder {
-                    return lhs.isFolder && !rhs.isFolder
-                }
-                return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
-            }
-            for child in sorted {
-                if child.isFolder {
-                    let expanded = expandedFolders.contains(child.path)
-                    rows.append(FileTreeRow(
-                        id: "dir:\(child.path)",
-                        path: child.path,
-                        name: child.name,
-                        depth: depth,
-                        isIgnored: child.isIgnored,
-                        kind: .folder(isExpanded: expanded)
-                    ))
-                    if expanded {
-                        if workspace.loadingIgnoredFolders.contains(child.path) {
-                            rows.append(FileTreeRow(
-                                id: "loading:\(child.path)",
-                                path: child.path,
-                                name: l10n.tr("files.loadingFolder"),
-                                depth: depth + 1,
-                                isIgnored: true,
-                                kind: .loading
-                            ))
-                        } else if child.children.isEmpty,
-                                  child.isIgnored,
-                                  workspace.loadedIgnoredFolders[child.path] != nil {
-                            rows.append(FileTreeRow(
-                                id: "empty:\(child.path)",
-                                path: child.path,
-                                name: l10n.tr("files.ignoredEmpty"),
-                                depth: depth + 1,
-                                isIgnored: true,
-                                kind: .emptyIgnored
-                            ))
-                        } else {
-                            appendChildren(of: child, depth: depth + 1)
-                        }
-                    }
-                } else {
-                    rows.append(FileTreeRow(
-                        id: "file:\(child.path)",
-                        path: child.path,
-                        name: child.name,
-                        depth: depth,
-                        isIgnored: child.isIgnored,
-                        kind: .file
-                    ))
-                }
-            }
+    func append(_ url: URL) {
+        lock.withLock { urls.append(url) }
+    }
+
+    func snapshot() -> [URL] {
+        lock.withLock { urls }
+    }
+}
+
+public enum MarkdownPreviewMode: String, CaseIterable, Identifiable, Sendable {
+    case preview
+    case source
+
+    public var id: String { rawValue }
+}
+
+public struct FilesWorkbenchView: View {
+    @Environment(\.prismTokens) private var tokens
+    @Environment(\.prismL10n) private var l10n
+    @Bindable public var workspace: WorkspaceController
+    public var onPreviewHTML: ((String) -> Void)?
+    public var onQuoteToComposer: ((String) -> Void)?
+
+    @AppStorage("sarto.files.markdownMode") private var markdownModeRaw: String = MarkdownPreviewMode.preview.rawValue
+    @State private var expandedFolders: Set<String> = []
+    @State private var treeRowsCache = FileTreeRowsCache()
+    @State private var isRootDropTargeted: Bool = false
+    @State private var dropTargetedFolder: String? = nil
+    @State private var selectedPreviewPassage: String = ""
+    @State private var previewImageItem: PrismImagePreviewItem? = nil
+
+    private var markdownMode: MarkdownPreviewMode {
+        MarkdownPreviewMode(rawValue: markdownModeRaw) ?? .preview
+    }
+    @State private var selectedPreviewLineRange: ClosedRange<Int>? = nil
+    @State private var editorSelection: TextSelection? = nil
+
+    public init(
+        workspace: WorkspaceController,
+        onPreviewHTML: ((String) -> Void)? = nil,
+        onQuoteToComposer: ((String) -> Void)? = nil
+    ) {
+        self.workspace = workspace
+        self.onPreviewHTML = onPreviewHTML
+        self.onQuoteToComposer = onQuoteToComposer
+    }
+
+    private var hasActiveFilter: Bool {
+        !workspace.fileFilter.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var totalDisplayedFileCount: Int {
+        if workspace.showIgnoredFiles {
+            return workspace.filePaths.count + workspace.ignoredPaths.count
         }
+        return workspace.filePaths.count
+    }
 
-        appendChildren(of: root, depth: 0)
-        return rows
+    private var visibleTreeRows: [FileTreeRow] {
+        treeRowsCache.rows(
+            workspace: workspace,
+            expandedFolders: expandedFolders,
+            loadingLabel: l10n.tr("files.loadingFolder"),
+            emptyLabel: l10n.tr("files.ignoredEmpty")
+        )
     }
 
     public var body: some View {

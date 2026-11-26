@@ -337,3 +337,100 @@ describe('FilesService uploads', () => {
     expect(await exists(path.join(root, '.git/x'))).toBe(false)
   })
 })
+
+describe('FilesService home and walk bounds', () => {
+  it('skips ~/Library, ~/.Trash, macOS bundles and ignored data paths when walking home', async () => {
+    const home = await realpath(await tempFolder('sarto-home-'))
+    const dataDir = path.join(home, 'sarto-data')
+    await mkdir(path.join(home, 'Library', 'Group Containers', 'app'), { recursive: true })
+    await mkdir(path.join(home, '.Trash', 'old'), { recursive: true })
+    await mkdir(path.join(home, 'Pictures', 'Photos Library.photoslibrary', 'originals'), {
+      recursive: true,
+    })
+    await mkdir(path.join(home, 'proj'), { recursive: true })
+    await mkdir(dataDir, { recursive: true })
+    await writeFile(path.join(home, 'Library', 'Group Containers', 'app', 'secret.db'), 'x')
+    await writeFile(path.join(home, '.Trash', 'old', 'gone.txt'), 'x')
+    await writeFile(
+      path.join(home, 'Pictures', 'Photos Library.photoslibrary', 'originals', 'a.jpg'),
+      'x',
+    )
+    await writeFile(path.join(dataDir, 'daemon.log'), 'x')
+    await writeFile(path.join(home, 'proj', 'readme.md'), 'hi')
+
+    const files = new FilesService({
+      exec: noGit,
+      platform: 'darwin',
+      homeDir: home,
+      ignorePaths: [dataDir],
+      media: async () => null,
+      describeMedia: async () => null,
+      trash: async () => {},
+    })
+
+    const listed = await files.list(home)
+    expect(listed.paths).toEqual(['proj/readme.md'])
+    expect(listed.truncated).toBe(false)
+
+    // Explicitly opening a folder inside ~/Library (such as iCloud Drive) still lists its files.
+    const icloudProject = path.join(home, 'Library', 'Mobile Documents', 'my-app')
+    await mkdir(icloudProject, { recursive: true })
+    await writeFile(path.join(icloudProject, 'index.ts'), 'export {}')
+    const icloudList = await files.list(icloudProject)
+    expect(icloudList.paths).toEqual(['index.ts'])
+  })
+
+  it('caps the number of directories scanned in a non-git walk', async () => {
+    const root = await realpath(await tempFolder('sarto-walk-limit-'))
+    for (let i = 0; i < 6; i++) {
+      await mkdir(path.join(root, `dir-${i}`))
+      await writeFile(path.join(root, `dir-${i}`, 'a.txt'), 'a')
+    }
+    const files = new FilesService({
+      exec: noGit,
+      platform: 'darwin',
+      homeDir: '/nonexistent-home',
+      limits: { walkDirs: 3 },
+      media: async () => null,
+      describeMedia: async () => null,
+      trash: async () => {},
+    })
+    const listed = await files.list(root)
+    expect(listed.truncated).toBe(true)
+    expect(listed.paths.length).toBeLessThan(6)
+  })
+
+  it('coalesces concurrent list calls for the same root into a single scan', async () => {
+    const root = await realpath(await tempFolder('sarto-singleflight-'))
+    await writeFile(path.join(root, 'a.txt'), 'a')
+    let gitCalls = 0
+    const slowNoGit: Exec = async () => {
+      gitCalls += 1
+      await new Promise((resolve) => setTimeout(resolve, 40))
+      return {
+        code: null,
+        stdout: '',
+        stderr: '',
+        failure: 'not-found',
+        message: 'git is not installed',
+      }
+    }
+    const files = new FilesService({
+      exec: slowNoGit,
+      platform: 'darwin',
+      homeDir: '/nonexistent-home',
+      media: async () => null,
+      describeMedia: async () => null,
+      trash: async () => {},
+    })
+    const [first, second, third] = await Promise.all([
+      files.list(root),
+      files.list(root),
+      files.list(root),
+    ])
+    expect(first).toEqual(second)
+    expect(second).toEqual(third)
+    // `listOnce` issues 4 parallel git commands; single-flight keeps concurrent callers to 1 run.
+    expect(gitCalls).toBe(4)
+  })
+})

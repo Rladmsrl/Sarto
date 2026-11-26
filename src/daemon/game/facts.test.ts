@@ -78,10 +78,16 @@ describe('game facts', () => {
   })
 
   it('sends nothing for the facts the game does not take', () => {
-    const facts = toGameFacts(
-      [{ kind: 'todo.completed', count: 2, id: 'x', sessionId: 's', agentId: 'codex', at: 1 }],
-      context(),
-    )
+    // A kind a newer agent host may send, which this daemon does not know.
+    const unknown = {
+      kind: 'todo.completed',
+      count: 2,
+      id: 'x',
+      sessionId: 's',
+      agentId: 'codex',
+      at: 1,
+    }
+    const facts = toGameFacts([unknown as unknown as WorkFact], context())
     expect(facts).toEqual([])
   })
 

@@ -292,24 +292,48 @@ async function conversationOf(file: string): Promise<Conversation | null> {
   }
 }
 
+const MAX_CONVERSATION_DIRS = 200
+const MAX_CONVERSATION_ENTRIES = 4_000
+const MAX_CONVERSATION_DEPTH = 6
+
 /** The conversation databases under the folders that exist; null when none does. */
 async function listConversations(folders: readonly string[]): Promise<string[] | null> {
   let found = false
   const files: string[] = []
+  let dirsScanned = 0
+  let entriesSeen = 0
   for (const folder of folders) {
-    let entries: Dirent[]
-    try {
-      entries = await readdir(folder, { withFileTypes: true, recursive: true })
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code
-      if (code === 'ENOENT' || code === 'ENOTDIR') continue
-      throw error
-    }
-    found = true
-    for (const entry of entries) {
-      if (!entry.isFile() || entry.name.startsWith('.')) continue
-      if (!EXTENSIONS.has(path.extname(entry.name))) continue
-      files.push(path.join(entry.parentPath, entry.name))
+    let level: string[] = [folder]
+    for (let depth = 0; level.length > 0 && depth <= MAX_CONVERSATION_DEPTH; depth++) {
+      const next: string[] = []
+      for (const dir of level) {
+        if (dirsScanned >= MAX_CONVERSATION_DIRS || entriesSeen >= MAX_CONVERSATION_ENTRIES) break
+        dirsScanned += 1
+        let entries: Dirent[]
+        try {
+          entries = await readdir(dir, { withFileTypes: true })
+        } catch (error) {
+          const code = (error as NodeJS.ErrnoException).code
+          if (code === 'ENOENT' || code === 'ENOTDIR') continue
+          if (depth === 0) throw error
+          continue
+        }
+        found = true
+        for (const entry of entries) {
+          if (entriesSeen >= MAX_CONVERSATION_ENTRIES) break
+          entriesSeen += 1
+          if (entry.name.startsWith('.') || entry.isSymbolicLink()) continue
+          const full = path.join(dir, entry.name)
+          if (entry.isDirectory()) {
+            if (dirsScanned + next.length < MAX_CONVERSATION_DIRS) next.push(full)
+            continue
+          }
+          if (!entry.isFile()) continue
+          if (!EXTENSIONS.has(path.extname(entry.name))) continue
+          files.push(full)
+        }
+      }
+      level = next
     }
   }
   return found ? files.sort() : null

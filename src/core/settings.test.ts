@@ -95,6 +95,15 @@ describe('the MCP section on load', () => {
   })
 })
 
+it('ignores the retired notification switches on load and rejects them in new settings', () => {
+  const notifications = { permission: false, sound: true, badge: false, island: false }
+  const { settings, problems } = parseSettingsFile({ version: 1, notifications })
+  expect(problems).toEqual([])
+  expect(settings).not.toHaveProperty('notifications')
+  expect(settings).toEqual(DEFAULT_SETTINGS)
+  expect(() => validateSettingsPatch({ notifications } as never)).toThrow()
+})
+
 it('drops retired harness choices on load and rejects them in new settings', () => {
   const general = {
     defaultAgent: 'fast-agent',

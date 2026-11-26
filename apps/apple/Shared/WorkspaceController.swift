@@ -668,15 +668,7 @@ private final class PTYChannel: @unchecked Sendable {
 public final class WorkspaceController {
     private static let maxDiffOrFileBytes = 1_048_576
 
-    private static var defaultProjectPath: String {
-        #if os(macOS)
-        FileManager.default.homeDirectoryForCurrentUser.path
-        #else
-        NSHomeDirectory()
-        #endif
-    }
-
-    public var activeProjectPath: String = WorkspaceController.defaultProjectPath
+    public var activeProjectPath: String = ""
 
     // MARK: - Git Diff State
     public var gitStatus: GitStatusInfo?
@@ -715,9 +707,12 @@ public final class WorkspaceController {
     public var ignoredFolders: Set<String> = []
     public var loadedIgnoredFolders: [String: ProjectFolderList] = [:]
     public var loadingIgnoredFolders: Set<String> = []
+    /// Incremented whenever the file tree inputs change, so views can cache built tree nodes.
+    public private(set) var fileTreeRevision: UInt64 = 0
     public var showIgnoredFiles: Bool = UserDefaults.standard.object(forKey: WorkspaceController.showIgnoredStorageKey) as? Bool ?? true {
         didSet {
             UserDefaults.standard.set(showIgnoredFiles, forKey: Self.showIgnoredStorageKey)
+            fileTreeRevision &+= 1
         }
     }
     public var isUploadingFiles: Bool = false
@@ -746,6 +741,13 @@ public final class WorkspaceController {
     public var isLoadingFiles: Bool = false
     /// Unsaved edits of files that are not open, keyed by absolute path, so switching never loses them.
     private var fileDrafts: [String: FileDraft] = [:]
+    @ObservationIgnored private var fileDraftOrder: [String] = []
+    @ObservationIgnored private var fileDraftTotalBytes: Int = 0
+    private static let maxFileDraftEntries = 40
+    private static let maxFileDraftTotalBytes = 16 * 1024 * 1024
+    /// Cached merged/filtered file lists so `filteredFilePaths` does not re-sort 50k paths per render.
+    @ObservationIgnored private var mergedSortedFilesCache: (generation: UInt64, revision: UInt64, paths: [String])? = nil
+    @ObservationIgnored private var filteredFilesCache: (generation: UInt64, revision: UInt64, query: String, results: [String])? = nil
     /// Cached `files.agentFolder` responses keyed by session ID.
     private var agentFolderBySessionID: [String: String] = [:]
 
@@ -785,6 +787,10 @@ public final class WorkspaceController {
     @ObservationIgnored private var watchedFilesProjectPath: String?
     @ObservationIgnored private weak var watchedFilesHostSession: SartoHostSession?
     @ObservationIgnored private var filesChangedDebounceTask: Task<Void, Never>?
+    @ObservationIgnored private var filesRefreshInFlight: Bool = false
+    @ObservationIgnored private var filesRefreshInFlightGeneration: UInt64 = 0
+    @ObservationIgnored private var filesRefreshPending: Bool = false
+    @ObservationIgnored private var filesRefreshPendingOpenFile: Bool = false
     @ObservationIgnored private var pendingTerminalAcks: [String: Int] = [:]
     @ObservationIgnored private var terminalAckTask: Task<Void, Never>?
     @ObservationIgnored private var terminalGrid = TerminalGridSize(cols: 96, rows: 26)
@@ -832,9 +838,7 @@ public final class WorkspaceController {
         self.hostSession = host
         self.isRemoteWorkspace = isRemote
         resetGitFlowState(keepTools: false)
-        let resolvedPath = projectPath.isEmpty
-            ? Self.defaultProjectPath
-            : projectPath
+        let resolvedPath = projectPath
         if changedConnection || resolvedPath != self.activeProjectPath {
             stashOpenFileDraftIfDirty()
             self.workspaceHostID = hostId
@@ -868,6 +872,26 @@ public final class WorkspaceController {
         }
     }
 
+    public func clearProjectPath() {
+        guard !activeProjectPath.isEmpty else { return }
+        stashOpenFileDraftIfDirty()
+        projectGeneration &+= 1
+        isUploadingFiles = false
+        activeProjectPath = ""
+        gitStatus = nil
+        changedFiles = []
+        gitLoadError = nil
+        selectedForCommit.removeAll()
+        selectedDiffPath = nil
+        activeFileDiff = nil
+        computedDiff = ComputedDiff(hunks: [], insertions: 0, deletions: 0)
+        resetProjectFilesState()
+        resetOpenFileState()
+        gitNotice = nil
+        resetGitFlowState(keepTools: true)
+        syncFileWatcher(host: hostSession, projectPath: "")
+    }
+
     public func setProjectPath(_ path: String) async {
         guard !path.isEmpty else { return }
         if path != activeProjectPath {
@@ -897,6 +921,9 @@ public final class WorkspaceController {
         ignoredFolders.removeAll()
         loadedIgnoredFolders.removeAll()
         loadingIgnoredFolders.removeAll()
+        filesRefreshPending = false
+        filesRefreshPendingOpenFile = false
+        fileTreeRevision &+= 1
     }
 
     private func resetOpenFileState() {
@@ -922,6 +949,16 @@ public final class WorkspaceController {
     public func refreshGit() async {
         let gen = projectGeneration
         let projectPath = activeProjectPath
+        guard !projectPath.isEmpty else {
+            gitStatus = nil
+            changedFiles = []
+            gitLoadError = nil
+            selectedDiffPath = nil
+            activeFileDiff = nil
+            computedDiff = ComputedDiff(hunks: [], insertions: 0, deletions: 0)
+            isLoadingGit = false
+            return
+        }
         isLoadingGit = true
         gitNotice = nil
         defer {
@@ -1182,7 +1219,8 @@ public final class WorkspaceController {
     }
 
     /// Handles a host `files.changed` notification for `projectPath` with a 250ms debounce,
-    /// reloading the project tree and silently refreshing the open file if it has no unsaved edits.
+    /// coalescing bursts while a refresh is already in flight so overlapping `files.list` RPCs
+    /// never pile up on the host.
     public func handleFilesChanged(projectPath: String) {
         let normalizedIncoming = Self.normalizeProjectPath(projectPath)
         guard !normalizedIncoming.isEmpty,
@@ -1190,26 +1228,25 @@ public final class WorkspaceController {
             return
         }
 
+        if filesRefreshInFlight && filesRefreshInFlightGeneration == projectGeneration {
+            filesRefreshPending = true
+            filesRefreshPendingOpenFile = true
+            return
+        }
+
+        scheduleDebouncedFilesRefresh(expectedProject: normalizedIncoming, refreshOpenFile: true)
+    }
+
+    private func scheduleDebouncedFilesRefresh(expectedProject: String, refreshOpenFile: Bool) {
         filesChangedDebounceTask?.cancel()
         filesChangedDebounceTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .milliseconds(250))
             guard let self, !Task.isCancelled else { return }
-            guard Self.normalizeProjectPath(self.activeProjectPath) == normalizedIncoming else {
-                self.filesChangedDebounceTask = nil
+            self.filesChangedDebounceTask = nil
+            guard Self.normalizeProjectPath(self.activeProjectPath) == expectedProject else {
                 return
             }
-            let gen = self.projectGeneration
-            await self.refreshFiles()
-            guard !Task.isCancelled, self.projectGeneration == gen else {
-                if !Task.isCancelled { self.filesChangedDebounceTask = nil }
-                return
-            }
-            if let openPath = self.selectedFilePath, !self.isFileDirty {
-                await self.silentlyRefreshOpenFile(path: openPath, generation: gen)
-            }
-            if !Task.isCancelled {
-                self.filesChangedDebounceTask = nil
-            }
+            await self.refreshFiles(refreshOpenFileIfClean: refreshOpenFile)
         }
     }
 
@@ -1462,26 +1499,81 @@ public final class WorkspaceController {
     }
 
     public var filteredFilePaths: [String] {
+        let q = fileFilter.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let cached = filteredFilesCache,
+           cached.generation == projectGeneration,
+           cached.revision == fileTreeRevision,
+           cached.query == q {
+            return cached.results
+        }
+
         let allPaths: [String]
         if showIgnoredFiles && !ignoredPaths.isEmpty {
-            let known = Set(filePaths)
-            let extraIgnored = ignoredPaths.filter { !known.contains($0) }.sorted()
-            allPaths = (filePaths + extraIgnored).sorted()
+            if let merged = mergedSortedFilesCache,
+               merged.generation == projectGeneration,
+               merged.revision == fileTreeRevision {
+                allPaths = merged.paths
+            } else {
+                let known = Set(filePaths)
+                let extraIgnored = ignoredPaths.filter { !known.contains($0) }
+                let combined = (filePaths + extraIgnored).sorted()
+                mergedSortedFilesCache = (projectGeneration, fileTreeRevision, combined)
+                allPaths = combined
+            }
         } else {
             allPaths = filePaths
         }
-        let q = fileFilter.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !q.isEmpty else { return Array(allPaths.prefix(250)) }
-        return Array(allPaths.filter { $0.lowercased().contains(q) }.prefix(200))
+
+        let results: [String]
+        if q.isEmpty {
+            results = Array(allPaths.prefix(250))
+        } else {
+            var matched: [String] = []
+            matched.reserveCapacity(min(200, allPaths.count))
+            for path in allPaths {
+                if path.localizedCaseInsensitiveContains(q) {
+                    matched.append(path)
+                    if matched.count >= 200 { break }
+                }
+            }
+            results = matched
+        }
+        filteredFilesCache = (projectGeneration, fileTreeRevision, q, results)
+        return results
     }
 
-    public func refreshFiles() async {
+    public func refreshFiles(refreshOpenFileIfClean: Bool = false) async {
         let gen = projectGeneration
         let projectPath = activeProjectPath
+        guard !projectPath.isEmpty else {
+            resetProjectFilesState()
+            openFileStatusNote = nil
+            isLoadingFiles = false
+            return
+        }
+        if filesRefreshInFlight && filesRefreshInFlightGeneration == gen {
+            filesRefreshPending = true
+            if refreshOpenFileIfClean { filesRefreshPendingOpenFile = true }
+            return
+        }
+        filesRefreshInFlight = true
+        filesRefreshInFlightGeneration = gen
         isLoadingFiles = true
         defer {
+            if filesRefreshInFlightGeneration == gen {
+                filesRefreshInFlight = false
+            }
             if projectGeneration == gen {
                 isLoadingFiles = false
+                if filesRefreshPending {
+                    let shouldRefreshOpen = filesRefreshPendingOpenFile
+                    filesRefreshPending = false
+                    filesRefreshPendingOpenFile = false
+                    let normalized = Self.normalizeProjectPath(activeProjectPath)
+                    if !normalized.isEmpty {
+                        scheduleDebouncedFilesRefresh(expectedProject: normalized, refreshOpenFile: shouldRefreshOpen)
+                    }
+                }
             }
         }
 
@@ -1495,8 +1587,11 @@ public final class WorkspaceController {
                 ignoredFolders = Set(list.ignoredFolders)
                 loadedIgnoredFolders.removeAll()
                 loadingIgnoredFolders.removeAll()
+                fileTreeRevision &+= 1
                 if selectedFilePath == nil, let first = filePaths.first {
                     await openFile(path: first)
+                } else if refreshOpenFileIfClean, let openPath = selectedFilePath, !isFileDirty {
+                    await silentlyRefreshOpenFile(path: openPath, generation: gen)
                 }
                 return
             } catch {
@@ -1525,9 +1620,12 @@ public final class WorkspaceController {
         ignoredFolders.removeAll()
         loadedIgnoredFolders.removeAll()
         loadingIgnoredFolders.removeAll()
+        fileTreeRevision &+= 1
         if selectedFilePath == nil,
            let first = collected.first(where: { $0.hasSuffix(".swift") || $0.hasSuffix(".ts") || $0 == "README.md" }) ?? collected.first {
             await openFile(path: first)
+        } else if refreshOpenFileIfClean, let openPath = selectedFilePath, !isFileDirty {
+            await silentlyRefreshOpenFile(path: openPath, generation: gen)
         }
         #endif
     }
@@ -1543,9 +1641,11 @@ public final class WorkspaceController {
         let gen = projectGeneration
         let projectPath = activeProjectPath
         loadingIgnoredFolders.insert(normalized)
+        fileTreeRevision &+= 1
         defer {
             if projectGeneration == gen {
                 loadingIgnoredFolders.remove(normalized)
+                fileTreeRevision &+= 1
             }
         }
 
@@ -1556,6 +1656,7 @@ public final class WorkspaceController {
                 loadedIgnoredFolders[normalized] = listing
                 ignoredPaths.formUnion(listing.paths)
                 ignoredFolders.formUnion(listing.folders)
+                fileTreeRevision &+= 1
                 return
             } catch {
                 guard projectGeneration == gen else { return }
@@ -1576,6 +1677,7 @@ public final class WorkspaceController {
         loadedIgnoredFolders[normalized] = localListing
         ignoredPaths.formUnion(localListing.paths)
         ignoredFolders.formUnion(localListing.folders)
+        fileTreeRevision &+= 1
         #endif
     }
 
@@ -1759,7 +1861,7 @@ public final class WorkspaceController {
         }
         let key = draftKey(for: path, in: projectPath)
         if force {
-            fileDrafts.removeValue(forKey: key)
+            removeFileDraft(for: key)
         }
         selectedFilePath = path
         isFileDirty = false
@@ -1771,7 +1873,7 @@ public final class WorkspaceController {
         openFileStatusNote = nil
         openFileHasSaveConflict = false
 
-        if let draft = fileDrafts.removeValue(forKey: key) {
+        if let draft = removeFileDraft(for: key) {
             openFileText = draft.text
             openFileVersion = draft.baseVersion
             openFileEditable = true
@@ -2014,16 +2116,41 @@ public final class WorkspaceController {
         // The user moved on while saving: the stashed draft now sits on top of the version just written.
         guard var draft = fileDrafts[key] else { return }
         if draft.text == savedText {
-            fileDrafts.removeValue(forKey: key)
+            removeFileDraft(for: key)
         } else {
             draft.baseVersion = version
-            fileDrafts[key] = draft
+            storeFileDraft(draft, for: key)
         }
     }
 
     private func stashOpenFileDraftIfDirty() {
         guard isFileDirty, openFileEditable, let path = selectedFilePath else { return }
-        fileDrafts[draftKey(for: path, in: activeProjectPath)] = FileDraft(text: openFileText, baseVersion: openFileVersion)
+        storeFileDraft(FileDraft(text: openFileText, baseVersion: openFileVersion), for: draftKey(for: path, in: activeProjectPath))
+    }
+
+    private func storeFileDraft(_ draft: FileDraft, for key: String) {
+        if let existing = fileDrafts[key] {
+            fileDraftTotalBytes = max(0, fileDraftTotalBytes - existing.text.utf8.count)
+        }
+        fileDrafts[key] = draft
+        fileDraftTotalBytes += draft.text.utf8.count
+        fileDraftOrder.removeAll { $0 == key }
+        fileDraftOrder.append(key)
+        while fileDraftOrder.count > Self.maxFileDraftEntries
+            || (fileDraftOrder.count > 1 && fileDraftTotalBytes > Self.maxFileDraftTotalBytes) {
+            let evicted = fileDraftOrder.removeFirst()
+            if let removed = fileDrafts.removeValue(forKey: evicted) {
+                fileDraftTotalBytes = max(0, fileDraftTotalBytes - removed.text.utf8.count)
+            }
+        }
+    }
+
+    @discardableResult
+    private func removeFileDraft(for key: String) -> FileDraft? {
+        guard let removed = fileDrafts.removeValue(forKey: key) else { return nil }
+        fileDraftTotalBytes = max(0, fileDraftTotalBytes - removed.text.utf8.count)
+        fileDraftOrder.removeAll { $0 == key }
+        return removed
     }
 
     private func draftKey(for relativePath: String, in projectPath: String) -> String {
@@ -2704,7 +2831,28 @@ public final class WorkspaceController {
     private nonisolated static func scanLocalProjectFiles(rootPath: String, limit: Int) -> [String] {
         let rootURL = URL(fileURLWithPath: rootPath).standardizedFileURL.resolvingSymlinksInPath()
         let fm = FileManager.default
-        let skipDirs: Set<String> = [".git", "node_modules", ".build", "DerivedData", "out", "dist", ".DS_Store"]
+        let homePath = fm.homeDirectoryForCurrentUser.standardizedFileURL.resolvingSymlinksInPath().path
+        let skipDirs: Set<String> = [".git", "node_modules", ".build", "DerivedData", "out", "dist", ".DS_Store", ".Trash"]
+        let protectedPaths: Set<String> = [
+            homePath + "/Library",
+            homePath + "/.Trash",
+            "/System",
+            "/Library",
+            "/Volumes",
+            "/dev",
+            "/private",
+            "/Network",
+            "/cores",
+        ]
+        let skippedPackageSuffixes = [
+            ".photoslibrary",
+            ".photolibrary",
+            ".musiclibrary",
+            ".tvlibrary",
+            ".aplibrary",
+            ".fcpbundle",
+            ".app",
+        ]
         guard let enumerator = fm.enumerator(
             at: rootURL,
             includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
@@ -2712,10 +2860,15 @@ public final class WorkspaceController {
         ) else { return [] }
 
         var results: [String] = []
+        var dirsScanned = 0
+        let maxDirectories = 5_000
         let prefixLen = rootURL.path.count + 1
         while let url = enumerator.nextObject() as? URL {
             let name = url.lastPathComponent
-            if skipDirs.contains(name) {
+            let lowerName = name.lowercased()
+            if skipDirs.contains(name)
+                || protectedPaths.contains(url.path)
+                || skippedPackageSuffixes.contains(where: { lowerName.hasSuffix($0) }) {
                 enumerator.skipDescendants()
                 continue
             }
@@ -2724,7 +2877,14 @@ public final class WorkspaceController {
                 enumerator.skipDescendants()
                 continue
             }
-            if values?.isDirectory == true { continue }
+            if values?.isDirectory == true {
+                dirsScanned += 1
+                if dirsScanned >= maxDirectories {
+                    enumerator.skipDescendants()
+                    break
+                }
+                continue
+            }
             if url.path.count > prefixLen {
                 results.append(String(url.path.dropFirst(prefixLen)))
             }

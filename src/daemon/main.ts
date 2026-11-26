@@ -19,7 +19,7 @@ import { AccountApi, clientInfo } from '../core/account/service'
 import { accountFile, readAccount } from '../core/account/store'
 import { readJsonFile } from '../core/json-file'
 import { parseSettingsFile } from '../core/settings-schema'
-import { nodeSystemReleaseForRun } from '../core/system-name'
+import { computerName, nodeSystemReleaseForRun } from '../core/system-name'
 import { accountLine, login, logout } from './account'
 import { HELP, parseCommand, type Command } from './args'
 import { resolveCloudOrigin } from './cloud-account'
@@ -321,7 +321,7 @@ async function report(
             description: redacted,
             version,
             platform,
-            deviceName: settings?.remote.name?.trim() || os.hostname(),
+            deviceName: settings?.remote.name?.trim() || (await computerName()),
             bundle: { filename: path.basename(output), bytes: new Uint8Array(bytes) },
           })
           submitted = {
@@ -433,7 +433,7 @@ async function account(kind: 'login' | 'logout', data: string): Promise<number> 
       clientInfo: async () =>
         clientInfo({
           kind: 'daemon',
-          name: settings.remote.name ?? os.hostname(),
+          name: settings.remote.name ?? (await computerName()),
           os: await nodeSystemReleaseForRun(),
           arch: process.arch,
           version,
