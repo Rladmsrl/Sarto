@@ -64,11 +64,20 @@ struct GeneralSettingsSectionView: View {
                         "",
                         selection: Binding<String>(
                             get: { state.defaultAgentID ?? "" },
-                            set: { state.defaultAgentID = $0.isEmpty ? nil : $0 }
+                            set: { next in
+                                let value: String? = next.isEmpty ? nil : next
+                                state.defaultAgentID = value
+                                // Keep the local agent-host defaultAgent aligned for background tasks.
+                                Task {
+                                    _ = try? await daemon.updateHostSettings([
+                                        "general": .object(["defaultAgent": value.map(JSONValue.string) ?? .null]),
+                                    ])
+                                }
+                            }
                         )
                     ) {
                         Text(l10n.tr("settings.general.defaultAgentAsk")).tag("")
-                        ForEach(state.agents.filter { ($0.disabled ?? false) == false && $0.id != "fake-agent" }) { agent in
+                        ForEach(PrismSettingsStore.visibleAgents(from: state.agents).filter { ($0.disabled ?? false) == false }) { agent in
                             Text(agent.name).tag(agent.id)
                         }
                     }
@@ -85,20 +94,6 @@ struct GeneralSettingsSectionView: View {
                     subtitle: l10n.tr("settings.general.restoreSub")
                 ) {
                     Toggle("", isOn: $state.restoreLastSession)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                        .controlSize(.small)
-                }
-
-                SettingsRowDivider()
-
-                SettingsRowView(
-                    id: "general.confirmQuit",
-                    highlightedID: router.highlightedRowID,
-                    title: l10n.tr("settings.general.confirmQuit"),
-                    subtitle: l10n.tr("settings.general.confirmQuitSub")
-                ) {
-                    Toggle("", isOn: $state.confirmQuitWhileRunning)
                         .labelsHidden()
                         .toggleStyle(.switch)
                         .controlSize(.small)
@@ -194,6 +189,11 @@ struct GeneralSettingsSectionView: View {
                 LaunchAtLoginSettingsRow(launch: island.launchAtLogin, highlightedID: router.highlightedRowID)
             }
         }
+        .onAppear {
+            for item in store.lightAgents {
+                state.ensureAgentOptionsLoaded(for: item.agentId)
+            }
+        }
     }
 
     private struct PinnedLightChoice {
@@ -205,19 +205,34 @@ struct GeneralSettingsSectionView: View {
 
     private var pinnedLightAgentChoices: [PinnedLightChoice] {
         var out: [PinnedLightChoice] = []
-        for item in store.lightAgents {
-            if let opts = state.agentOptionsById[item.agentId],
-               let modelOpt = opts.config.first(where: { $0.category == "model" || $0.id == "model" }) {
-                let modelId = modelOpt.value.stringValue
-                    ?? modelOpt.choices?.first?.value
-                    ?? ""
-                if !modelId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    let modelLabel = modelOpt.choices?.first(where: { $0.value == modelId })?.name ?? modelId
+        var seen: Set<String> = []
+        for item in store.lightAgents where !PrismSettingsStore.retiredAgentIDs.contains(item.agentId) {
+            guard let opts = state.agentOptionsById[item.agentId],
+                  let modelOpt = opts.config.first(where: { $0.category == "model" || $0.id == "model" })
+            else { continue }
+
+            let available = modelOpt.choices ?? []
+            if !available.isEmpty {
+                for choice in available {
+                    let mid = choice.value.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !mid.isEmpty else { continue }
+                    let tag = "pinned:\(item.agentId)::\(mid)"
+                    guard seen.insert(tag).inserted else { continue }
                     out.append(PinnedLightChoice(
-                        tag: "pinned:\(item.agentId)::\(modelId)",
+                        tag: tag,
                         agentId: item.agentId,
-                        model: modelId,
-                        label: "\(item.name) · \(modelLabel)"
+                        model: mid,
+                        label: "\(item.name) · \(choice.name)"
+                    ))
+                }
+            } else if let mid = modelOpt.value.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines), !mid.isEmpty {
+                let tag = "pinned:\(item.agentId)::\(mid)"
+                if seen.insert(tag).inserted {
+                    out.append(PinnedLightChoice(
+                        tag: tag,
+                        agentId: item.agentId,
+                        model: mid,
+                        label: "\(item.name) · \(mid)"
                     ))
                 }
             }
@@ -227,8 +242,9 @@ struct GeneralSettingsSectionView: View {
            let mid = store.hostSettings.lightModelId,
            !mid.isEmpty {
             let currentTag = "pinned:\(aid)::\(mid)"
-            if !out.contains(where: { $0.tag == currentTag }) {
-                out.append(PinnedLightChoice(tag: currentTag, agentId: aid, model: mid, label: "\(aid) · \(mid)"))
+            if seen.insert(currentTag).inserted {
+                let agentName = state.agentDisplayName(for: aid)
+                out.append(PinnedLightChoice(tag: currentTag, agentId: aid, model: mid, label: "\(agentName) · \(mid)"))
             }
         }
         return out
@@ -321,6 +337,35 @@ private struct LaunchAtLoginSettingsRow: View {
     }
 }
 
+// MARK: - Installed System Font Catalog
+
+@MainActor
+private enum SystemFontCatalog {
+    static let allFamilies: [String] = {
+        NSFontManager.shared.availableFontFamilies
+            .filter { !$0.hasPrefix(".") }
+            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }()
+
+    static let installedSet: Set<String> = Set(allFamilies)
+
+    static let proseRecommended = ["SF Pro Text", "Inter", "PingFang SC", "Helvetica Neue", "Avenir Next"]
+    static let monoRecommended = [
+        "JetBrains Mono", "SF Mono", "Maple Mono", "Cascadia Code",
+        "Fira Code", "Menlo", "Hack", "Sarasa Mono SC",
+    ]
+
+    static func menuSections(recommended: [String], current: String) -> (preferred: [String], others: [String]) {
+        var preferred = recommended.filter { installedSet.contains($0) }
+        if !current.isEmpty, !preferred.contains(current), !installedSet.contains(current) {
+            preferred.insert(current, at: 0)
+        }
+        let prefSet = Set(preferred)
+        let others = allFamilies.filter { !prefSet.contains($0) }
+        return (preferred, others)
+    }
+}
+
 // MARK: - 2. Appearance & Typography Section
 
 struct AppearanceSettingsSectionView: View {
@@ -332,8 +377,9 @@ struct AppearanceSettingsSectionView: View {
     @Environment(\.prismTokens) private var tokens
     @Environment(\.prismL10n) private var l10n
 
-    private static let uiFontSuggestions = ["", "SF Pro Text", "Inter", "PingFang SC", "Helvetica Neue"]
-    private static let codeFontSuggestions = ["", "JetBrains Mono", "SF Mono", "Menlo", "Fira Code", "Hack"]
+    private var hasCustomFonts: Bool {
+        !state.proseFontFamily.isEmpty || !state.codeFontFamily.isEmpty || !state.terminalFontFamily.isEmpty
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -494,49 +540,66 @@ struct AppearanceSettingsSectionView: View {
                                 .foregroundStyle(tokens.mutedForeground)
                         }
                         Spacer()
-                        if !state.proseFontFamily.isEmpty || !state.codeFontFamily.isEmpty {
+                        if hasCustomFonts {
                             SettingsPillButton(l10n.tr("settings.common.reset")) {
                                 state.proseFontFamily = ""
                                 state.codeFontFamily = ""
+                                state.terminalFontFamily = ""
                             }
                         }
                     }
 
                     HStack(spacing: 12) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(l10n.tr("settings.appearance.proseFont"))
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(tokens.mutedForeground)
-                            Picker("", selection: $state.proseFontFamily) {
-                                Text(l10n.tr("settings.appearance.fontSystemDefault")).tag("")
-                                ForEach(Self.uiFontSuggestions.dropFirst(), id: \.self) { font in
-                                    Text(font).tag(font)
-                                }
-                            }
-                            .labelsHidden()
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(l10n.tr("settings.appearance.codeFont"))
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(tokens.mutedForeground)
-                            Picker("", selection: $state.codeFontFamily) {
-                                Text(l10n.tr("settings.appearance.fontSystemDefault")).tag("")
-                                ForEach(Self.codeFontSuggestions.dropFirst(), id: \.self) { font in
-                                    Text(font).tag(font)
-                                }
-                            }
-                            .labelsHidden()
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        fontFamilyPicker(
+                            label: l10n.tr("settings.appearance.proseFont"),
+                            selection: $state.proseFontFamily,
+                            recommended: SystemFontCatalog.proseRecommended
+                        )
+                        fontFamilyPicker(
+                            label: l10n.tr("settings.appearance.codeFont"),
+                            selection: $state.codeFontFamily,
+                            recommended: SystemFontCatalog.monoRecommended
+                        )
                     }
                 }
                 .padding(14)
                 .id("appearance.fonts")
+
+                SettingsRowDivider()
+
+                SettingsRowView(
+                    id: "terminal.fontSize",
+                    highlightedID: router.highlightedRowID,
+                    title: l10n.tr("settings.terminal.fontSize"),
+                    subtitle: l10n.tr("settings.terminal.fontSizeSub")
+                ) {
+                    Picker("", selection: $state.terminalFontSize) {
+                        Text("12 pt").tag(12)
+                        Text("13 pt").tag(13)
+                        Text("14 pt").tag(14)
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                    .frame(width: 190)
+                }
+
+                SettingsRowDivider()
+
+                SettingsRowView(
+                    id: "terminal.fontFamily",
+                    highlightedID: router.highlightedRowID,
+                    title: l10n.tr("settings.terminal.fontFamily"),
+                    subtitle: nil
+                ) {
+                    fontFamilyMenu(
+                        selection: $state.terminalFontFamily,
+                        recommended: SystemFontCatalog.monoRecommended
+                    )
+                    .frame(width: 190)
+                }
             }
 
-            SettingsGroupSection(l10n.tr("settings.appearance.groupMotion")) {
+            SettingsGroupSection(l10n.tr("settings.appearance.groupMotionAndLayout")) {
                 SettingsRowView(
                     id: "appearance.motion",
                     highlightedID: router.highlightedRowID,
@@ -552,9 +615,9 @@ struct AppearanceSettingsSectionView: View {
                     .pickerStyle(.segmented)
                     .frame(width: 260)
                 }
-            }
 
-            SettingsGroupSection(l10n.tr("settings.appearance.groupLayout")) {
+                SettingsRowDivider()
+
                 SettingsRowView(
                     id: "appearance.rail",
                     highlightedID: router.highlightedRowID,
@@ -578,6 +641,36 @@ struct AppearanceSettingsSectionView: View {
                 }
             }
         }
+    }
+
+    private func fontFamilyPicker(label: String, selection: Binding<String>, recommended: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(tokens.mutedForeground)
+            fontFamilyMenu(selection: selection, recommended: recommended)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func fontFamilyMenu(selection: Binding<String>, recommended: [String]) -> some View {
+        let sections = SystemFontCatalog.menuSections(recommended: recommended, current: selection.wrappedValue)
+        return Picker("", selection: selection) {
+            Text(l10n.tr("settings.appearance.fontSystemDefault")).tag("")
+            if !sections.preferred.isEmpty {
+                Divider()
+                ForEach(sections.preferred, id: \.self) { font in
+                    Text(font).tag(font)
+                }
+            }
+            if !sections.others.isEmpty {
+                Divider()
+                ForEach(sections.others, id: \.self) { font in
+                    Text(font).tag(font)
+                }
+            }
+        }
+        .labelsHidden()
     }
 }
 
@@ -702,23 +795,32 @@ private struct AppIconOptionTile: View {
     }
 }
 
-// MARK: - 3. Dynamic Island & Menu Bar Section (Single Source of Truth)
+// MARK: - 3. Dynamic Island, Menu Bar & Usage Section (Consolidated)
 
 struct IslandMenuBarSettingsSectionView: View {
     @Bindable var state: SartoState
+    @Bindable var daemon: LocalDaemonManager
     @Bindable var island: PrismDynamicIslandCoordinator
+    @Bindable var store: PrismSettingsStore
     @Bindable var router: PrismSettingsRouter
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             IslandMenuBarSettingsBody(
                 state: state,
+                daemon: daemon,
                 settingsStore: island.settingsStore,
                 usageStore: island.usageStore,
                 island: island,
+                store: store,
+                router: router,
                 highlightedID: router.highlightedRowID
             )
-            GameSettingsSection(state: state, store: island.gameStore)
+            GameSettingsSection(
+                state: state,
+                store: island.gameStore,
+                highlightedID: router.highlightedRowID
+            )
         }
         .onAppear { island.setUsageViewerVisible(true) }
         .onDisappear { island.setUsageViewerVisible(false) }
@@ -727,9 +829,12 @@ struct IslandMenuBarSettingsSectionView: View {
 
 private struct IslandMenuBarSettingsBody: View {
     @Bindable var state: SartoState
+    @Bindable var daemon: LocalDaemonManager
     @ObservedObject var settingsStore: UsageSettingsStore
     @ObservedObject var usageStore: PrismUsageStore
     let island: PrismDynamicIslandCoordinator
+    @Bindable var store: PrismSettingsStore
+    let router: PrismSettingsRouter
     let highlightedID: String?
 
     @State private var displays = Displays.all()
@@ -739,8 +844,25 @@ private struct IslandMenuBarSettingsBody: View {
     private var settings: Binding<UsageIslandSettings> { $settingsStore.settings }
 
     var body: some View {
+        let allProviders = settingsStore.ordered(usageStore.providers)
+        let activeProvidersCount = allProviders.filter { !settings.wrappedValue.hidden.contains($0.id) }.count
+        let encryptedUsageActive = state.sartoSyncStatus.isVaultReady
+        let activeMacCount = max(usageStore.devices.count, state.sartoSyncStatus.usageDevices.count)
+
         VStack(alignment: .leading, spacing: 18) {
             SettingsGroupSection(l10n.tr("settings.island.groupIsland")) {
+                if settings.wrappedValue.islandEnabled {
+                    HStack(spacing: 6) {
+                        SettingsPillButton(l10n.tr("settings.island.previewPop"), icon: "bell.badge") {
+                            island.triggerPreviewPop()
+                        }
+                        SettingsPillButton(l10n.tr("settings.island.previewApproval"), icon: "checkmark.shield") {
+                            island.triggerPreviewApproval()
+                        }
+                    }
+                    .id("island.preview")
+                }
+            } content: {
                 SettingsRowView(
                     id: "island.enabled",
                     highlightedID: highlightedID,
@@ -800,26 +922,6 @@ private struct IslandMenuBarSettingsBody: View {
                     .frame(width: 268)
                     .disabled(!settings.wrappedValue.islandEnabled)
                 }
-
-                SettingsRowDivider()
-
-                SettingsRowView(
-                    id: "island.preview",
-                    highlightedID: highlightedID,
-                    title: l10n.tr("settings.island.previewTitle"),
-                    subtitle: l10n.tr("settings.island.previewSub")
-                ) {
-                    HStack(spacing: 8) {
-                        SettingsPillButton(l10n.tr("settings.island.previewPop"), icon: "bell.badge") {
-                            island.triggerPreviewPop()
-                        }
-                        SettingsPillButton(l10n.tr("settings.island.previewApproval"), icon: "checkmark.shield") {
-                            island.triggerPreviewApproval()
-                        }
-                    }
-                    .disabled(!settings.wrappedValue.islandEnabled)
-                    .opacity(settings.wrappedValue.islandEnabled ? 1 : 0.45)
-                }
             }
 
             SettingsGroupSection(l10n.tr("settings.menubar.groupMenuBar")) {
@@ -868,60 +970,13 @@ private struct IslandMenuBarSettingsBody: View {
                 .disabled(!settings.wrappedValue.menubarEnabled)
                 .opacity(settings.wrappedValue.menubarEnabled ? 1 : 0.45)
             }
-        }
-        .onAppear { displays = Displays.all() }
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)) { _ in
-            displays = Displays.all()
-        }
-    }
-}
 
-// MARK: - 4. Usage & Multi-Mac Sync Section (Consolidated from Menu Bar)
-
-struct UsageSyncSettingsSectionView: View {
-    @Bindable var state: SartoState
-    @Bindable var daemon: LocalDaemonManager
-    @Bindable var island: PrismDynamicIslandCoordinator
-    @Bindable var store: PrismSettingsStore
-    @Bindable var router: PrismSettingsRouter
-
-    var body: some View {
-        UsageSyncSettingsBody(
-            state: state,
-            daemon: daemon,
-            settingsStore: island.settingsStore,
-            usageStore: island.usageStore,
-            store: store,
-            router: router,
-            highlightedID: router.highlightedRowID
-        )
-        .onAppear { island.setUsageViewerVisible(true) }
-        .onDisappear { island.setUsageViewerVisible(false) }
-    }
-}
-
-private struct UsageSyncSettingsBody: View {
-    @Bindable var state: SartoState
-    @Bindable var daemon: LocalDaemonManager
-    @ObservedObject var settingsStore: UsageSettingsStore
-    @ObservedObject var usageStore: PrismUsageStore
-    @Bindable var store: PrismSettingsStore
-    let router: PrismSettingsRouter
-    let highlightedID: String?
-
-    @Environment(\.prismTokens) private var tokens
-    @Environment(\.prismL10n) private var l10n
-
-    private var settings: Binding<UsageIslandSettings> { $settingsStore.settings }
-
-    var body: some View {
-        let all = settingsStore.ordered(usageStore.providers)
-        let activeCount = all.filter { !settings.wrappedValue.hidden.contains($0.id) }.count
-
-        VStack(alignment: .leading, spacing: 18) {
-            SettingsGroupSection(l10n.tr("settings.usage.sources"), trailingBadge: "\(activeCount) / \(all.count)") {
+            SettingsGroupSection(
+                l10n.tr("settings.usage.sources"),
+                trailingBadge: "\(activeProvidersCount) / \(allProviders.count)"
+            ) {
                 VStack(spacing: 0) {
-                    ForEach(Array(all.enumerated()), id: \.element.id) { index, provider in
+                    ForEach(Array(allProviders.enumerated()), id: \.element.id) { index, provider in
                         if index > 0 { SettingsRowDivider() }
                         let hidden = settings.wrappedValue.hidden.contains(provider.id)
                         HStack(spacing: 10) {
@@ -970,12 +1025,12 @@ private struct UsageSyncSettingsBody: View {
                                         .background(Circle().fill(tokens.surface2))
                                 }
                                 .buttonStyle(.plain)
-                                .disabled(index == all.count - 1)
-                                .opacity(index == all.count - 1 ? 0.35 : 1)
+                                .disabled(index == allProviders.count - 1)
+                                .opacity(index == allProviders.count - 1 ? 0.35 : 1)
                             }
 
                             let lastShown = !hidden
-                                && all.filter { !settingsStore.settings.hidden.contains($0.id) }.count <= 1
+                                && allProviders.filter { !settingsStore.settings.hidden.contains($0.id) }.count <= 1
                             Toggle(
                                 "",
                                 isOn: Binding(
@@ -996,7 +1051,10 @@ private struct UsageSyncSettingsBody: View {
                 .id("usage.sources")
             }
 
-            SettingsGroupSection(l10n.tr("settings.usage.groupPrivacy")) {
+            SettingsGroupSection(
+                l10n.tr("settings.usage.groupDisplay"),
+                trailingBadge: encryptedUsageActive && activeMacCount > 0 ? "\(activeMacCount) Mac" : nil
+            ) {
                 SettingsRowView(
                     id: "usage.privacy",
                     highlightedID: highlightedID,
@@ -1015,8 +1073,6 @@ private struct UsageSyncSettingsBody: View {
                     id: "usage.fromComputer",
                     highlightedID: highlightedID,
                     title: l10n.tr("settings.usage.fromComputer"),
-                    // The window may be on another host, whose setting this changes; the menu
-                    // bar and the island always read this Mac's.
                     subtitle: state.connectionMode.isRemote
                         ? l10n.tr("settings.usage.fromComputerRemoteSub", state.activeHostSnapshot.name)
                         : l10n.tr("settings.usage.fromComputerSub")
@@ -1042,49 +1098,15 @@ private struct UsageSyncSettingsBody: View {
                     .controlSize(.small)
                     .disabled(!state.connectionMode.isLive)
                 }
-            }
 
-            let encryptedUsageActive = state.sartoSyncStatus.isVaultReady
-            let activeMacCount = max(usageStore.devices.count, state.sartoSyncStatus.usageDevices.count)
-
-            SettingsGroupSection(
-                l10n.tr("settings.usage.sync"),
-                trailingBadge: encryptedUsageActive && activeMacCount > 0 ? "\(activeMacCount) Mac" : nil
-            ) {
-                if encryptedUsageActive {
-                    HStack(alignment: .top, spacing: 10) {
-                        Image(systemName: "lock.shield.fill")
-                            .font(.system(size: 13))
-                            .foregroundStyle(tokens.success)
-                            .padding(.top, 1)
-                        Text(l10n.tr("settings.usage.encryptedSyncNote", max(1, activeMacCount)))
-                            .font(.system(size: 12))
-                            .foregroundStyle(tokens.secondaryForeground)
-                        Spacer()
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                } else {
-                    // Usage reaches other Macs only through Sarto's encrypted sync, set up with the account.
-                    SettingsRowView(
-                        id: "usage.sync",
-                        highlightedID: highlightedID,
-                        title: l10n.tr("settings.usage.syncOffTitle"),
-                        subtitle: l10n.tr("settings.usage.syncOffBody")
-                    ) {
-                        SettingsPillButton(l10n.tr("settings.usage.openCloudSync"), icon: "arrow.right", prominent: true) {
-                            router.jumpTo(section: .remoteAndCloud, rowID: "remote.sync")
-                        }
-                    }
-                }
+                SettingsRowDivider()
 
                 if encryptedUsageActive {
-                    SettingsRowDivider()
                     SettingsRowView(
                         id: "usage.syncScope",
                         highlightedID: highlightedID,
                         title: l10n.tr("settings.usage.syncScope"),
-                        subtitle: nil
+                        subtitle: l10n.tr("settings.usage.encryptedSyncNote", max(1, activeMacCount))
                     ) {
                         Picker("", selection: settings.usageScope) {
                             ForEach(UsageScope.allCases, id: \.self) { scope in
@@ -1096,38 +1118,6 @@ private struct UsageSyncSettingsBody: View {
                         .frame(width: 190)
                     }
 
-                    ForEach(usageStore.devices) { device in
-                        SettingsRowDivider()
-                        HStack(spacing: 10) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                HStack(spacing: 6) {
-                                    Text(device.name)
-                                        .font(.system(size: 12.5, weight: .medium))
-                                        .foregroundStyle(tokens.foreground)
-                                    if device.isThisMac {
-                                        Text(l10n.tr("settings.usage.thisMac"))
-                                            .font(.system(size: 10, weight: .semibold))
-                                            .foregroundStyle(tokens.primary)
-                                            .padding(.horizontal, 6)
-                                            .padding(.vertical, 1.5)
-                                            .background(Capsule().fill(tokens.primarySoft))
-                                    }
-                                }
-                                Text(device.updatedAt.map { UsageAgo.text($0, l10n: l10n) } ?? "—")
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(tokens.mutedForeground)
-                            }
-                            Spacer()
-                            if !device.isThisMac {
-                                SettingsPillButton(l10n.tr("settings.common.remove"), destructive: true) {
-                                    usageStore.removeDevice(device.id)
-                                }
-                            }
-                        }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 9)
-                    }
-
                     if let syncError = usageStore.syncError {
                         SettingsRowDivider()
                         Text(syncError)
@@ -1136,8 +1126,23 @@ private struct UsageSyncSettingsBody: View {
                             .padding(.horizontal, 14)
                             .padding(.vertical, 9)
                     }
+                } else {
+                    SettingsRowView(
+                        id: "usage.syncScope",
+                        highlightedID: highlightedID,
+                        title: l10n.tr("settings.usage.sync"),
+                        subtitle: l10n.tr("settings.usage.syncOffBody")
+                    ) {
+                        SettingsPillButton(l10n.tr("settings.usage.openCloudSync"), icon: "arrow.right", prominent: true) {
+                            router.jumpTo(section: .remoteAndCloud, rowID: "remote.sync")
+                        }
+                    }
                 }
             }
+        }
+        .onAppear { displays = Displays.all() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)) { _ in
+            displays = Displays.all()
         }
     }
 
@@ -1149,10 +1154,9 @@ private struct UsageSyncSettingsBody: View {
         }
         return provider.note ?? provider.plan
     }
-
 }
 
-// MARK: - 5. Notifications Section
+// MARK: - 4. Notifications Section
 
 struct NotificationsSettingsSectionView: View {
     @Bindable var state: SartoState
@@ -1175,8 +1179,11 @@ private struct NotificationsSettingsBody: View {
 
     @Environment(\.prismL10n) private var l10n
     @Environment(\.prismTokens) private var tokens
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
+        let motion = PrismSpringSpec.snappy.animation(tier: state.motionTier, reduceMotion: reduceMotion)
+
         VStack(alignment: .leading, spacing: 18) {
             SettingsGroupSection(l10n.tr("settings.notifications.groupEvents")) {
                 SettingsRowView(
@@ -1227,7 +1234,17 @@ private struct NotificationsSettingsBody: View {
                     title: l10n.tr("settings.usage.lowAlert"),
                     subtitle: l10n.tr("settings.notifications.lowQuotaSub")
                 ) {
-                    Picker("", selection: $settingsStore.settings.lowQuotaAlert) {
+                    Picker(
+                        "",
+                        selection: Binding(
+                            get: { settingsStore.settings.lowQuotaAlert },
+                            set: { next in
+                                withAnimation(motion) {
+                                    settingsStore.settings.lowQuotaAlert = next
+                                }
+                            }
+                        )
+                    ) {
                         Text(l10n.tr("settings.notifications.lowQuota.pop")).tag(LowQuotaAlertMode.pop)
                         Text(l10n.tr("settings.notifications.lowQuota.badge")).tag(LowQuotaAlertMode.badge)
                         Text(l10n.tr("settings.notifications.lowQuota.off")).tag(LowQuotaAlertMode.off)
@@ -1237,25 +1254,27 @@ private struct NotificationsSettingsBody: View {
                     .frame(width: 240)
                 }
 
-                SettingsRowDivider()
+                if settingsStore.settings.lowAlert {
+                    SettingsRowDivider()
 
-                SettingsRowView(
-                    id: "notifications.threshold",
-                    highlightedID: highlightedID,
-                    title: l10n.tr("settings.usage.threshold"),
-                    subtitle: l10n.tr("settings.notifications.thresholdSub")
-                ) {
-                    Picker("", selection: $settingsStore.settings.lowThreshold) {
-                        ForEach(UsageIslandSettings.lowThresholds, id: \.self) { value in
-                            Text("\(value)%").tag(value)
+                    SettingsRowView(
+                        id: "notifications.threshold",
+                        highlightedID: highlightedID,
+                        title: l10n.tr("settings.usage.threshold"),
+                        subtitle: l10n.tr("settings.notifications.thresholdSub")
+                    ) {
+                        Picker("", selection: $settingsStore.settings.lowThreshold) {
+                            ForEach(UsageIslandSettings.lowThresholds, id: \.self) { value in
+                                Text("\(value)%").tag(value)
+                            }
                         }
+                        .labelsHidden()
+                        .pickerStyle(.segmented)
+                        .frame(width: 210)
                     }
-                    .labelsHidden()
-                    .pickerStyle(.segmented)
-                    .frame(width: 210)
-                    .disabled(!settingsStore.settings.lowAlert)
                 }
             }
+            .animation(motion, value: settingsStore.settings.lowAlert)
 
             Text(l10n.tr(
                 settingsStore.settings.islandEnabled

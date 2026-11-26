@@ -40,7 +40,7 @@ struct ExtensionsSettingsSectionView: View {
     @Environment(\.prismL10n) private var l10n
 
     private var visibleAgents: [AgentStatusInfo] {
-        state.agents.filter { $0.id != "fake-agent" }
+        PrismSettingsStore.visibleAgents(from: state.agents)
     }
 
     private var pluginCapableAgents: [AgentStatusInfo] {
@@ -108,8 +108,8 @@ struct ExtensionsSettingsSectionView: View {
         }
         .onAppear {
             syncTabFromHighlight(router.highlightedRowID)
-            if let firstPluginAgent = pluginCapableAgents.first {
-                newMarketplaceAgentID = firstPluginAgent.id
+            if let firstMarketplaceAgent = marketplaceCapableAgents.first {
+                newMarketplaceAgentID = firstMarketplaceAgent.id
             }
         }
         .onChange(of: router.highlightedRowID) { _, next in

@@ -15,7 +15,6 @@ struct RemoteCloudSettingsSectionView: View {
     @State private var pendingRemoveCloudDevice: CloudDeviceInfo? = nil
 
     @State private var isSubmittingSync: Bool = false
-    @State private var isRestartingDaemon: Bool = false
     @State private var isDisconnectingRemoteClaude: Bool = false
     @State private var busyUpdateHostIDs: Set<String> = []
     @State private var checkedRemoteHostIDs: Set<String> = []
@@ -69,57 +68,8 @@ struct RemoteCloudSettingsSectionView: View {
             // 2. Unified My Devices (Computers + Mobile signed in to the same Sarto account)
             myDevicesSection
 
-            // 3. Local Background Service & Remote Terminal Access
-            SettingsGroupSection(l10n.tr("settings.localDaemon")) {
-                SettingsRowView(
-                    id: "remote.daemon",
-                    highlightedID: router.highlightedRowID,
-                    title: daemonStatusText,
-                    subtitle: daemonSubtitleText
-                ) {
-                    HStack(spacing: 8) {
-                        if isRestartingDaemon {
-                            ProgressView()
-                                .controlSize(.small)
-                            SettingsPillButton(
-                                l10n.tr("settings.daemon.restart"),
-                                icon: "arrow.clockwise",
-                                disabled: true
-                            ) {}
-                        } else if state.connectionMode.isLive || daemon.isStartingOrRunning {
-                            if daemon.canRestartLocally {
-                                SettingsPillButton(
-                                    daemon.runtimeOutdated
-                                        ? l10n.tr("settings.daemon.restartToUpdate")
-                                        : l10n.tr("settings.daemon.restart"),
-                                    icon: "arrow.clockwise",
-                                    prominent: daemon.runtimeOutdated
-                                ) {
-                                    restartLocalDaemon()
-                                }
-                            } else {
-                                SettingsPillButton(
-                                    l10n.tr("settings.daemon.reconnect"),
-                                    icon: "arrow.clockwise"
-                                ) {
-                                    reconnectLocalDaemon()
-                                }
-                            }
-                        } else {
-                            SettingsPillButton(
-                                l10n.tr("settings.startAndConnect"),
-                                icon: "play.fill",
-                                prominent: true
-                            ) {
-                                reconnectLocalDaemon()
-                            }
-                        }
-                    }
-                }
-                .help(daemon.controlSocketPath)
-
-                SettingsRowDivider()
-
+            // 3. Local Remote Sharing Permissions (Remote Terminal + Remote Claude Code Hosting)
+            SettingsGroupSection(l10n.tr("settings.remote.sharingGroup")) {
                 SettingsRowView(
                     id: "remote.terminal",
                     highlightedID: router.highlightedRowID,
@@ -150,23 +100,6 @@ struct RemoteCloudSettingsSectionView: View {
                 SettingsRowDivider()
 
                 remoteClaudeSettingsBlock
-            }
-
-            // 4. Security & Privacy
-            SettingsGroupSection(l10n.tr("settings.privacy.title")) {
-                SettingsRowView(
-                    id: "remote.privacy",
-                    highlightedID: router.highlightedRowID,
-                    title: l10n.tr("settings.privacy.policyTitle"),
-                    subtitle: l10n.tr("settings.privacy.policySub")
-                ) {
-                    SettingsPillButton(
-                        l10n.tr("settings.privacy.policyAction"),
-                        icon: "checkmark.shield"
-                    ) {
-                        openPrivacyPolicy()
-                    }
-                }
             }
         }
         .onAppear {
@@ -614,8 +547,9 @@ struct RemoteCloudSettingsSectionView: View {
     }
 
     /// What sync carries, in the words a user knows, with the scope or record each one is.
+    /// Scopes the Mac app does not create (`skills`, `themes`) only show when already populated.
     private var syncCategories: [(icon: String, titleKey: String, scope: String)] {
-        [
+        let all: [(icon: String, titleKey: String, scope: String)] = [
             ("paintbrush", "settings.sync.cat.prefs", "ui-prefs"),
             ("cpu", "settings.sync.cat.agents", "host-config"),
             ("server.rack", "settings.sync.cat.mcp", "mcp-servers"),
@@ -625,6 +559,12 @@ struct RemoteCloudSettingsSectionView: View {
             ("brain", "settings.sync.cat.memory", "memory-and-mesh"),
             ("chart.bar", "settings.sync.cat.usage", "usage"),
         ]
+        return all.filter { item in
+            if item.scope == "skills" || item.scope == "themes" {
+                return (syncStatus.revisions[item.scope] ?? 0) > 0
+            }
+            return true
+        }
     }
 
     private var activeSyncStatusBanner: some View {
@@ -1640,6 +1580,274 @@ struct RemoteCloudSettingsSectionView: View {
         }
     }
 
+}
+
+// MARK: - 10. Advanced & Service Section (Daemon, Proxy & Diagnostics)
+
+struct AdvancedServiceSettingsSectionView: View {
+    @Bindable var state: SartoState
+    @Bindable var daemon: LocalDaemonManager
+    @Bindable var store: PrismSettingsStore
+    @Bindable var router: PrismSettingsRouter
+
+    @State private var isRestartingDaemon: Bool = false
+    @State private var proxyMode: String = "environment"
+    @State private var proxyUrl: String = ""
+    @State private var proxyNoProxy: String = ""
+    @State private var verboseEnabled: Bool = false
+    @State private var showClearConfirm: Bool = false
+
+    @Environment(\.prismTokens) private var tokens
+    @Environment(\.prismL10n) private var l10n
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            // 1. Unified Local Background Service (Controls + Health Metrics)
+            SettingsGroupSection(l10n.tr("settings.localDaemon")) {
+                SettingsPillButton(l10n.tr("settings.common.refresh"), icon: "arrow.clockwise") {
+                    Task { await store.loadDaemonAndRemote(state: state, daemon: daemon) }
+                }
+            } content: {
+                SettingsRowView(
+                    id: "remote.daemon",
+                    highlightedID: router.highlightedRowID,
+                    title: daemonStatusText,
+                    subtitle: daemonSubtitleText
+                ) {
+                    HStack(spacing: 8) {
+                        if isRestartingDaemon {
+                            ProgressView()
+                                .controlSize(.small)
+                            SettingsPillButton(
+                                l10n.tr("settings.daemon.restart"),
+                                icon: "arrow.clockwise",
+                                disabled: true
+                            ) {}
+                        } else if state.connectionMode.isLive || daemon.isStartingOrRunning {
+                            if daemon.canRestartLocally {
+                                SettingsPillButton(
+                                    daemon.runtimeOutdated
+                                        ? l10n.tr("settings.daemon.restartToUpdate")
+                                        : l10n.tr("settings.daemon.restart"),
+                                    icon: "arrow.clockwise",
+                                    prominent: daemon.runtimeOutdated
+                                ) {
+                                    restartLocalDaemon()
+                                }
+                            } else {
+                                SettingsPillButton(
+                                    l10n.tr("settings.daemon.reconnect"),
+                                    icon: "arrow.clockwise"
+                                ) {
+                                    reconnectLocalDaemon()
+                                }
+                            }
+                        } else {
+                            SettingsPillButton(
+                                l10n.tr("settings.startAndConnect"),
+                                icon: "play.fill",
+                                prominent: true
+                            ) {
+                                reconnectLocalDaemon()
+                            }
+                        }
+                    }
+                }
+                .help(daemon.controlSocketPath)
+
+                if let st = store.daemonStatus {
+                    SettingsRowDivider()
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(spacing: 16) {
+                            let daemonTags = [st.origin, st.commit].compactMap { value -> String? in
+                                guard let value, !value.isEmpty else { return nil }
+                                return value
+                            }
+                            let daemonMeta = daemonTags.isEmpty ? "" : " · " + daemonTags.joined(separator: " · ")
+                            healthMetric(label: "Daemon", value: "v\(st.version)\(daemonMeta) · PID \(st.pid)")
+                            healthMetric(label: l10n.tr("settings.advanced.uptime"), value: formatUptime(startedAtMs: st.startedAt))
+                        }
+                        HStack(spacing: 8) {
+                            hostChip(name: "agent-host", status: st.hosts.agent)
+                            hostChip(name: "terminal-host", status: st.hosts.terminal)
+                            hostChip(name: "remote-host", status: st.hosts.remote)
+                        }
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 11)
+                }
+            }
+
+            // 2. Network Proxy
+            SettingsGroupSection(l10n.tr("settings.advanced.proxy")) {
+                SettingsRowView(
+                    id: "advanced.proxy",
+                    highlightedID: router.highlightedRowID,
+                    title: l10n.tr("settings.advanced.proxyMode"),
+                    subtitle: l10n.tr("settings.advanced.proxySub")
+                ) {
+                    Picker("", selection: $proxyMode) {
+                        Text(l10n.tr("settings.advanced.proxyEnv")).tag("environment")
+                        Text(l10n.tr("settings.advanced.proxyCustom")).tag("custom")
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                    .frame(width: 210)
+                    .onChange(of: proxyMode) { _, next in
+                        if next == "environment" {
+                            saveProxy()
+                        }
+                    }
+                }
+
+                if proxyMode == "custom" {
+                    SettingsRowDivider()
+                    VStack(alignment: .leading, spacing: 10) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(l10n.tr("settings.advanced.proxyUrl"))
+                                .font(.system(size: 11.5, weight: .medium))
+                                .foregroundStyle(tokens.mutedForeground)
+                            TextField("http://127.0.0.1:7890", text: $proxyUrl)
+                                .textFieldStyle(.plain)
+                                .font(.system(size: 12, design: .monospaced))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 6)
+                                .background(RoundedRectangle(cornerRadius: tokens.rXS).fill(tokens.codeBackground))
+                                .overlay(RoundedRectangle(cornerRadius: tokens.rXS).strokeBorder(tokens.borderEtched, lineWidth: 1))
+                        }
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("NO_PROXY")
+                                .font(.system(size: 11.5, weight: .medium))
+                                .foregroundStyle(tokens.mutedForeground)
+                            TextField("localhost,127.0.0.1,.local", text: $proxyNoProxy)
+                                .textFieldStyle(.plain)
+                                .font(.system(size: 12, design: .monospaced))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 6)
+                                .background(RoundedRectangle(cornerRadius: tokens.rXS).fill(tokens.codeBackground))
+                                .overlay(RoundedRectangle(cornerRadius: tokens.rXS).strokeBorder(tokens.borderEtched, lineWidth: 1))
+                        }
+
+                        HStack {
+                            Spacer()
+                            SettingsPillButton(l10n.tr("settings.common.save"), prominent: true) {
+                                saveProxy()
+                            }
+                        }
+                    }
+                    .padding(14)
+                }
+            }
+
+            // 3. Diagnostics & Data
+            SettingsGroupSection(l10n.tr("settings.advanced.diagnostics")) {
+                SettingsRowView(
+                    id: "advanced.diagnostics",
+                    highlightedID: router.highlightedRowID,
+                    title: l10n.tr("settings.advanced.verbose"),
+                    subtitle: l10n.tr("settings.advanced.verboseSub")
+                ) {
+                    Toggle(
+                        "",
+                        isOn: Binding(
+                            get: { verboseEnabled },
+                            set: { next in
+                                verboseEnabled = next
+                                Task {
+                                    do {
+                                        let until = try await daemon.setVerboseLogging(next)
+                                        store.hostSettings.verboseUntil = until
+                                        verboseEnabled = until != nil
+                                    } catch {
+                                        store.showError(error.localizedDescription)
+                                    }
+                                }
+                            }
+                        )
+                    )
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                }
+
+                SettingsRowDivider()
+
+                SettingsRowView(
+                    id: "advanced.dataFolder",
+                    highlightedID: router.highlightedRowID,
+                    title: l10n.tr("settings.advanced.dataFolder"),
+                    subtitle: store.daemonStatus?.dataPath ?? daemon.dataDirectory
+                ) {
+                    SettingsPillButton(l10n.tr("settings.advanced.openFolder"), icon: "folder") {
+                        let path = store.daemonStatus?.dataPath ?? daemon.dataDirectory
+                        NSWorkspace.shared.open(URL(fileURLWithPath: path))
+                    }
+                }
+
+                SettingsRowDivider()
+
+                SettingsRowView(
+                    id: "advanced.clearSessions",
+                    highlightedID: router.highlightedRowID,
+                    title: l10n.tr("settings.advanced.clearSessions"),
+                    subtitle: l10n.tr("settings.advanced.clearSessionsSub")
+                ) {
+                    SettingsPillButton(l10n.tr("settings.advanced.clearAllBtn"), icon: "trash", destructive: true, disabled: !state.connectionMode.isLive) {
+                        showClearConfirm = true
+                    }
+                }
+            }
+        }
+        .onAppear {
+            syncFromStore()
+        }
+        .onChange(of: store.hostSettings) { _, _ in syncFromStore() }
+        .alert(l10n.tr("settings.advanced.clearSessionsConfirmTitle"), isPresented: $showClearConfirm) {
+            Button(l10n.tr("thread.entry.cancel"), role: .cancel) {}
+            Button(l10n.tr("settings.advanced.clearAllBtn"), role: .destructive) {
+                Task {
+                    do {
+                        try await state.clearAllHostSessions()
+                        store.showNotice(l10n.tr("settings.advanced.clearSessionsDone"))
+                    } catch {
+                        store.showError(error.localizedDescription)
+                    }
+                }
+            }
+        } message: {
+            Text(l10n.tr("settings.advanced.clearSessionsConfirmBody"))
+        }
+    }
+
+    private func syncFromStore() {
+        proxyMode = store.hostSettings.proxyMode
+        proxyUrl = store.hostSettings.proxyUrl
+        proxyNoProxy = store.hostSettings.proxyNoProxy
+        if let until = store.hostSettings.verboseUntil {
+            verboseEnabled = until > Date().timeIntervalSince1970 * 1000
+        } else {
+            verboseEnabled = false
+        }
+    }
+
+    private func saveProxy() {
+        let proxyObj: [String: JSONValue]
+        if proxyMode == "environment" {
+            proxyObj = ["mode": .string("environment")]
+        } else {
+            proxyObj = [
+                "mode": .string("custom"),
+                "url": .string(proxyUrl.trimmingCharacters(in: .whitespacesAndNewlines)),
+                "noProxy": .string(proxyNoProxy.trimmingCharacters(in: .whitespacesAndNewlines)),
+            ]
+        }
+        let patch: [String: JSONValue] = ["proxy": .object(proxyObj)]
+        Task {
+            await store.patchHostSettings(patch, state: state, daemon: daemon, notice: l10n.tr("settings.common.saved"))
+        }
+    }
+
     private var daemonStatusText: String {
         if isRestartingDaemon {
             return l10n.tr("settings.daemon.restarting")
@@ -1747,298 +1955,6 @@ struct RemoteCloudSettingsSectionView: View {
         }
     }
 
-    private func openPrivacyPolicy() {
-        if let url = state.privacyPolicyURL {
-            NSWorkspace.shared.open(url)
-        }
-    }
-}
-
-// MARK: - 11. Advanced & About Section
-
-struct AdvancedAboutSettingsSectionView: View {
-    @Bindable var state: SartoState
-    @Bindable var daemon: LocalDaemonManager
-    @Bindable var store: PrismSettingsStore
-    @Bindable var router: PrismSettingsRouter
-
-    @State private var proxyMode: String = "environment"
-    @State private var proxyUrl: String = ""
-    @State private var proxyNoProxy: String = ""
-    @State private var verboseEnabled: Bool = false
-    @State private var showClearConfirm: Bool = false
-    @State private var cloudReports: CloudReportListInfo? = nil
-    @State private var isLoadingReports: Bool = false
-    @State private var reportsError: String? = nil
-    @State private var copiedReportID: String? = nil
-
-    @Environment(\.prismTokens) private var tokens
-    @Environment(\.prismL10n) private var l10n
-    @Environment(SartoUpdater.self) private var updater
-    @Environment(ProblemReportCoordinator.self) private var problemReport
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            UpdatesSettingsGroup(updater: updater, router: router)
-
-            SettingsGroupSection(l10n.tr("settings.advanced.proxy")) {
-                SettingsRowView(
-                    id: "advanced.proxy",
-                    highlightedID: router.highlightedRowID,
-                    title: l10n.tr("settings.advanced.proxyMode"),
-                    subtitle: l10n.tr("settings.advanced.proxySub")
-                ) {
-                    Picker("", selection: $proxyMode) {
-                        Text(l10n.tr("settings.advanced.proxyEnv")).tag("environment")
-                        Text(l10n.tr("settings.advanced.proxyCustom")).tag("custom")
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.segmented)
-                    .frame(width: 210)
-                    .onChange(of: proxyMode) { _, next in
-                        if next == "environment" {
-                            saveProxy()
-                        }
-                    }
-                }
-
-                if proxyMode == "custom" {
-                    SettingsRowDivider()
-                    VStack(alignment: .leading, spacing: 10) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(l10n.tr("settings.advanced.proxyUrl"))
-                                .font(.system(size: 11.5, weight: .medium))
-                                .foregroundStyle(tokens.mutedForeground)
-                            TextField("http://127.0.0.1:7890", text: $proxyUrl)
-                                .textFieldStyle(.plain)
-                                .font(.system(size: 12, design: .monospaced))
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 6)
-                                .background(RoundedRectangle(cornerRadius: tokens.rXS).fill(tokens.codeBackground))
-                                .overlay(RoundedRectangle(cornerRadius: tokens.rXS).strokeBorder(tokens.borderEtched, lineWidth: 1))
-                        }
-
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("NO_PROXY")
-                                .font(.system(size: 11.5, weight: .medium))
-                                .foregroundStyle(tokens.mutedForeground)
-                            TextField("localhost,127.0.0.1,.local", text: $proxyNoProxy)
-                                .textFieldStyle(.plain)
-                                .font(.system(size: 12, design: .monospaced))
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 6)
-                                .background(RoundedRectangle(cornerRadius: tokens.rXS).fill(tokens.codeBackground))
-                                .overlay(RoundedRectangle(cornerRadius: tokens.rXS).strokeBorder(tokens.borderEtched, lineWidth: 1))
-                        }
-
-                        HStack {
-                            Spacer()
-                            SettingsPillButton(l10n.tr("settings.common.save"), prominent: true) {
-                                saveProxy()
-                            }
-                        }
-                    }
-                    .padding(14)
-                }
-            }
-
-            SettingsGroupSection(l10n.tr("settings.advanced.diagnostics")) {
-                SettingsRowView(
-                    id: "advanced.diagnostics",
-                    highlightedID: router.highlightedRowID,
-                    title: l10n.tr("settings.advanced.verbose"),
-                    subtitle: l10n.tr("settings.advanced.verboseSub")
-                ) {
-                    Toggle(
-                        "",
-                        isOn: Binding(
-                            get: { verboseEnabled },
-                            set: { next in
-                                verboseEnabled = next
-                                Task {
-                                    do {
-                                        let until = try await daemon.setVerboseLogging(next)
-                                        store.hostSettings.verboseUntil = until
-                                        verboseEnabled = until != nil
-                                    } catch {
-                                        store.showError(error.localizedDescription)
-                                    }
-                                }
-                            }
-                        )
-                    )
-                    .labelsHidden()
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
-                }
-
-                SettingsRowDivider()
-
-                SettingsRowView(
-                    id: "advanced.dataFolder",
-                    highlightedID: router.highlightedRowID,
-                    title: l10n.tr("settings.advanced.dataFolder"),
-                    subtitle: store.daemonStatus?.dataPath ?? daemon.dataDirectory
-                ) {
-                    HStack(spacing: 8) {
-                        SettingsPillButton(l10n.tr("settings.advanced.openFolder"), icon: "folder") {
-                            let path = store.daemonStatus?.dataPath ?? daemon.dataDirectory
-                            NSWorkspace.shared.open(URL(fileURLWithPath: path))
-                        }
-                        SettingsPillButton(l10n.tr("settings.advanced.reportProblem"), icon: "ladybug.fill", prominent: true) {
-                            let isRemote = state.activeHostID != SartoState.localHostID
-                            let remoteName = isRemote
-                                ? state.otherHosts.first(where: { $0.id == state.activeHostID })?.name
-                                : nil
-                            problemReport.open(
-                                target: .settings,
-                                remoteHostId: isRemote ? state.activeHostID : nil,
-                                remoteHostName: remoteName
-                            )
-                        }
-                    }
-                }
-
-                SettingsRowDivider()
-
-                SettingsRowView(
-                    id: "advanced.clearSessions",
-                    highlightedID: router.highlightedRowID,
-                    title: l10n.tr("settings.advanced.clearSessions"),
-                    subtitle: l10n.tr("settings.advanced.clearSessionsSub")
-                ) {
-                    SettingsPillButton(l10n.tr("settings.advanced.clearAllBtn"), icon: "trash", destructive: true, disabled: !state.connectionMode.isLive) {
-                        showClearConfirm = true
-                    }
-                }
-            }
-
-            myProblemReportsSection
-
-            SettingsGroupSection(l10n.tr("settings.advanced.about")) {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack(spacing: 12) {
-                        Image(state.appIconStyle.assetName)
-                            .resizable()
-                            .interpolation(.high)
-                            .scaledToFit()
-                            .frame(width: 48, height: 48)
-
-                        VStack(alignment: .leading, spacing: 2.5) {
-                            Text(SartoBrand.name)
-                                .font(.system(size: 15, weight: .semibold))
-                                .foregroundStyle(tokens.foreground)
-                            Text(l10n.tr("brand.slogan"))
-                                .font(.system(size: 11.5))
-                                .foregroundStyle(tokens.secondaryForeground)
-                                .lineLimit(1)
-                            let info = Bundle.main.infoDictionary ?? [:]
-                            let appVer = (info["SartoVersion"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-                                ?? (info["CFBundleShortVersionString"] as? String) ?? "0.2.0"
-                            let buildNo = (info["CFBundleVersion"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "2"
-                            let commit = (info["SartoGitCommit"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-                            let channel = (info["SartoBuildChannel"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-                            let buildSuffix = ([buildNo, commit].compactMap { $0 }).joined(separator: " · ")
-                            let channelSuffix = (channel != nil && channel != "stable") ? " [\(channel!)]" : ""
-                            Text("macOS Native ADE · v\(appVer) (\(buildSuffix))\(channelSuffix)")
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(tokens.mutedForeground)
-                        }
-                        Spacer()
-                        SettingsPillButton(l10n.tr("settings.common.refresh"), icon: "arrow.clockwise") {
-                            Task { await store.loadDaemonAndRemote(state: state, daemon: daemon) }
-                        }
-                    }
-
-                    if let st = store.daemonStatus {
-                        SettingsRowDivider()
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack(spacing: 16) {
-                                let daemonTags = [st.origin, st.commit].compactMap { value -> String? in
-                                    guard let value, !value.isEmpty else { return nil }
-                                    return value
-                                }
-                                let daemonMeta = daemonTags.isEmpty ? "" : " · " + daemonTags.joined(separator: " · ")
-                                healthMetric(label: "Daemon", value: "v\(st.version)\(daemonMeta) · PID \(st.pid)")
-                                healthMetric(label: l10n.tr("settings.advanced.uptime"), value: formatUptime(startedAtMs: st.startedAt))
-                                healthMetric(label: l10n.tr("settings.remote.devices"), value: pairedDevicesHealthSummary(st: st))
-                            }
-                            HStack(spacing: 8) {
-                                hostChip(name: "agent-host", status: st.hosts.agent)
-                                hostChip(name: "terminal-host", status: st.hosts.terminal)
-                                hostChip(name: "remote-host", status: st.hosts.remote)
-                            }
-                        }
-                    }
-                }
-                .padding(14)
-                .id("advanced.about")
-            }
-        }
-        .onAppear {
-            syncFromStore()
-            Task { await refreshCloudReports() }
-        }
-        .task {
-            await store.refreshLiveDevicePresence(daemon: daemon)
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(3))
-                guard !Task.isCancelled else { break }
-                await store.refreshLiveDevicePresence(daemon: daemon)
-            }
-        }
-        .onChange(of: store.hostSettings) { _, _ in syncFromStore() }
-        .onChange(of: state.cloudAccountStatus.account.isSignedIn) { _, _ in
-            Task { await refreshCloudReports() }
-        }
-        .onChange(of: problemReport.reportsRefreshToken) { _, _ in
-            Task { await refreshCloudReports() }
-        }
-        .alert(l10n.tr("settings.advanced.clearSessionsConfirmTitle"), isPresented: $showClearConfirm) {
-            Button(l10n.tr("thread.entry.cancel"), role: .cancel) {}
-            Button(l10n.tr("settings.advanced.clearAllBtn"), role: .destructive) {
-                Task {
-                    do {
-                        try await state.clearAllHostSessions()
-                        store.showNotice(l10n.tr("settings.advanced.clearSessionsDone"))
-                    } catch {
-                        store.showError(error.localizedDescription)
-                    }
-                }
-            }
-        } message: {
-            Text(l10n.tr("settings.advanced.clearSessionsConfirmBody"))
-        }
-    }
-
-    private func syncFromStore() {
-        proxyMode = store.hostSettings.proxyMode
-        proxyUrl = store.hostSettings.proxyUrl
-        proxyNoProxy = store.hostSettings.proxyNoProxy
-        if let until = store.hostSettings.verboseUntil {
-            verboseEnabled = until > Date().timeIntervalSince1970 * 1000
-        } else {
-            verboseEnabled = false
-        }
-    }
-
-    private func saveProxy() {
-        let proxyObj: [String: JSONValue]
-        if proxyMode == "environment" {
-            proxyObj = ["mode": .string("environment")]
-        } else {
-            proxyObj = [
-                "mode": .string("custom"),
-                "url": .string(proxyUrl.trimmingCharacters(in: .whitespacesAndNewlines)),
-                "noProxy": .string(proxyNoProxy.trimmingCharacters(in: .whitespacesAndNewlines)),
-            ]
-        }
-        let patch: [String: JSONValue] = ["proxy": .object(proxyObj)]
-        Task {
-            await store.patchHostSettings(patch, state: state, daemon: daemon, notice: l10n.tr("settings.common.saved"))
-        }
-    }
-
     private func healthMetric(label: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label)
@@ -2073,6 +1989,121 @@ struct AdvancedAboutSettingsSectionView: View {
         .background(RoundedRectangle(cornerRadius: tokens.rXS).fill(tokens.surface2))
     }
 
+    private func formatUptime(startedAtMs: Double) -> String {
+        guard startedAtMs > 0 else { return "—" }
+        let sec = max(0, Int(Date().timeIntervalSince1970 - startedAtMs / 1000))
+        let h = sec / 3600
+        let m = (sec % 3600) / 60
+        if h > 0 { return "\(h)h \(m)m" }
+        return "\(m)m"
+    }
+}
+
+// MARK: - 11. Updates, Reports & About Section
+
+struct UpdatesAboutSettingsSectionView: View {
+    @Bindable var state: SartoState
+    @Bindable var daemon: LocalDaemonManager
+    @Bindable var store: PrismSettingsStore
+    @Bindable var router: PrismSettingsRouter
+
+    @State private var cloudReports: CloudReportListInfo? = nil
+    @State private var isLoadingReports: Bool = false
+    @State private var reportsError: String? = nil
+    @State private var copiedReportID: String? = nil
+
+    @Environment(\.prismTokens) private var tokens
+    @Environment(\.prismL10n) private var l10n
+    @Environment(SartoUpdater.self) private var updater
+    @Environment(ProblemReportCoordinator.self) private var problemReport
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            UpdatesSettingsGroup(updater: updater, router: router)
+
+            myProblemReportsSection
+
+            SettingsGroupSection(l10n.tr("settings.advanced.about")) {
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(spacing: 12) {
+                        Image(state.appIconStyle.assetName)
+                            .resizable()
+                            .interpolation(.high)
+                            .scaledToFit()
+                            .frame(width: 48, height: 48)
+
+                        VStack(alignment: .leading, spacing: 2.5) {
+                            Text(SartoBrand.name)
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(tokens.foreground)
+                            Text(l10n.tr("brand.slogan"))
+                                .font(.system(size: 11.5))
+                                .foregroundStyle(tokens.secondaryForeground)
+                                .lineLimit(1)
+                            let info = Bundle.main.infoDictionary ?? [:]
+                            let appVer = (info["SartoVersion"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+                                ?? (info["CFBundleShortVersionString"] as? String) ?? "0.2.0"
+                            let buildNo = (info["CFBundleVersion"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "2"
+                            let commit = (info["SartoGitCommit"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+                            let channel = (info["SartoBuildChannel"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+                            let buildSuffix = ([buildNo, commit].compactMap { $0 }).joined(separator: " · ")
+                            let channelSuffix = (channel != nil && channel != "stable") ? " [\(channel!)]" : ""
+                            Text("macOS Native ADE · v\(appVer) (\(buildSuffix))\(channelSuffix)")
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(tokens.mutedForeground)
+                        }
+                        Spacer()
+                    }
+                    .padding(14)
+                    .id("advanced.about")
+
+                    SettingsRowDivider()
+
+                    SettingsRowView(
+                        id: "remote.privacy",
+                        highlightedID: router.highlightedRowID,
+                        title: l10n.tr("settings.privacy.policyTitle"),
+                        subtitle: l10n.tr("settings.privacy.policySub")
+                    ) {
+                        SettingsPillButton(
+                            l10n.tr("settings.privacy.policyAction"),
+                            icon: "checkmark.shield"
+                        ) {
+                            openPrivacyPolicy()
+                        }
+                    }
+                }
+            }
+        }
+        .onAppear {
+            Task { await refreshCloudReports() }
+        }
+        .onChange(of: state.cloudAccountStatus.account.isSignedIn) { _, _ in
+            Task { await refreshCloudReports() }
+        }
+        .onChange(of: problemReport.reportsRefreshToken) { _, _ in
+            Task { await refreshCloudReports() }
+        }
+    }
+
+    private func openProblemReportSheet() {
+        let isRemote = state.activeHostID != SartoState.localHostID
+        let remoteName = isRemote
+            ? state.otherHosts.first(where: { $0.id == state.activeHostID })?.name
+            : nil
+        problemReport.open(
+            target: .settings,
+            remoteHostId: isRemote ? state.activeHostID : nil,
+            remoteHostName: remoteName
+        )
+    }
+
+    private func openPrivacyPolicy() {
+        if let url = state.privacyPolicyURL {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
     private var myProblemReportsSection: some View {
         let totalBadge: String? = {
             guard state.cloudAccountStatus.account.isSignedIn,
@@ -2083,6 +2114,10 @@ struct AdvancedAboutSettingsSectionView: View {
         }()
 
         return SettingsGroupSection(l10n.tr("settings.reports.section"), trailingBadge: totalBadge) {
+            SettingsPillButton(l10n.tr("settings.advanced.reportProblem"), icon: "ladybug.fill", prominent: true) {
+                openProblemReportSheet()
+            }
+        } content: {
             VStack(alignment: .leading, spacing: 0) {
                 if !state.cloudAccountStatus.account.isSignedIn {
                     signedOutReportsBanner
@@ -2177,7 +2212,7 @@ struct AdvancedAboutSettingsSectionView: View {
 
             Spacer(minLength: 10)
 
-            SettingsPillButton(l10n.tr("report.sheet.signIn"), icon: "person.crop.circle", prominent: true) {
+            SettingsPillButton(l10n.tr("report.sheet.signIn"), icon: "person.crop.circle") {
                 router.jumpTo(section: .remoteAndCloud, rowID: "remote.sync")
             }
         }
@@ -2391,63 +2426,6 @@ struct AdvancedAboutSettingsSectionView: View {
         } catch {
             reportsError = error.localizedDescription
         }
-    }
-
-    private func isMobilePairedDevice(_ device: PairedDeviceSummary) -> Bool {
-        let kind = device.kind.lowercased()
-        let platform = device.platform.lowercased()
-        return kind == "ios" || kind == "mobile" || kind == "iphone" || kind == "ipad"
-            || platform.contains("ios") || platform.contains("ipad") || platform.contains("iphone")
-    }
-
-    private func isLocalSelfPairedDevice(_ device: PairedDeviceSummary) -> Bool {
-        guard !device.connected, !isMobilePairedDevice(device) else { return false }
-        let cleanDevice = SartoState.cleanHostDisplayName(device.name)
-        var localNames: [String] = [
-            SartoState.cleanHostDisplayName(state.localHostDisplayName),
-            SartoState.cleanHostDisplayName(ProcessInfo.processInfo.hostName),
-        ]
-        if let currentCloud = daemon.accountDevices.first(where: { $0.current }) {
-            localNames.append(SartoState.cleanHostDisplayName(currentCloud.name))
-        }
-        return localNames.contains { !$0.isEmpty && $0.caseInsensitiveCompare(cleanDevice) == .orderedSame }
-    }
-
-    private func pairedDevicesHealthSummary(st: DaemonStatusInfo) -> String {
-        let peerPaired = store.pairedDevices.filter { !isLocalSelfPairedDevice($0) }
-        let mobilePeers = peerPaired.filter { isMobilePairedDevice($0) }
-        let desktopPeers = peerPaired.filter { !isMobilePairedDevice($0) }
-
-        // Deduplicate peer computers across inbound pairedDevices and outbound otherHosts
-        // so a bidirectional Mac mesh link is counted once and reflects live connectivity either way.
-        var desktopOnlineByKey: [String: Bool] = [:]
-        for dev in desktopPeers {
-            let key = SartoState.cleanHostDisplayName(dev.name).lowercased()
-            desktopOnlineByKey[key] = (desktopOnlineByKey[key] ?? false) || dev.connected
-        }
-        for host in state.otherHosts where !host.removed {
-            let key = SartoState.cleanHostDisplayName(host.name).lowercased()
-            desktopOnlineByKey[key] = (desktopOnlineByKey[key] ?? false) || host.connection.isOnline
-        }
-
-        let onlineDesktops = desktopOnlineByKey.values.filter { $0 }.count
-        let onlineMobiles = mobilePeers.filter { $0.connected }.count
-        let onlineCount = max(onlineDesktops + onlineMobiles, st.connectedDevices ?? 0)
-        let totalCount = max(desktopOnlineByKey.count + mobilePeers.count, onlineCount)
-
-        if totalCount > 0 {
-            return l10n.tr("settings.remote.devicesOnlineRatio", onlineCount, totalCount)
-        }
-        return l10n.tr("settings.remote.devicesOnlineOnly", onlineCount)
-    }
-
-    private func formatUptime(startedAtMs: Double) -> String {
-        guard startedAtMs > 0 else { return "—" }
-        let sec = max(0, Int(Date().timeIntervalSince1970 - startedAtMs / 1000))
-        let h = sec / 3600
-        let m = (sec % 3600) / 60
-        if h > 0 { return "\(h)h \(m)m" }
-        return "\(m)m"
     }
 }
 

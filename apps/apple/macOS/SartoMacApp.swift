@@ -328,7 +328,7 @@ struct SartoMacApp: App {
             CommandGroup(after: .appInfo) {
                 Button(appState.l10n.tr("settings.updates.menuCheck")) {
                     wireAppLifecycle()
-                    settingsRouter.open(section: .advancedAndAbout, rowID: "advanced.updates")
+                    settingsRouter.open(section: .updatesAndAbout, rowID: "advanced.updates")
                     Task { await updater.check() }
                 }
             }
@@ -526,7 +526,7 @@ struct SartoMacApp: App {
             return nil
         }
         islandCoordinator.onRequestOpenUpdates = { [settingsRouter] in
-            settingsRouter.open(section: .advancedAndAbout, rowID: "advanced.updates")
+            settingsRouter.open(section: .updatesAndAbout, rowID: "advanced.updates")
         }
         updater.onStateChange = { [islandCoordinator, appState, updater] in
             islandCoordinator.refreshUpdateBadge()

@@ -25,11 +25,11 @@ enum PrismSettingsGroup: String, CaseIterable, Identifiable {
     var sections: [PrismSettingsSection] {
         switch self {
         case .appAndExperience:
-            return [.general, .appearance, .islandAndMenuBar, .usageAndSync, .notifications]
+            return [.general, .appearance, .islandAndMenuBar, .notifications]
         case .hostAndAgents:
-            return [.agents, .extensions, .memory, .archived, .gitAndTerminal]
+            return [.agents, .extensions, .memory, .gitAndTerminal]
         case .networkAndSystem:
-            return [.remoteAndCloud, .advancedAndAbout]
+            return [.remoteAndCloud, .advanced, .updatesAndAbout]
         }
     }
 }
@@ -38,32 +38,40 @@ enum PrismSettingsSection: String, CaseIterable, Identifiable, Hashable, Sendabl
     case general
     case appearance
     case islandAndMenuBar
-    case usageAndSync
     case notifications
     case agents
     case extensions
     case memory
-    case archived
     case gitAndTerminal
     case remoteAndCloud
-    case advancedAndAbout
+    case advanced
+    case updatesAndAbout
 
     var id: String { rawValue }
+
+    /// Sections whose controls read or mutate settings on the currently active host session.
+    var editsActiveHost: Bool {
+        switch self {
+        case .general, .islandAndMenuBar, .agents, .extensions, .memory, .gitAndTerminal, .advanced:
+            return true
+        case .appearance, .notifications, .remoteAndCloud, .updatesAndAbout:
+            return false
+        }
+    }
 
     var symbolName: String {
         switch self {
         case .general: return "gearshape.fill"
         case .appearance: return "paintbrush.fill"
         case .islandAndMenuBar: return "menubar.dock.rectangle"
-        case .usageAndSync: return "chart.bar.xaxis"
         case .notifications: return "bell.badge.fill"
         case .agents: return "cpu.fill"
         case .extensions: return "puzzlepiece.extension.fill"
         case .memory: return "brain.head.profile"
-        case .archived: return "archivebox.fill"
         case .gitAndTerminal: return "terminal.fill"
         case .remoteAndCloud: return "network"
-        case .advancedAndAbout: return "slider.horizontal.3"
+        case .advanced: return "slider.horizontal.3"
+        case .updatesAndAbout: return "sparkles"
         }
     }
 
@@ -72,15 +80,14 @@ enum PrismSettingsSection: String, CaseIterable, Identifiable, Hashable, Sendabl
         case .general: return tokens.prismCobalt
         case .appearance: return tokens.prismIris
         case .islandAndMenuBar: return tokens.prismAmber
-        case .usageAndSync: return tokens.success
         case .notifications: return tokens.prismCoral
         case .agents: return tokens.prismCobalt
         case .extensions: return tokens.prismIris
         case .memory: return tokens.prismIris
-        case .archived: return tokens.secondaryForeground
         case .gitAndTerminal: return tokens.success
         case .remoteAndCloud: return tokens.prismCobalt
-        case .advancedAndAbout: return tokens.secondaryForeground
+        case .advanced: return tokens.secondaryForeground
+        case .updatesAndAbout: return tokens.success
         }
     }
 
@@ -127,45 +134,49 @@ enum PrismSettingsSearchCatalog {
         .init(id: "gen.send", section: .general, rowID: "general.sendKey", titleKey: "settings.general.sendKey", subtitleKey: "settings.general.sendKeySub", keywords: "enter command return submit composer 发送 快捷键 回车"),
         .init(id: "gen.agent", section: .general, rowID: "general.defaultAgent", titleKey: "settings.general.defaultAgent", subtitleKey: "settings.general.defaultAgentSub", keywords: "default agent claude codex antigravity 默认 代理"),
         .init(id: "gen.restore", section: .general, rowID: "general.restore", titleKey: "settings.general.restore", subtitleKey: "settings.general.restoreSub", keywords: "restore session startup launch 恢复 上次 会话 启动"),
-        .init(id: "gen.quit", section: .general, rowID: "general.confirmQuit", titleKey: "settings.general.confirmQuit", subtitleKey: "settings.general.confirmQuitSub", keywords: "quit exit running confirm 退出 确认"),
+        .init(id: "gen.titles", section: .general, rowID: "general.sessionTitles", titleKey: "settings.general.sessionTitles", subtitleKey: "settings.general.sessionTitlesSub", keywords: "auto title naming 自动 标题 命名"),
+        .init(id: "gen.suggest", section: .general, rowID: "general.promptSuggestions", titleKey: "settings.general.promptSuggestions", subtitleKey: "settings.general.promptSuggestionsSub", keywords: "prompt suggestion next message tab ghost 建议 推荐 下一条 提示"),
+        .init(id: "gen.light", section: .general, rowID: "general.lightModel", titleKey: "settings.general.lightModel", subtitleKey: "settings.general.lightModelSub", keywords: "light small model background naming summary 轻模型 后台 小模型"),
         .init(id: "gen.login", section: .general, rowID: "general.launchAtLogin", titleKey: "settings.general.launchAtLogin", subtitleKey: "settings.general.launchAtLoginSub", keywords: "login startup boot macos 开机 自动 启动 登录项"),
-        .init(id: "gen.titles", section: .general, rowID: "general.sessionTitles", titleKey: "settings.general.sessionTitles", subtitleKey: "settings.general.sessionTitlesSub", keywords: "auto title naming light model 自动 标题 命名 轻模型"),
 
         // Appearance
         .init(id: "app.mode", section: .appearance, rowID: "appearance.colorMode", titleKey: "settings.appearance.colorMode", subtitleKey: "settings.appearance.colorModeSub", keywords: "theme dark light system mode 外观 主题 深色 浅色 跟随系统"),
         .init(id: "app.palette", section: .appearance, rowID: "appearance.palette", titleKey: "settings.palettes", subtitleKey: nil, keywords: "obsidian warm crystal alabaster palette 调色板 配色"),
-        .init(id: "app.accent", section: .appearance, rowID: "appearance.accent", titleKey: "settings.accents", subtitleKey: nil, keywords: "accent color cobalt iris amber mono 强调色 点缀色"),
-        .init(id: "app.icon", section: .appearance, rowID: "appearance.appIcon", titleKey: "settings.appearance.appIconTitle", subtitleKey: "settings.appearance.appIconSub", keywords: "app icon dock obsidian warm crystal alabaster 图标 应用图标 程序坞 深空黑曜 暖炭玄岩 白昼冷晶 暖白画册 钴蓝 赤陶"),
-        .init(id: "app.motion", section: .appearance, rowID: "appearance.motion", titleKey: "settings.motionTier", subtitleKey: nil, keywords: "motion animation reduce 120hz 动效 动画 减弱"),
+        .init(id: "app.accent", section: .appearance, rowID: "appearance.accent", titleKey: "settings.accents", subtitleKey: nil, keywords: "accent color cobalt iris amber mono custom wheel 强调色 点缀色 色盘"),
+        .init(id: "app.icon", section: .appearance, rowID: "appearance.appIcon", titleKey: "settings.appearance.appIconTitle", subtitleKey: "settings.appearance.appIconSub", keywords: "app icon dock obsidian warm crystal alabaster 图标 应用图标 程序坞 深空黑曜 暖炭玄岩 白昼冷晶 暖白画册"),
         .init(id: "app.textsize", section: .appearance, rowID: "appearance.textSize", titleKey: "settings.appearance.textSize", subtitleKey: "settings.appearance.textSizeSub", keywords: "font size text scale small large 字号 字体 大小"),
-        .init(id: "app.fonts", section: .appearance, rowID: "appearance.fonts", titleKey: "settings.appearance.fonts", subtitleKey: "settings.appearance.fontsSub", keywords: "font family ui prose code monospace 字体 代码"),
         .init(id: "app.width", section: .appearance, rowID: "appearance.readingWidth", titleKey: "settings.appearance.readingWidth", subtitleKey: "settings.appearance.readingWidthSub", keywords: "reading width compact wide column 阅读 宽度 宽屏"),
+        .init(id: "app.fonts", section: .appearance, rowID: "appearance.fonts", titleKey: "settings.appearance.fonts", subtitleKey: "settings.appearance.fontsSub", keywords: "font family ui prose code monospace 字体 代码 正文"),
+        .init(id: "app.termfont", section: .appearance, rowID: "terminal.fontSize", titleKey: "settings.terminal.fontSize", subtitleKey: "settings.terminal.fontSizeSub", keywords: "terminal font size family monospace 终端 字体 字号"),
+        .init(id: "app.motion", section: .appearance, rowID: "appearance.motion", titleKey: "settings.motionTier", subtitleKey: "settings.appearance.motionSub", keywords: "motion animation reduce 120hz metal 动效 动画 减弱 性能"),
+        .init(id: "app.rail", section: .appearance, rowID: "appearance.rail", titleKey: "settings.island.rail", subtitleKey: "settings.island.railSub", keywords: "running rail panel sidebar layout 右侧 运行中 面板 布局"),
 
-        // Island & Menu Bar
+        // Island, Menu Bar & Usage
         .init(id: "isl.show", section: .islandAndMenuBar, rowID: "island.enabled", titleKey: "settings.island.show", subtitleKey: "settings.island.showSub", keywords: "dynamic island notch 灵动岛 刘海"),
         .init(id: "isl.displays", section: .islandAndMenuBar, rowID: "island.displays", titleKey: "settings.island.displays", subtitleKey: "settings.island.displaysSub", keywords: "monitor display screen map 显示器 多屏 位置"),
+        .init(id: "isl.motion", section: .islandAndMenuBar, rowID: "island.motion", titleKey: "settings.island.motion", subtitleKey: "settings.island.motionSub", keywords: "island animation motion lively calm still frame rate 灵动岛 动画 动效 灵动 柔和 静止"),
         .init(id: "isl.preview", section: .islandAndMenuBar, rowID: "island.preview", titleKey: "settings.island.previewTitle", subtitleKey: "settings.island.previewSub", keywords: "preview test pop approval 预览 测试 弹窗 审批"),
-        .init(id: "app.rail", section: .appearance, rowID: "appearance.rail", titleKey: "settings.island.rail", subtitleKey: "settings.island.railSub", keywords: "running rail panel sidebar layout 右侧 运行中 面板 布局"),
-        .init(id: "isl.motion", section: .islandAndMenuBar, rowID: "island.motion", titleKey: "settings.island.motion", subtitleKey: "settings.island.motionSub", keywords: "animation motion lively calm still frame rate 动画 动效 灵动 柔和 静止"),
-        .init(id: "isl.menubar", section: .islandAndMenuBar, rowID: "menubar.enabled", titleKey: "settings.menubar.show", subtitleKey: "settings.menubar.showSub", keywords: "menu bar status icon vial 菜单栏 状态栏 图标 文字"),
-
-        // Usage & Sync
-        .init(id: "use.sources", section: .usageAndSync, rowID: "usage.sources", titleKey: "settings.usage.sources", subtitleKey: "settings.usage.sourcesSub", keywords: "provider usage quota source order claude codex antigravity 数据来源 额度 排序"),
-        .init(id: "use.privacy", section: .usageAndSync, rowID: "usage.privacy", titleKey: "settings.usage.privacy", subtitleKey: "settings.usage.privacySub", keywords: "privacy money hide amounts 隐藏金额 隐私"),
-        .init(id: "notif.lowquota", section: .notifications, rowID: "notifications.lowQuota", titleKey: "settings.usage.lowAlert", subtitleKey: "settings.notifications.lowQuotaSub", keywords: "low quota alert threshold subtle badge pop 额度 预警 阈值 轻提醒 角标 弹出"),
-        .init(id: "use.sync", section: .usageAndSync, rowID: "usage.sync", titleKey: "settings.usage.sync", subtitleKey: "settings.usage.syncSub", keywords: "sarto cloud usage quota sync multi mac encrypted 多设备 多机 同步 用量 额度 加密"),
-        .init(id: "use.hostlogs", section: .usageAndSync, rowID: "usage.fromComputer", titleKey: "settings.usage.fromComputer", subtitleKey: "settings.usage.fromComputerSub", keywords: "host local logs usage summary 读取 本地 日志"),
+        .init(id: "isl.menubar", section: .islandAndMenuBar, rowID: "menubar.enabled", titleKey: "settings.menubar.show", subtitleKey: "settings.menubar.showSub", keywords: "menu bar status icon vial text mode 菜单栏 状态栏 图标 文字"),
+        .init(id: "use.sources", section: .islandAndMenuBar, rowID: "usage.sources", titleKey: "settings.usage.sources", subtitleKey: "settings.usage.sourcesSub", keywords: "provider usage quota source order claude codex antigravity 数据来源 额度 排序 用量"),
+        .init(id: "use.privacy", section: .islandAndMenuBar, rowID: "usage.privacy", titleKey: "settings.usage.privacy", subtitleKey: "settings.usage.privacySub", keywords: "privacy money hide amounts screen share 隐藏金额 隐私 录屏"),
+        .init(id: "use.hostlogs", section: .islandAndMenuBar, rowID: "usage.fromComputer", titleKey: "settings.usage.fromComputer", subtitleKey: "settings.usage.fromComputerSub", keywords: "host local logs usage summary daemon 读取 本地 日志 汇总"),
+        .init(id: "use.sync", section: .islandAndMenuBar, rowID: "usage.syncScope", titleKey: "settings.usage.syncScope", subtitleKey: "settings.usage.syncSub", keywords: "usage scope all macs this mac sync multi mac 统计范围 多机 多设备 同步 用量 额度"),
+        .init(id: "isl.game", section: .islandAndMenuBar, rowID: "game.enabled", titleKey: "game.settings.toggle", subtitleKey: "game.settings.inDesignSubtitle", keywords: "idle game expedition design preview 挂机游戏 小游戏 设计中"),
 
         // Notifications
         .init(id: "not.perm", section: .notifications, rowID: "notifications.permission", titleKey: "settings.notifications.permission", subtitleKey: "settings.notifications.permissionSub", keywords: "notification permission approval alert 通知 权限 审批"),
         .init(id: "not.turn", section: .notifications, rowID: "notifications.turnEnded", titleKey: "settings.notifications.turnEnded", subtitleKey: "settings.notifications.turnEndedSub", keywords: "turn complete finish done 回合 结束 完成"),
+        .init(id: "not.err", section: .notifications, rowID: "notifications.error", titleKey: "settings.notifications.error", subtitleKey: "settings.notifications.errorSub", keywords: "error failed crash alert 出错 失败 异常 告警"),
+        .init(id: "not.lowquota", section: .notifications, rowID: "notifications.lowQuota", titleKey: "settings.usage.lowAlert", subtitleKey: "settings.notifications.lowQuotaSub", keywords: "low quota alert threshold subtle badge pop 额度 预警 阈值 轻提醒 角标 弹出"),
+        .init(id: "not.threshold", section: .notifications, rowID: "notifications.threshold", titleKey: "settings.usage.threshold", subtitleKey: "settings.notifications.thresholdSub", keywords: "low quota threshold percent 10 20 30 50 提醒 阈值 百分比"),
         .init(id: "not.inapp", section: .notifications, rowID: "notifications.inAppPill", titleKey: "settings.notifications.inAppPill", subtitleKey: "settings.notifications.inAppPillSub", keywords: "in-app toast pill banner popup notice focused 应用内 浮窗 胶囊 弹窗 提醒"),
-        .init(id: "not.sound", section: .notifications, rowID: "notifications.sound", titleKey: "settings.notifications.sound", subtitleKey: "settings.notifications.soundSub", keywords: "sound badge dock audio 提示音 徽标"),
+        .init(id: "not.sound", section: .notifications, rowID: "notifications.sound", titleKey: "settings.notifications.sound", subtitleKey: "settings.notifications.soundSub", keywords: "sound audio chime 提示音 声音"),
+        .init(id: "not.badge", section: .notifications, rowID: "notifications.badge", titleKey: "settings.notifications.badge", subtitleKey: "settings.notifications.badgeSub", keywords: "dock badge unread count icon 程序坞 徽标 角标 未读"),
 
         // Agents & Harnesses
-        .init(id: "agt.env", section: .agents, rowID: "agents.environment", titleKey: "settings.agents.environment", subtitleKey: "settings.agents.environmentSub", keywords: "node npm shell path environment check updates 环境 检测 更新"),
-        .init(id: "agt.list", section: .agents, rowID: "agents.list", titleKey: "settings.agents.list", subtitleKey: "settings.agents.listSub", keywords: "claude codex opencode cline antigravity api key login logout binary auto compact prompt cache 登录 密钥 二进制 自动压缩"),
-        .init(id: "agt.idle", section: .agents, rowID: "agents.idleRelease", titleKey: "settings.agents.idleRelease", subtitleKey: "settings.agents.idleReleaseSub", keywords: "idle release memory process timeout 空闲 释放 回收 内存"),
+        .init(id: "agt.list", section: .agents, rowID: "agents.list", titleKey: "settings.agents.list", subtitleKey: "settings.agents.listSub", keywords: "claude codex opencode cline antigravity api key login logout binary auto compact prompt cache 登录 密钥 二进制 自动压缩 缓存"),
+        .init(id: "agt.idle", section: .agents, rowID: "agents.idleRelease", titleKey: "settings.agents.idleRelease", subtitleKey: "settings.agents.idleReleaseSub", keywords: "idle release memory process timeout claude 空闲 释放 回收 内存"),
+        .init(id: "agt.env", section: .agents, rowID: "agents.environment", titleKey: "settings.agents.environment", subtitleKey: "settings.agents.environmentSub", keywords: "node npm shell path environment check updates reload 环境 检测 更新 重载"),
 
         // MCP & Agent Plugins
         .init(id: "ext.builtin", section: .extensions, rowID: "extensions.builtinMcp", titleKey: "settings.ext.builtinMcp", subtitleKey: "settings.ext.builtinMcpSub", keywords: "sarto mcp server builtin tools bridge 内置 桥接 工具"),
@@ -175,29 +186,34 @@ enum PrismSettingsSearchCatalog {
 
         // Memory
         .init(id: "mem.enable", section: .memory, rowID: "memory.enabled", titleKey: "settings.memory.enabled", subtitleKey: "settings.memory.enabledSub", keywords: "memory global project remember import 记忆 全局 项目 导入"),
-        .init(id: "mem.entries", section: .memory, rowID: "memory.entries", titleKey: "settings.memory.entries", subtitleKey: "settings.memory.entriesSub", keywords: "memory list edit add delete 记忆 列表 编辑 新增 删除"),
-
-        // Archived
-        .init(id: "arc.list", section: .archived, rowID: "archived.sessions", titleKey: "settings.archived.title", subtitleKey: "settings.archived.sub", keywords: "archived restore unarchive delete session 归档 会话 恢复 删除"),
+        .init(id: "mem.entries", section: .memory, rowID: "memory.entries", titleKey: "settings.memory.entries", subtitleKey: "settings.memory.entriesSub", keywords: "memory list edit add delete promote 记忆 列表 编辑 新增 删除 提升"),
 
         // Git & Terminal
         .init(id: "git.fetch", section: .gitAndTerminal, rowID: "git.fetch", titleKey: "settings.git.fetch", subtitleKey: "settings.git.fetchSub", keywords: "git background fetch remote 拉取 后台"),
-        .init(id: "git.wt", section: .gitAndTerminal, rowID: "git.worktreeRoot", titleKey: "settings.git.worktreeRoot", subtitleKey: "settings.git.worktreeRootSub", keywords: "worktree branch root setup copy 分支 工作树 根目录"),
-        .init(id: "trm.shell", section: .gitAndTerminal, rowID: "terminal.shell", titleKey: "settings.terminal.shell", subtitleKey: "settings.terminal.shellSub", keywords: "terminal shell zsh bash font size 终端 字体 字号"),
+        .init(id: "git.wt", section: .gitAndTerminal, rowID: "git.worktreeRoot", titleKey: "settings.git.worktreeRoot", subtitleKey: "settings.git.worktreeRootSub", keywords: "worktree branch root setup copy template env 分支 工作树 根目录 复制"),
+        .init(id: "trm.shell", section: .gitAndTerminal, rowID: "terminal.shell", titleKey: "settings.terminal.shell", subtitleKey: "settings.terminal.shellSub", keywords: "terminal shell zsh bash path 终端 路径"),
 
         // Cloud Sync & Multi-Device
-        .init(id: "rem.cloud", section: .remoteAndCloud, rowID: "remote.sync", titleKey: "settings.remote.cloudCardTitle", subtitleKey: "settings.remote.cloudCardSub", keywords: "sarto cloud official account sync e2ee 官方云 账号 同步 多设备 无缝"),
+        .init(id: "rem.cloud", section: .remoteAndCloud, rowID: "remote.sync", titleKey: "settings.remote.cloudCardTitle", subtitleKey: "settings.remote.cloudCardSub", keywords: "sarto cloud official account sync e2ee vault recovery 官方云 账号 同步 恢复密钥 多设备"),
         .init(id: "rem.devices", section: .remoteAndCloud, rowID: "remote.devices", titleKey: "settings.myDevices.title", subtitleKey: "settings.myDevices.sub", keywords: "my devices computers mac iphone ipad mobile host mesh version upgrade update sidebar remove 我的设备 电脑 手机 版本 升级 更新 侧边栏 移除 互联"),
-        .init(id: "rem.daemon", section: .remoteAndCloud, rowID: "remote.daemon", titleKey: "settings.localDaemon", subtitleKey: "settings.daemon.subtitle", keywords: "daemon background service restart local socket 守护进程 后台服务 重启 本地"),
         .init(id: "rem.term", section: .remoteAndCloud, rowID: "remote.terminal", titleKey: "settings.remote.terminal", subtitleKey: "settings.remote.terminalSub", keywords: "remote terminal allow access 远程 终端 权限"),
         .init(id: "rem.claude", section: .remoteAndCloud, rowID: "remote.claude", titleKey: "settings.remote.claudeTitle", subtitleKey: "settings.remote.claudeSub", keywords: "remote claude model host share borrow concurrent idle 远程 模型 借用 并发 空闲"),
-        .init(id: "rem.privacy", section: .remoteAndCloud, rowID: "remote.privacy", titleKey: "settings.privacy.policyTitle", subtitleKey: "settings.privacy.policySub", keywords: "privacy security e2ee encryption keychain provenance verify 隐私 安全 加密 密钥链 溯源 声明"),
 
-        // Advanced & About
-        .init(id: "adv.updates", section: .advancedAndAbout, rowID: "advanced.updates", titleKey: "settings.updates.title", subtitleKey: "settings.updates.automaticSub", keywords: "update upgrade version download restart install beta channel 更新 升级 版本 下载 重启 安装 测试 通道"),
-        .init(id: "adv.proxy", section: .advancedAndAbout, rowID: "advanced.proxy", titleKey: "settings.advanced.proxy", subtitleKey: "settings.advanced.proxySub", keywords: "http https socks proxy no_proxy network 代理 网络"),
-        .init(id: "adv.diag", section: .advancedAndAbout, rowID: "advanced.diagnostics", titleKey: "settings.advanced.diagnostics", subtitleKey: "settings.advanced.diagnosticsSub", keywords: "verbose logs diagnostic report data folder 日志 诊断 目录"),
-        .init(id: "adv.about", section: .advancedAndAbout, rowID: "advanced.about", titleKey: "settings.advanced.about", subtitleKey: "settings.advanced.aboutSub", keywords: "about version daemon health pid uptime 关于 版本 状态"),
+        // Advanced & Service
+        .init(id: "adv.daemon", section: .advanced, rowID: "remote.daemon", titleKey: "settings.localDaemon", subtitleKey: "settings.daemon.subtitle", keywords: "daemon background service restart local socket health pid uptime host 守护进程 后台服务 重启 本地 健康 状态"),
+        .init(id: "adv.proxy", section: .advanced, rowID: "advanced.proxy", titleKey: "settings.advanced.proxy", subtitleKey: "settings.advanced.proxySub", keywords: "http https socks proxy no_proxy network 代理 网络"),
+        .init(id: "adv.diag", section: .advanced, rowID: "advanced.diagnostics", titleKey: "settings.advanced.verbose", subtitleKey: "settings.advanced.verboseSub", keywords: "verbose logs diagnostic debug 24h 详细 日志 诊断"),
+        .init(id: "adv.data", section: .advanced, rowID: "advanced.dataFolder", titleKey: "settings.advanced.dataFolder", subtitleKey: "settings.advanced.diagnosticsSub", keywords: "data folder directory path finder 数据 目录 文件夹"),
+        .init(id: "adv.clear", section: .advanced, rowID: "advanced.clearSessions", titleKey: "settings.advanced.clearSessions", subtitleKey: "settings.advanced.clearSessionsSub", keywords: "clear delete remove all sessions history 清空 删除 全部 会话 历史"),
+
+        // Updates & About
+        .init(id: "upd.status", section: .updatesAndAbout, rowID: "advanced.updates", titleKey: "settings.updates.title", subtitleKey: "settings.updates.automaticSub", keywords: "update upgrade version download restart install 更新 升级 版本 下载 重启 安装"),
+        .init(id: "upd.auto", section: .updatesAndAbout, rowID: "advanced.updates.automatic", titleKey: "settings.updates.automatic", subtitleKey: "settings.updates.automaticSub", keywords: "automatic update check download 自动更新"),
+        .init(id: "upd.chan", section: .updatesAndAbout, rowID: "advanced.updates.channel", titleKey: "settings.updates.channel", subtitleKey: "settings.updates.channel.stableSub", keywords: "channel stable beta prerelease 更新通道 正式版 测试版"),
+        .init(id: "upd.src", section: .updatesAndAbout, rowID: "advanced.updates.source", titleKey: "settings.updates.source", subtitleKey: "settings.updates.source.autoSub", keywords: "source mirror official download 下载来源 镜像 官方"),
+        .init(id: "upd.reports", section: .updatesAndAbout, rowID: "advanced.reports", titleKey: "settings.reports.section", subtitleKey: "settings.reports.emptySub", keywords: "problem report bug feedback issue console 报告 问题 反馈"),
+        .init(id: "upd.privacy", section: .updatesAndAbout, rowID: "remote.privacy", titleKey: "settings.privacy.policyTitle", subtitleKey: "settings.privacy.policySub", keywords: "privacy security e2ee encryption keychain provenance verify 隐私 安全 加密 密钥链 溯源 声明"),
+        .init(id: "upd.about", section: .updatesAndAbout, rowID: "advanced.about", titleKey: "settings.advanced.about", subtitleKey: "settings.advanced.aboutSub", keywords: "about version build commit 关于 版本"),
     ]
 }
 
@@ -251,18 +267,17 @@ final class PrismSettingsRouter {
                 return .extensions
             }
             switch normalizedSection {
-            case "general": return .general
+            case "general", "archived": return .general
             case "appearance": return .appearance
-            case "island", "menubar": return .islandAndMenuBar
-            case "usage": return .usageAndSync
+            case "island", "menubar", "usage": return .islandAndMenuBar
             case "notifications": return .notifications
             case "agents", "harnesses": return .agents
             case "marketplace", "mcp", "plugins", "extensions": return .extensions
             case "memory": return .memory
-            case "archived": return .archived
             case "git", "terminal": return .gitAndTerminal
-            case "remote", "hosts", "account", "sharing", "privacy": return .remoteAndCloud
-            case "advanced", "about", "browser", "devices", "computer-use": return .advancedAndAbout
+            case "remote", "hosts", "account", "sharing": return .remoteAndCloud
+            case "about", "updates", "privacy": return .updatesAndAbout
+            case "advanced", "browser", "devices", "computer-use": return .advanced
             default: return .general
             }
         }()
@@ -275,9 +290,10 @@ final class PrismSettingsRouter {
             case "general.send-key", "general.sendkey": return "general.sendKey"
             case "general.default-agent", "general.defaultagent": return "general.defaultAgent"
             case "general.restore", "general.restore-session": return "general.restore"
-            case "general.confirm-quit", "general.confirmquit": return "general.confirmQuit"
-            case "general.launch-at-login", "general.launchatlogin": return "general.launchAtLogin"
             case "general.session-titles", "general.sessiontitles": return "general.sessionTitles"
+            case "general.prompt-suggestions", "general.promptsuggestions": return "general.promptSuggestions"
+            case "general.light-model", "general.lightmodel": return "general.lightModel"
+            case "general.launch-at-login", "general.launchatlogin": return "general.launchAtLogin"
             case "appearance.color-mode", "appearance.colormode", "appearance.theme": return "appearance.colorMode"
             case "appearance.app-icon", "appearance.appicon", "appearance.icon": return "appearance.appIcon"
             case "appearance.text-size", "appearance.textsize", "appearance.zoom": return "appearance.textSize"
@@ -287,13 +303,18 @@ final class PrismSettingsRouter {
             case "memory.enabled": return "memory.enabled"
             case "git.background-fetch", "git.fetch": return "git.fetch"
             case "git.worktree-root", "git.worktreeroot": return "git.worktreeRoot"
-            case "terminal.shell", "terminal.shell-path", "terminal.font-size": return "terminal.shell"
-            case "remote.direct", "remote.direct-port": return "remote.direct"
+            case "terminal.shell", "terminal.shell-path": return "terminal.shell"
+            case "terminal.font-size", "terminal.fontsize", "terminal.font-family": return "terminal.fontSize"
+            case "remote.direct", "remote.direct-port", "remote.devices": return "remote.devices"
             case "remote.terminal": return "remote.terminal"
             case "remote.privacy", "privacy": return "remote.privacy"
             case "advanced.proxy", "proxy.mode", "proxy.url": return "advanced.proxy"
             case "advanced.verbose", "advanced.diagnostics": return "advanced.diagnostics"
+            case "advanced.data-folder", "advanced.datafolder": return "advanced.dataFolder"
+            case "advanced.remove-sessions", "advanced.clearsessions": return "advanced.clearSessions"
+            case "advanced.report", "advanced.reports": return "advanced.reports"
             case "about", "advanced.about": return "advanced.about"
+            case "about.update", "advanced.updates": return "advanced.updates"
             default:
                 if r.hasPrefix("mcp.sarto") { return "extensions.builtinMcp" }
                 if r.hasPrefix("marketplace.mcp") || r.hasPrefix("mcp.") { return "extensions.mcpServers" }
@@ -308,7 +329,15 @@ final class PrismSettingsRouter {
             }
         }()
 
-        open(section: targetSection, rowID: mappedRowID)
+        let resolvedSection: PrismSettingsSection = {
+            switch mappedRowID {
+            case "terminal.fontSize": return .appearance
+            case "remote.privacy", "advanced.about", "advanced.updates", "advanced.reports": return .updatesAndAbout
+            default: return targetSection
+            }
+        }()
+
+        open(section: resolvedSection, rowID: mappedRowID)
     }
 
     private func triggerHighlight(rowID: String) {
@@ -348,6 +377,13 @@ enum MemoryScopeSelection: Equatable, Hashable {
 @MainActor
 @Observable
 final class PrismSettingsStore {
+    /// Retired or test harnesses hidden across all Settings lists even when older hosts advertise them.
+    static let retiredAgentIDs: Set<String> = ["fake-agent", "fast-agent", "minion"]
+
+    static func visibleAgents(from agents: [AgentStatusInfo]) -> [AgentStatusInfo] {
+        agents.filter { !retiredAgentIDs.contains($0.id) }
+    }
+
     var daemonStatus: DaemonStatusInfo? = nil
     var hostSettings: HostSettingsSnapshot = HostSettingsSnapshot()
     /// This computer's own host settings, whichever host the window shows: hosting Claude Code for

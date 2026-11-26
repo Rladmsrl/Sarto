@@ -19,8 +19,7 @@ struct AgentsSettingsSectionView: View {
     @Environment(\.prismL10n) private var l10n
 
     private var visibleAgents: [AgentStatusInfo] {
-        // Older hosts still advertise the retired harnesses.
-        state.agents.filter { !["fake-agent", "fast-agent", "minion"].contains($0.id) }
+        PrismSettingsStore.visibleAgents(from: state.agents)
     }
 
     var body: some View {
@@ -29,69 +28,34 @@ struct AgentsSettingsSectionView: View {
                 SettingsBannerView(text: l10n.tr("settings.hostOfflineBanner"), kind: .info)
             }
 
-            // Environment & Bulk Update Bar
-            SettingsGroupSection(l10n.tr("settings.agents.environment")) {
-                SettingsRowView(
-                    id: "agents.environment",
-                    highlightedID: router.highlightedRowID,
-                    title: environmentHeadline,
-                    subtitle: environmentSubtitle
-                ) {
-                    HStack(spacing: 8) {
-                        SettingsPillButton(l10n.tr("settings.agents.reloadEnv"), icon: "arrow.triangle.2.circlepath", disabled: !state.connectionMode.isLive) {
-                            Task {
-                                guard let host = state.activeHostSession else { return }
-                                do {
-                                    let updated = try await host.reloadAgentEnvironment()
-                                    state.agents = updated
-                                    if let env = try? await host.agentEnvironment() {
-                                        store.environmentInfo = env
-                                    }
-                                    store.showNotice(l10n.tr("settings.agents.envReloaded"))
-                                } catch {
-                                    store.showError(error.localizedDescription)
-                                }
-                            }
-                        }
-                        SettingsPillButton(l10n.tr("settings.agents.checkUpdates"), icon: "arrow.down.circle", prominent: true, disabled: !state.connectionMode.isLive) {
-                            Task {
-                                guard let host = state.activeHostSession else { return }
-                                do {
-                                    let updated = try await host.checkAgentUpdates()
-                                    state.agents = updated
-                                    store.showNotice(l10n.tr("settings.agents.updatesChecked"))
-                                } catch {
-                                    store.showError(error.localizedDescription)
-                                }
-                            }
-                        }
-                    }
-                }
+            if let warn = store.environmentInfo?.warning, !warn.isEmpty {
+                SettingsBannerView(text: warn, kind: .error)
             }
 
             let groups = Dictionary(grouping: visibleAgents, by: hasInstalledHarness)
-            agentGroup(groups[true] ?? [], title: "settings.agents.list")
+            installedAgentsGroup(groups[true] ?? [])
                 .id("agents.list")
-            if let installable = groups[false] {
+            if let installable = groups[false], !installable.isEmpty {
                 agentGroup(installable, title: "settings.agents.installable")
             }
 
-            // Idle Session Auto-Release Policy
+            // Idle Session Auto-Release Policy (Claude Code)
             SettingsGroupSection(l10n.tr("settings.agents.idleRelease")) {
                 SettingsRowView(
                     id: "agents.idleRelease",
                     highlightedID: router.highlightedRowID,
                     title: l10n.tr("settings.agents.idleMode"),
-                    subtitle: l10n.tr("settings.agents.idleReleaseSub")
+                    subtitle: idleReleaseSubtitle
                 ) {
                     Picker(
                         "",
                         selection: Binding<String>(
                             get: { store.hostSettings.idleRelease },
                             set: { next in
+                                let wasCustom = store.hostSettings.idleRelease == "custom"
                                 store.hostSettings.idleRelease = next
                                 var idleObj: [String: JSONValue] = ["release": .string(next)]
-                                if next == "custom" {
+                                if next == "custom" && !wasCustom {
                                     store.hostSettings.idleOutOfView = 5
                                     store.hostSettings.idleInView = 15
                                     store.hostSettings.idleLimit = 2
@@ -117,6 +81,32 @@ struct AgentsSettingsSectionView: View {
                     .pickerStyle(.segmented)
                     .frame(width: 240)
                     .disabled(!state.connectionMode.isLive)
+                }
+            }
+
+            // Runtime Environment (secondary diagnostic card at bottom)
+            SettingsGroupSection(l10n.tr("settings.agents.environment")) {
+                SettingsRowView(
+                    id: "agents.environment",
+                    highlightedID: router.highlightedRowID,
+                    title: environmentHeadline,
+                    subtitle: environmentSubtitle
+                ) {
+                    SettingsPillButton(l10n.tr("settings.agents.reloadEnv"), icon: "arrow.triangle.2.circlepath", disabled: !state.connectionMode.isLive) {
+                        Task {
+                            guard let host = state.activeHostSession else { return }
+                            do {
+                                let updated = try await host.reloadAgentEnvironment()
+                                state.agents = updated
+                                if let env = try? await host.agentEnvironment() {
+                                    store.environmentInfo = env
+                                }
+                                store.showNotice(l10n.tr("settings.agents.envReloaded"))
+                            } catch {
+                                store.showError(error.localizedDescription)
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -153,11 +143,63 @@ struct AgentsSettingsSectionView: View {
         return store.environmentInfo?.npmPath ?? l10n.tr("settings.agents.environmentSub")
     }
 
+    private var idleReleaseSubtitle: String {
+        switch store.hostSettings.idleRelease {
+        case "never":
+            return l10n.tr("settings.agents.idleOffSub")
+        case "custom":
+            let out = store.hostSettings.idleOutOfView
+            let inV = store.hostSettings.idleInView
+            if let limit = store.hostSettings.idleLimit {
+                return l10n.tr("settings.agents.idleCustomWithLimitSub", out, inV, limit)
+            }
+            return l10n.tr("settings.agents.idleCustomSub", out, inV)
+        default:
+            return l10n.tr("settings.agents.idleBalancedSub")
+        }
+    }
+
     private func hasInstalledHarness(_ agent: AgentStatusInfo) -> Bool {
         if agent.uninstalled == true { return false }
         if agent.cli?.installed != nil || agent.availability.release != nil { return true }
         if let package = agent.availability.package { return package.installed }
         return AgentAvailability.isInstalled(agent)
+    }
+
+    private func installedAgentsGroup(_ agents: [AgentStatusInfo]) -> some View {
+        SettingsGroupSection(
+            l10n.tr("settings.agents.list"),
+            trailingBadge: String(agents.count)
+        ) {
+            SettingsPillButton(
+                l10n.tr("settings.agents.checkUpdates"),
+                icon: "arrow.down.circle",
+                disabled: !state.connectionMode.isLive
+            ) {
+                Task {
+                    guard let host = state.activeHostSession else { return }
+                    do {
+                        let updated = try await host.checkAgentUpdates()
+                        state.agents = updated
+                        store.showNotice(l10n.tr("settings.agents.updatesChecked"))
+                    } catch {
+                        store.showError(error.localizedDescription)
+                    }
+                }
+            }
+        } content: {
+            if agents.isEmpty {
+                Text(l10n.tr("settings.agents.empty"))
+                    .font(.system(size: 12))
+                    .foregroundStyle(tokens.mutedForeground)
+                    .padding(14)
+            } else {
+                ForEach(Array(agents.enumerated()), id: \.element.id) { index, agent in
+                    if index > 0 { SettingsRowDivider() }
+                    agentRow(agent)
+                }
+            }
+        }
     }
 
     private func agentGroup(_ agents: [AgentStatusInfo], title: String) -> some View {
@@ -781,7 +823,7 @@ struct MemorySettingsSectionView: View {
                 SettingsBannerView(text: l10n.tr("settings.hostOfflineBanner"), kind: .info)
             }
 
-            SettingsGroupSection(l10n.tr("settings.memory.enabled")) {
+            SettingsGroupSection(l10n.tr("settings.memory.groupSwitch")) {
                 SettingsRowView(
                     id: "memory.enabled",
                     highlightedID: router.highlightedRowID,
@@ -1128,113 +1170,7 @@ struct MemorySettingsSectionView: View {
     }
 }
 
-// MARK: - 8. Archived Sessions Section
-
-struct ArchivedSettingsSectionView: View {
-    @Bindable var state: SartoState
-    @Bindable var router: PrismSettingsRouter
-
-    @State private var searchText: String = ""
-    @State private var pendingDeleteSession: SessionSummary? = nil
-
-    @Environment(\.prismTokens) private var tokens
-    @Environment(\.prismL10n) private var l10n
-
-    private func sessionLabel(_ session: SessionSummary) -> String {
-        if let t = session.title?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty {
-            return t
-        }
-        return session.id
-    }
-
-    private var archivedSessions: [SessionSummary] {
-        let base = state.sessions
-            .filter { $0.archivedAt != nil }
-            .sorted { ($0.archivedAt ?? $0.updatedAt) > ($1.archivedAt ?? $1.updatedAt) }
-        let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !q.isEmpty else { return base }
-        return base.filter {
-            sessionLabel($0).lowercased().contains(q)
-                || $0.agentId.lowercased().contains(q)
-                || $0.projectPath.lowercased().contains(q)
-        }
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 7) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(tokens.mutedForeground)
-                TextField(l10n.tr("settings.archived.searchPlaceholder"), text: $searchText)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 12))
-            }
-            .padding(.horizontal, 9)
-            .padding(.vertical, 6)
-            .background(RoundedRectangle(cornerRadius: tokens.rSM).fill(tokens.surface1))
-            .overlay(RoundedRectangle(cornerRadius: tokens.rSM).strokeBorder(tokens.borderEtched, lineWidth: 1))
-
-            SettingsGroupSection(
-                l10n.tr("settings.archived.title"),
-                trailingBadge: "\(archivedSessions.count)"
-            ) {
-                if archivedSessions.isEmpty {
-                    Text(l10n.tr("settings.archived.empty"))
-                        .font(.system(size: 12))
-                        .foregroundStyle(tokens.mutedForeground)
-                        .padding(16)
-                        .id("archived.sessions")
-                } else {
-                    VStack(spacing: 0) {
-                        ForEach(Array(archivedSessions.enumerated()), id: \.element.id) { idx, session in
-                            if idx > 0 { SettingsRowDivider() }
-                            HStack(spacing: 10) {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(sessionLabel(session))
-                                        .font(.system(size: 13, weight: .medium))
-                                        .foregroundStyle(tokens.foreground)
-                                        .lineLimit(1)
-                                    let proj = URL(fileURLWithPath: session.projectPath).lastPathComponent
-                                    Text("\(session.agentId) · \(proj)")
-                                        .font(.system(size: 11, design: .monospaced))
-                                        .foregroundStyle(tokens.mutedForeground)
-                                        .lineLimit(1)
-                                }
-                                Spacer(minLength: 8)
-                                SettingsPillButton(l10n.tr("settings.archived.restore"), icon: "arrow.uturn.backward") {
-                                    Task { await state.unarchiveSession(id: session.id) }
-                                }
-                                SettingsPillButton(l10n.tr("settings.common.delete"), destructive: true) {
-                                    pendingDeleteSession = session
-                                }
-                            }
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 10)
-                        }
-                    }
-                    .id("archived.sessions")
-                }
-            }
-        }
-        .alert(
-            l10n.tr("settings.archived.deleteConfirmTitle"),
-            isPresented: Binding(get: { pendingDeleteSession != nil }, set: { if !$0 { pendingDeleteSession = nil } })
-        ) {
-            Button(l10n.tr("thread.entry.cancel"), role: .cancel) { pendingDeleteSession = nil }
-            Button(l10n.tr("settings.common.delete"), role: .destructive) {
-                if let target = pendingDeleteSession {
-                    pendingDeleteSession = nil
-                    Task { await state.deleteSession(id: target.id) }
-                }
-            }
-        } message: {
-            Text(pendingDeleteSession.map(sessionLabel) ?? "")
-        }
-    }
-}
-
-// MARK: - 9. Git & Terminal Section
+// MARK: - 8. Git & Terminal Section
 
 struct GitTerminalSettingsSectionView: View {
     @Bindable var state: SartoState
@@ -1251,11 +1187,9 @@ struct GitTerminalSettingsSectionView: View {
     @Environment(\.prismTokens) private var tokens
     @Environment(\.prismL10n) private var l10n
 
-    private static let terminalFontSuggestions = ["", "JetBrains Mono", "SF Mono", "Menlo", "Fira Code"]
-
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            SettingsGroupSection("Git & Worktrees") {
+            SettingsGroupSection(l10n.tr("settings.git.group")) {
                 SettingsRowView(
                     id: "git.fetch",
                     highlightedID: router.highlightedRowID,
@@ -1356,6 +1290,20 @@ struct GitTerminalSettingsSectionView: View {
                                 }
 
                                 HStack(spacing: 8) {
+                                    Text(l10n.tr("settings.git.copyPaths"))
+                                        .font(.system(size: 11.5))
+                                        .foregroundStyle(tokens.mutedForeground)
+                                        .frame(width: 110, alignment: .leading)
+                                    TextField(l10n.tr("settings.git.copyPathsPlaceholder"), text: $wtCopyPaths)
+                                        .textFieldStyle(.plain)
+                                        .font(.system(size: 11.5, design: .monospaced))
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 5)
+                                        .background(RoundedRectangle(cornerRadius: tokens.rXS).fill(tokens.codeBackground))
+                                        .overlay(RoundedRectangle(cornerRadius: tokens.rXS).strokeBorder(tokens.borderEtched, lineWidth: 1))
+                                }
+
+                                HStack(spacing: 8) {
                                     Text(l10n.tr("settings.git.setupCommand"))
                                         .font(.system(size: 11.5))
                                         .foregroundStyle(tokens.mutedForeground)
@@ -1426,37 +1374,14 @@ struct GitTerminalSettingsSectionView: View {
                 SettingsRowDivider()
 
                 SettingsRowView(
-                    id: "terminal.fontSize",
+                    id: "terminal.typographyLink",
                     highlightedID: router.highlightedRowID,
-                    title: l10n.tr("settings.terminal.fontSize"),
-                    subtitle: l10n.tr("settings.terminal.fontSizeSub")
+                    title: l10n.tr("settings.terminal.typographyTitle"),
+                    subtitle: l10n.tr("settings.terminal.typographySub")
                 ) {
-                    Picker("", selection: $state.terminalFontSize) {
-                        Text("12 pt").tag(12)
-                        Text("13 pt").tag(13)
-                        Text("14 pt").tag(14)
+                    SettingsPillButton(l10n.tr("settings.terminal.openAppearance"), icon: "arrow.right") {
+                        router.jumpTo(section: .appearance, rowID: "terminal.fontSize")
                     }
-                    .labelsHidden()
-                    .pickerStyle(.segmented)
-                    .frame(width: 190)
-                }
-
-                SettingsRowDivider()
-
-                SettingsRowView(
-                    id: "terminal.fontFamily",
-                    highlightedID: router.highlightedRowID,
-                    title: l10n.tr("settings.terminal.fontFamily"),
-                    subtitle: nil
-                ) {
-                    Picker("", selection: $state.terminalFontFamily) {
-                        Text(l10n.tr("settings.appearance.fontSystemDefault")).tag("")
-                        ForEach(Self.terminalFontSuggestions.dropFirst(), id: \.self) { font in
-                            Text(font).tag(font)
-                        }
-                    }
-                    .labelsHidden()
-                    .frame(width: 190)
                 }
             }
         }

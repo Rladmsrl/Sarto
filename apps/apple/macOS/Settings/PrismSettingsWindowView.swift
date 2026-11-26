@@ -60,6 +60,11 @@ struct PrismSettingsWindowView: View {
                 Task { await preload(section: router.selectedSection) }
             }
         }
+        .onChange(of: state.activeHostID) { _, _ in
+            if state.connectionMode.isLive {
+                Task { await preload(section: router.selectedSection) }
+            }
+        }
         .onChange(of: state.memoryChangeRevision) { _, _ in
             if router.selectedSection == .memory, state.connectionMode.isLive {
                 Task { await store.loadMemorySection(state: state) }
@@ -115,11 +120,14 @@ struct PrismSettingsWindowView: View {
 
     private func preload(section: PrismSettingsSection) async {
         switch section {
-        case .general, .gitAndTerminal, .usageAndSync:
+        case .general, .gitAndTerminal, .islandAndMenuBar:
             await store.loadHostSettings(state: state, daemon: daemon)
             if section == .general, let host = state.activeHostSession {
                 if let lights = try? await host.listLightAgents() {
                     store.lightAgents = lights
+                    for item in lights {
+                        state.ensureAgentOptionsLoaded(for: item.agentId)
+                    }
                 }
             }
         case .agents:
@@ -128,9 +136,9 @@ struct PrismSettingsWindowView: View {
             await store.loadExtensionsSection(state: state, daemon: daemon)
         case .memory:
             await store.loadMemorySection(state: state)
-        case .remoteAndCloud, .advancedAndAbout:
+        case .remoteAndCloud, .advanced, .updatesAndAbout:
             await store.loadDaemonAndRemote(state: state, daemon: daemon)
-        case .appearance, .islandAndMenuBar, .notifications, .archived:
+        case .appearance, .notifications:
             break
         }
     }
@@ -197,24 +205,34 @@ struct PrismSettingsWindowView: View {
 
             Divider().overlay(tokens.borderEtched)
 
-            // Bottom Daemon Connection Indicator Pill
-            HStack(spacing: 7) {
-                Circle()
-                    .fill(state.connectionMode.isLive ? tokens.success : tokens.warning)
-                    .frame(width: 7, height: 7)
-                Text(state.connectionMode.isLive ? l10n.tr("settings.status.daemonConnected") : l10n.tr("settings.status.daemonOffline"))
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(tokens.secondaryForeground)
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-                if let ver = store.daemonStatus?.version {
-                    Text("v\(ver)")
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(tokens.mutedForeground)
+            // Bottom Daemon Connection Indicator Pill (clickable to open Daemon service controls)
+            Button {
+                router.jumpTo(section: .advanced, rowID: "remote.daemon")
+            } label: {
+                HStack(spacing: 7) {
+                    Circle()
+                        .fill(state.connectionMode.isLive ? tokens.success : tokens.warning)
+                        .frame(width: 7, height: 7)
+                    Text(state.connectionMode.isLive ? l10n.tr("settings.status.daemonConnected") : l10n.tr("settings.status.daemonOffline"))
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(tokens.secondaryForeground)
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    if let ver = store.daemonStatus?.version {
+                        Text("v\(ver)")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(tokens.mutedForeground)
+                    }
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(tokens.mutedForeground.opacity(0.7))
                 }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+                .contentShape(Rectangle())
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 9)
+            .buttonStyle(.plain)
+            .help(l10n.tr("settings.status.daemonOpenHelp"))
         }
         .background(tokens.sidebar)
     }
@@ -283,6 +301,9 @@ struct PrismSettingsWindowView: View {
                             searchResultsView
                         } else {
                             sectionHeader(for: router.selectedSection)
+                            if state.connectionMode.isRemote && router.selectedSection.editsActiveHost {
+                                remoteHostScopeBanner
+                            }
                             sectionBody(for: router.selectedSection)
                         }
                     }
@@ -412,6 +433,32 @@ struct PrismSettingsWindowView: View {
         }
     }
 
+    private var remoteHostScopeBanner: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "network")
+                .font(.system(size: 12.5, weight: .semibold))
+                .foregroundStyle(tokens.prismCobalt)
+            Text(l10n.tr("settings.remoteScope.banner", state.activeHostSnapshot.name))
+                .font(.system(size: 12))
+                .foregroundStyle(tokens.foreground)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
+            SettingsPillButton(l10n.tr("settings.remoteScope.switchLocal"), icon: "laptopcomputer") {
+                Task {
+                    _ = await state.switchActiveHost(to: SartoState.localHostID)
+                    await preload(section: router.selectedSection)
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background(RoundedRectangle(cornerRadius: tokens.rSM, style: .continuous).fill(tokens.primarySoft))
+        .overlay(
+            RoundedRectangle(cornerRadius: tokens.rSM, style: .continuous)
+                .strokeBorder(tokens.prismCobalt.opacity(0.35), lineWidth: 1)
+        )
+    }
+
     @ViewBuilder
     private func sectionBody(for section: PrismSettingsSection) -> some View {
         switch section {
@@ -420,9 +467,7 @@ struct PrismSettingsWindowView: View {
         case .appearance:
             AppearanceSettingsSectionView(state: state, router: router)
         case .islandAndMenuBar:
-            IslandMenuBarSettingsSectionView(state: state, island: island, router: router)
-        case .usageAndSync:
-            UsageSyncSettingsSectionView(state: state, daemon: daemon, island: island, store: store, router: router)
+            IslandMenuBarSettingsSectionView(state: state, daemon: daemon, island: island, store: store, router: router)
         case .notifications:
             NotificationsSettingsSectionView(state: state, island: island, router: router)
         case .agents:
@@ -431,29 +476,43 @@ struct PrismSettingsWindowView: View {
             ExtensionsSettingsSectionView(state: state, daemon: daemon, store: store, router: router)
         case .memory:
             MemorySettingsSectionView(state: state, store: store, router: router)
-        case .archived:
-            ArchivedSettingsSectionView(state: state, router: router)
         case .gitAndTerminal:
             GitTerminalSettingsSectionView(state: state, daemon: daemon, store: store, router: router)
         case .remoteAndCloud:
             RemoteCloudSettingsSectionView(state: state, daemon: daemon, store: store, router: router)
-        case .advancedAndAbout:
-            AdvancedAboutSettingsSectionView(state: state, daemon: daemon, store: store, router: router)
+        case .advanced:
+            AdvancedServiceSettingsSectionView(state: state, daemon: daemon, store: store, router: router)
+        case .updatesAndAbout:
+            UpdatesAboutSettingsSectionView(state: state, daemon: daemon, store: store, router: router)
         }
     }
 }
 
 // MARK: - Shared Native macOS Settings Chrome
 
-struct SettingsGroupSection<Content: View>: View {
+struct SettingsGroupSection<Trailing: View, Content: View>: View {
     @Environment(\.prismTokens) private var tokens
     let title: String
     let trailingBadge: String?
+    let trailing: () -> Trailing
     let content: () -> Content
 
-    init(_ title: String, trailingBadge: String? = nil, @ViewBuilder content: @escaping () -> Content) {
+    init(
+        _ title: String,
+        trailingBadge: String? = nil,
+        @ViewBuilder trailing: @escaping () -> Trailing,
+        @ViewBuilder content: @escaping () -> Content
+    ) {
         self.title = title
         self.trailingBadge = trailingBadge
+        self.trailing = trailing
+        self.content = content
+    }
+
+    init(_ title: String, trailingBadge: String? = nil, @ViewBuilder content: @escaping () -> Content) where Trailing == EmptyView {
+        self.title = title
+        self.trailingBadge = trailingBadge
+        self.trailing = { EmptyView() }
         self.content = content
     }
 
@@ -472,6 +531,7 @@ struct SettingsGroupSection<Content: View>: View {
                         .background(Capsule().fill(tokens.surface2))
                 }
                 Spacer(minLength: 0)
+                trailing()
             }
             .padding(.horizontal, 4)
 

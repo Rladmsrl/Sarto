@@ -19,6 +19,7 @@ enum GameFeature {
 struct GameSettingsSection: View {
     var state: SartoState
     var store: GameStore
+    var highlightedID: String? = nil
 
     @Environment(\.prismTokens) private var tokens
     @Environment(\.prismL10n) private var l10n
@@ -26,24 +27,69 @@ struct GameSettingsSection: View {
 
     @State private var showsConsent = false
     @State private var showsLockedNotice = false
+    @State private var isPillHovered = false
     @State private var failed = false
 
     var body: some View {
         let motion = PrismSpringSpec.snappy.animation(tier: state.motionTier, reduceMotion: reduceMotion)
         VStack(alignment: .leading, spacing: 10) {
             SettingsGroupSection(l10n.tr("game.settings.section")) {
-                SettingsRowView(id: "game.enabled", title: l10n.tr("game.settings.toggle"), subtitle: subtitle) {
-                    Toggle("", isOn: toggle)
-                        .toggleStyle(.switch)
-                        .controlSize(.small)
-                        .labelsHidden()
-                        .disabled(!canSwitch)
-                        .accessibilityLabel(l10n.tr("game.settings.toggle"))
+                SettingsRowView(
+                    id: "game.enabled",
+                    highlightedID: highlightedID,
+                    title: l10n.tr("game.settings.toggle"),
+                    subtitle: subtitle
+                ) {
+                    if GameFeature.locked {
+                        Button {
+                            showsLockedNotice = true
+                        } label: {
+                            HStack(spacing: 5) {
+                                Image(systemName: "sparkles")
+                                    .font(.system(size: 10.5, weight: .semibold))
+                                Text(l10n.tr("game.settings.inDesignPill"))
+                                    .font(.system(size: 11, weight: .semibold))
+                            }
+                            .foregroundStyle(tokens.prismIris)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(
+                                Capsule().fill(
+                                    tokens.prismIris.opacity(
+                                        isPillHovered
+                                            ? (tokens.palette.isDark ? 0.26 : 0.18)
+                                            : (tokens.palette.isDark ? 0.16 : 0.10)
+                                    )
+                                )
+                            )
+                            .overlay(
+                                Capsule().strokeBorder(
+                                    tokens.prismIris.opacity(isPillHovered ? 0.50 : 0.30),
+                                    lineWidth: 1
+                                )
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .onHover { hovered in
+                            withAnimation(PrismSpringSpec.micro.animation(tier: state.motionTier, reduceMotion: reduceMotion)) {
+                                isPillHovered = hovered
+                            }
+                        }
+                        .accessibilityLabel(l10n.tr("game.settings.inDesignPill"))
+                    } else {
+                        Toggle("", isOn: toggle)
+                            .toggleStyle(.switch)
+                            .controlSize(.small)
+                            .labelsHidden()
+                            .disabled(!canSwitch)
+                            .accessibilityLabel(l10n.tr("game.settings.toggle"))
+                    }
                 }
                 if !GameFeature.locked, let log = store.status?.uploadLog {
                     SettingsRowDivider()
                     SettingsRowView(
                         id: "game.uploads",
+                        highlightedID: highlightedID,
                         title: l10n.tr("game.settings.uploadsTitle"),
                         subtitle: l10n.tr("game.settings.uploadsSubtitle")
                     ) {
@@ -71,6 +117,8 @@ struct GameSettingsSection: View {
         }
         .alert(l10n.tr("game.settings.locked"), isPresented: $showsLockedNotice) {
             Button(l10n.tr("game.settings.ok"), role: .cancel) {}
+        } message: {
+            Text(l10n.tr("game.settings.lockedDetail"))
         }
     }
 
@@ -97,7 +145,7 @@ struct GameSettingsSection: View {
     }
 
     private var subtitle: String {
-        if GameFeature.locked { return l10n.tr("game.settings.description") }
+        if GameFeature.locked { return l10n.tr("game.settings.inDesignSubtitle") }
         guard let status = store.status else { return l10n.tr("game.settings.waiting") }
         if !status.optedIn && !status.available { return l10n.tr("game.settings.noServer") }
         if status.optedIn && !status.enabled { return l10n.tr("game.settings.signIn") }
