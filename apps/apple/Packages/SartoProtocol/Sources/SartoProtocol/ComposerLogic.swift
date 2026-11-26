@@ -1518,8 +1518,8 @@ public enum ComposerWaitingCard {
             case .settingsChange(let p) where p.asked && p.outcome == nil:
                 return .answerSettingsChange(entryId: p.id, decision: key == .escape ? "keep" : "change")
 
-            case .memory(let p) where p.status == "pending":
-                return .answerMemory(entryId: p.id, decision: key == .escape ? "decline" : "remember")
+            case .memory(let p) where p.awaitsAnswer:
+                return .answerMemory(entryId: p.id, decision: key == .escape ? "skip" : "remember")
 
             case .projectMcp(let p) where p.decision == nil:
                 return .answerProjectMcp(entryId: p.id, decision: key == .escape ? "skip" : "use")

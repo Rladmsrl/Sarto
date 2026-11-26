@@ -117,7 +117,7 @@ public struct MemoryWriteEntryPayload: Codable, Sendable, Equatable {
     public let action: String // "remember" | "update" | "forget"
     public let memoryId: String?
     public let title: String
-    public let status: String // "written" | "pending" | "accepted" | "declined" | "undone" | "expired" | ...
+    public let status: String // "written" | "undone" | "proposed" | "accepted" | "declined"
     public let undo: String?
     public let draft: MemoryDraftPayload?
 
@@ -156,6 +156,10 @@ public struct MemoryWriteEntryPayload: Codable, Sendable, Equatable {
         self.undo = try c.decodeIfPresent(String.self, forKey: .undo)
         self.draft = try? c.decodeIfPresent(MemoryDraftPayload.self, forKey: .draft)
     }
+
+    /// A global write waits for the user while `proposed`; `sessions.answerMemory` takes
+    /// `remember` or `skip` for it (src/shared/memory.ts).
+    public var awaitsAnswer: Bool { status == "proposed" }
 }
 
 public struct SettingChangeValueText: Codable, Sendable, Equatable {

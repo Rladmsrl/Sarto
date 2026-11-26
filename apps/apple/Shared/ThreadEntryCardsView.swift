@@ -169,7 +169,7 @@ public struct MemoryWriteEntryCardView: View {
     public let actions: ThreadEntryCardActions
 
     public var body: some View {
-        let isPending = payload.status == "pending"
+        let isPending = payload.awaitsAnswer
         let isGlobal = payload.layer == "global"
 
         VStack(alignment: .leading, spacing: 8) {
@@ -225,7 +225,7 @@ public struct MemoryWriteEntryCardView: View {
                         onAnswer(payload.id, "remember")
                     }
                     ProtocolActionButton(title: l10n.tr("thread.memory.decline"), primary: false) {
-                        onAnswer(payload.id, "decline")
+                        onAnswer(payload.id, "skip")
                     }
                 }
             }

@@ -526,13 +526,34 @@ struct M1ProtocolTests {
         #expect(wtSettings.copy == [".env"])
     }
 
+    @Test("A proposed global memory waits for an answer the daemon accepts: remember or skip")
+    func proposedMemoryAnswers() throws {
+        let json = Data("""
+        [{ "kind": "memory", "id": "m1", "layer": "global", "action": "remember", "memoryId": null, "title": "Reply in Chinese", "status": "proposed", "undo": null, "draft": { "title": "Reply in Chinese", "description": "d", "body": "b" } }]
+        """.utf8)
+        let entries = try JSONDecoder().decode([ThreadEntry].self, from: json)
+        guard case .memory(let memory) = entries.first else {
+            Issue.record("Expected a memory entry")
+            return
+        }
+        #expect(memory.awaitsAnswer)
+        #expect(ComposerWaitingCard.action(for: .enter, in: entries) == .answerMemory(entryId: "m1", decision: "remember"))
+        #expect(ComposerWaitingCard.action(for: .escape, in: entries) == .answerMemory(entryId: "m1", decision: "skip"))
+
+        for status in ["written", "accepted", "declined", "undone"] {
+            let answered = MemoryWriteEntryPayload(id: "m1", layer: "global", action: "remember", title: "t", status: status)
+            #expect(!answered.awaitsAnswer)
+            #expect(ComposerWaitingCard.action(for: .escape, in: [.memory(answered)]) == nil)
+        }
+    }
+
     @Test("Decode all 15 extended Sarto ThreadEntry kinds, PendingElicitation, and entry.update merge")
     func extendedThreadEntriesAndUpdates() throws {
         let entriesJSON = Data("""
         [
           { "kind": "git", "id": "g1", "event": "commit", "commits": [{ "oid": "abc1234", "subject": "feat: add tests" }], "more": 0 },
           { "kind": "artifact", "id": "a1", "artifactId": "art_01", "title": "Architecture Spec", "action": "create", "version": 2, "writes": 2 },
-          { "kind": "memory", "id": "m1", "layer": "global", "action": "remember", "memoryId": null, "title": "Prefer SwiftUI", "status": "pending", "undo": null, "draft": { "title": "Prefer SwiftUI", "description": "UI framework preference", "body": "Always use SwiftUI." } },
+          { "kind": "memory", "id": "m1", "layer": "global", "action": "remember", "memoryId": null, "title": "Prefer SwiftUI", "status": "proposed", "undo": null, "draft": { "title": "Prefer SwiftUI", "description": "UI framework preference", "body": "Always use SwiftUI." } },
           { "kind": "settings_change", "id": "sc1", "asked": true, "expiresAt": 1700001000000, "outcome": null, "items": [{ "id": "appearance.color-mode", "place": "Appearance", "name": "Theme", "from": { "value": "light", "text": "Light" }, "to": { "value": "dark", "text": "Dark" } }] },
           { "kind": "browser_origin", "id": "bo1", "requestId": 7, "origin": "https://example.com", "decision": null },
           { "kind": "control_ask", "id": "ca1", "surface": "browser", "step": "sign_in", "target": "github.com", "reason": "Sign in to continue", "outcome": null },
