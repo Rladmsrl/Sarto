@@ -60,11 +60,21 @@ final class SystemAlertNotifier: NSObject, UNUserNotificationCenterDelegate {
         UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: Array(gone))
     }
 
+    /// Reads only the `Sendable` status inside the callback so `UNNotificationSettings` never
+    /// crosses an isolation boundary on SDKs where it is not `Sendable` (Xcode 16.4 / macOS 15).
+    private nonisolated static func authorizationStatus() async -> UNAuthorizationStatus {
+        await withCheckedContinuation { continuation in
+            UNUserNotificationCenter.current().getNotificationSettings { settings in
+                continuation.resume(returning: settings.authorizationStatus)
+            }
+        }
+    }
+
     /// Asks for permission the first time there is something to say, and never again once the
     /// user has answered; the answer is read each time, as it may change in System Settings.
     private static func mayNotify() async -> Bool {
         let center = UNUserNotificationCenter.current()
-        switch await center.notificationSettings().authorizationStatus {
+        switch await authorizationStatus() {
         case .authorized, .provisional, .ephemeral:
             return true
         case .notDetermined:
