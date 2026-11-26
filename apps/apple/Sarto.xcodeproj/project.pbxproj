@@ -1,0 +1,758 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0297F6925F4EFC139718B504 /* ProblemReportSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9AAEBEF75C0101D9D12EC46D /* ProblemReportSheetView.swift */; };
+		07ECB6489628855792DF74D9 /* SidebarTreeModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE2C17D8FF7A1DEB504A406F /* SidebarTreeModel.swift */; };
+		0B75F77CDF798A622E1F92B3 /* NewSessionSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6712122435D26B2E54B63ED2 /* NewSessionSheet.swift */; };
+		115170A3CDDA9AE75F9E9C31 /* UpdateInstallFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 592032CA7B05DB2AF7078ADE /* UpdateInstallFlow.swift */; };
+		16A692DB09F289AFAE7C0DB4 /* AgentAvailability.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EBCBDA9DCE3B77AA00EC56A /* AgentAvailability.swift */; };
+		1AE2BA7ACC8BE28D483607CF /* PrismSettingsRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01BB4D5EE8C0A275A969DF8D /* PrismSettingsRouter.swift */; };
+		1D6F9737EB949294ECD6127E /* ThreadTimelineModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE0AE72E3902044CF58D12FF /* ThreadTimelineModel.swift */; };
+		270E2478ECB9E23EB8AE6F2B /* UsageCore in Frameworks */ = {isa = PBXBuildFile; productRef = DBE37E286112AB22555CDF89 /* UsageCore */; };
+		2DA7D03E3F52328BAA78FE5A /* IslandViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DFA362578C4452E75E6D340 /* IslandViews.swift */; };
+		2E0C3459373EF01F21A18F6A /* DaemonManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1236BB960F29C2A5F5ECB43 /* DaemonManager.swift */; };
+		32BB0F3CE7E3A1607FD12EE5 /* SartoAppPaths.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70F21ACDBB51B4C78F02C882 /* SartoAppPaths.swift */; };
+		38E975FA1D7E0C8D9B92E7A9 /* MacWorkbenchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3A160385FD001F9CC82986D /* MacWorkbenchView.swift */; };
+		3E78179362D653E9D48FDC05 /* ThreadEntryCardsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E35E125D4E2D292D9452893D /* ThreadEntryCardsView.swift */; };
+		43A48D6EB849B755BF6940E6 /* IslandSignals.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BC497E33D5236CDDE9FFDE8 /* IslandSignals.swift */; };
+		5453E816E88EB4552BFAE04C /* SettingsExtensionsSectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC8B1C288F030BC639CB1CFB /* SettingsExtensionsSectionView.swift */; };
+		54681CF48E18C0017AC97EB6 /* ThreadRichContentViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6A5916E183DA224F2D8574F /* ThreadRichContentViews.swift */; };
+		5915C1703CCD8B3E87B2082E /* SessionMarkdownExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A13A053ABC104FF18DA711D /* SessionMarkdownExporter.swift */; };
+		5B10054F5ABEF726B43867BE /* SartoState+AgentAvailability.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85C2A422633CB24769BDDF5C /* SartoState+AgentAvailability.swift */; };
+		5B42EF668C5ADFD683A0591F /* ComposerAttachments.swift in Sources */ = {isa = PBXBuildFile; fileRef = A25E840CE058002EEEDF82DA /* ComposerAttachments.swift */; };
+		5CF281ECBC24026BF24A428C /* GlobalSessionSearchSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 780A6AFEAD08EC9B71588407 /* GlobalSessionSearchSheet.swift */; };
+		6054F04722CD4A7578B03989 /* NewSessionStageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97EF65BB06EE0343203E4769 /* NewSessionStageView.swift */; };
+		61B394BD6EDA67D5D81F69D2 /* MacSidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38942CAD0CE394A2CDE7A56D /* MacSidebarView.swift */; };
+		691DCF02D9A7B8AFA5AC99C1 /* MenuBarKit in Frameworks */ = {isa = PBXBuildFile; productRef = 7462ED9D68864A47AC0FD91E /* MenuBarKit */; };
+		6ACDBD5D8F4008CB8D6C2A7F /* UsageSettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0D4056CB7B1AE8F9853D380 /* UsageSettingsStore.swift */; };
+		6B32471E3271593A149275C2 /* ComposerPopoversView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 949F2883FAF8DCF4033FE08F /* ComposerPopoversView.swift */; };
+		6E48ABB1076EDF73F2D64DF4 /* UpdatesSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81E1A3C0B06A944F8CABC182 /* UpdatesSettingsView.swift */; };
+		773BB57E80B6484D0A5AF7B2 /* SartoProtocol in Frameworks */ = {isa = PBXBuildFile; productRef = A8B6FC8E2C6EA5823D4A89E6 /* SartoProtocol */; };
+		794531FE02C80B2CCD06F057 /* UsageStoreModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA52CBC99D86632D92784C00 /* UsageStoreModel.swift */; };
+		7CA9E3524D365CD66430EDAE /* SartoState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57911F287D767C7028EA8A51 /* SartoState.swift */; };
+		7D5018586192D9CBE8E65EF7 /* AgentInstallSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = C22F2123D08D4044AD5B3BA0 /* AgentInstallSheet.swift */; };
+		7F1A0DD5EC9599986F4C584D /* GitFlowViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34CDC75E31D5D926F3249B53 /* GitFlowViews.swift */; };
+		7F949A9117763C4B079D0C70 /* SettingsClientSectionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2099C185F435C4298DAEBB5D /* SettingsClientSectionsView.swift */; };
+		811DDDECD257C9011C324844 /* PrismPreviewStageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D06BC03D60916F0B4C66377B /* PrismPreviewStageView.swift */; };
+		862DEB2C3C1DD13E4F45EFC3 /* WorkbenchPanes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C30A38C1EB0C1227F36F8CD /* WorkbenchPanes.swift */; };
+		8A7C6FBED1C4484DC4C4EFC9 /* PrismSettingsWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E86BA68646F5088BA716FD7E /* PrismSettingsWindowView.swift */; };
+		8AB4C7A5963A0464CFDF2764 /* AppIconManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD76702D5535D4CAD90FCE65 /* AppIconManager.swift */; };
+		8C7C1E24FD64096712775269 /* PrismDesign in Frameworks */ = {isa = PBXBuildFile; productRef = 8D0FA523F53CA6B9A148E1E6 /* PrismDesign */; };
+		8FA9BA0C168259B14439B2D9 /* SessionThreadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D88DFC685E7A0F2274AD0CEB /* SessionThreadView.swift */; };
+		903625ACFC070358C073B5CE /* MenuBarPanelViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F44B8A9AF9026D530B937926 /* MenuBarPanelViews.swift */; };
+		9508E55FFEF66943F14B7BE5 /* ComposerOverlaysAndPreviews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96E80FD288C519E51AD8D86C /* ComposerOverlaysAndPreviews.swift */; };
+		954AF266491D75E0EA2D3D9F /* AgentRPGCharacterPopover.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77DE437D5FA0433BFD01B6A9 /* AgentRPGCharacterPopover.swift */; };
+		98A07F97597C47985446E12C /* IslandLocalization.swift in Sources */ = {isa = PBXBuildFile; fileRef = E94215AF7808E5564055272C /* IslandLocalization.swift */; };
+		9E2F70A1994BC4DED337F8AB /* IslandModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E923628483BC400FCE16D7F /* IslandModels.swift */; };
+		A15BC0133B58D26CA8B2E1A8 /* AgentRPGModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 473DBA9B121DF86F1817513D /* AgentRPGModels.swift */; };
+		A34A9999A6AD4548AF67D2D3 /* IslandProjection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85B7FDC05E4823D967460825 /* IslandProjection.swift */; };
+		A6407B1050B32003A9EACB26 /* ImportCLISessionsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D53724818126E257758F3376 /* ImportCLISessionsSheet.swift */; };
+		A98036750192A71459F20C63 /* IslandCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0EB7307AAB278DF056623DC1 /* IslandCoordinator.swift */; };
+		ACBEFFF07263BC2FA9E2947D /* WorkspaceController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B2780604B2CE595B3263410 /* WorkspaceController.swift */; };
+		ACFD06FCC8D0113D8F97BADD /* WorkspaceController+GitFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7E010ED9790E15599D83589 /* WorkspaceController+GitFlow.swift */; };
+		AF6DBD51E61D346A89C920CC /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F93282751CCEB90CE1D71427 /* Assets.xcassets */; };
+		B2FFF932DB8D22DF0BEBD940 /* SartoMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1D753FDC726C09F4AB3CA9 /* SartoMacApp.swift */; };
+		BFCF7CB00EA122739F9B52C4 /* ComposerTextEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA1C9A93192EC5719BA1C7B9 /* ComposerTextEditor.swift */; };
+		C4F3201A9EEED7035841FD28 /* PrismBrowserEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCB0CBD9D94ADC69A968A020 /* PrismBrowserEngine.swift */; };
+		C80EB2BA65065A37E796A618 /* PrismBrowserPaneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8992E1D1C10EA5BBED6C3C0F /* PrismBrowserPaneView.swift */; };
+		C9F964095CFE35448DD050FA /* SessionOverlayViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A595FDCDC12819E3DD014710 /* SessionOverlayViews.swift */; };
+		D01FCED31CD392A68AE16A95 /* DaemonRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40243CE65AE343967F5231A4 /* DaemonRuntime.swift */; };
+		D209E04550A00A942EEA3F01 /* RunningSessionsRail.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE1B1EFBFAAED74203FDE2C6 /* RunningSessionsRail.swift */; };
+		D266A74415ADB63D29BEBCD1 /* ProblemReportCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CED7A7ED2873BB603608356 /* ProblemReportCoordinator.swift */; };
+		D381532972FEAA12913D518E /* SartoUpdate in Frameworks */ = {isa = PBXBuildFile; productRef = F08FC6CB50DD9D89491EC387 /* SartoUpdate */; };
+		D3E49CE373C2E2E81F39A5B3 /* IslandAssets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9AB6944800D65D863968370A /* IslandAssets.swift */; };
+		D9CF872CAB78B4AF9D7D2E12 /* DisplayMapPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 733B4B70F2EAE1560AAB417A /* DisplayMapPicker.swift */; };
+		DF919AB9AC36E48BD460B978 /* AgentRPGStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60BD2F5CAD7B326506141950 /* AgentRPGStore.swift */; };
+		E50502C9907BC3C83D72A16F /* IslandUsageViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4ABC19CF9AAEFCEF9877C2C7 /* IslandUsageViews.swift */; };
+		E8E925A5A256B6B7B5D97B9D /* QuitCountdown.swift in Sources */ = {isa = PBXBuildFile; fileRef = 286F49D38195DD675CA2CAF4 /* QuitCountdown.swift */; };
+		E92893E2BCD51CC09577B2B2 /* SartoUpdater.swift in Sources */ = {isa = PBXBuildFile; fileRef = A35A780F27808B934EAC09A6 /* SartoUpdater.swift */; };
+		E9E4CCECAB66A158884B60AC /* PrismDeviceController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60CB420A93F43011A3FA6C09 /* PrismDeviceController.swift */; };
+		EB76CED5658DF26EABFE0D28 /* SettingsNetworkAndSystemView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EE22AE96A054D5D660C2D38 /* SettingsNetworkAndSystemView.swift */; };
+		F00E6F448C8232D9AE584AFB /* SyncApprovalPanelController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B748B129F3FA2A2C7B95F84 /* SyncApprovalPanelController.swift */; };
+		F1B7EFFD66CABBCB0E261DF6 /* IslandController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4787016FCA61C9367790DD97 /* IslandController.swift */; };
+		F32E69A32A44071ED8DE5BF3 /* SartoState+MultiHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = F36D967EF11E87BC3FCFBF6D /* SartoState+MultiHost.swift */; };
+		F9856275D611EC9FD300670B /* FileDownload.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06C51E3E7A2FC4562753206C /* FileDownload.swift */; };
+		FD65351FCECE058F13196250 /* SettingsHostSectionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B185F253E10317EBB1B7944 /* SettingsHostSectionsView.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		01BB4D5EE8C0A275A969DF8D /* PrismSettingsRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrismSettingsRouter.swift; sourceTree = "<group>"; };
+		06C51E3E7A2FC4562753206C /* FileDownload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileDownload.swift; sourceTree = "<group>"; };
+		0EB7307AAB278DF056623DC1 /* IslandCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IslandCoordinator.swift; sourceTree = "<group>"; };
+		18CC02915CA661B045A3D897 /* UsageIslandKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = UsageIslandKit; path = Packages/UsageIslandKit; sourceTree = SOURCE_ROOT; };
+		1CD180FA8BFB1A9C52AB3614 /* SartoMac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SartoMac.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		1DFA362578C4452E75E6D340 /* IslandViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IslandViews.swift; sourceTree = "<group>"; };
+		2099C185F435C4298DAEBB5D /* SettingsClientSectionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsClientSectionsView.swift; sourceTree = "<group>"; };
+		286F49D38195DD675CA2CAF4 /* QuitCountdown.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuitCountdown.swift; sourceTree = "<group>"; };
+		34CDC75E31D5D926F3249B53 /* GitFlowViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitFlowViews.swift; sourceTree = "<group>"; };
+		367E46E7B5838C63A26610B7 /* SartoProtocol */ = {isa = PBXFileReference; lastKnownFileType = folder; name = SartoProtocol; path = Packages/SartoProtocol; sourceTree = SOURCE_ROOT; };
+		38942CAD0CE394A2CDE7A56D /* MacSidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacSidebarView.swift; sourceTree = "<group>"; };
+		3B185F253E10317EBB1B7944 /* SettingsHostSectionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsHostSectionsView.swift; sourceTree = "<group>"; };
+		3BC497E33D5236CDDE9FFDE8 /* IslandSignals.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IslandSignals.swift; sourceTree = "<group>"; };
+		3C30A38C1EB0C1227F36F8CD /* WorkbenchPanes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkbenchPanes.swift; sourceTree = "<group>"; };
+		3EE22AE96A054D5D660C2D38 /* SettingsNetworkAndSystemView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsNetworkAndSystemView.swift; sourceTree = "<group>"; };
+		40243CE65AE343967F5231A4 /* DaemonRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaemonRuntime.swift; sourceTree = "<group>"; };
+		473DBA9B121DF86F1817513D /* AgentRPGModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentRPGModels.swift; sourceTree = "<group>"; };
+		4787016FCA61C9367790DD97 /* IslandController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IslandController.swift; sourceTree = "<group>"; };
+		4ABC19CF9AAEFCEF9877C2C7 /* IslandUsageViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IslandUsageViews.swift; sourceTree = "<group>"; };
+		57911F287D767C7028EA8A51 /* SartoState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SartoState.swift; sourceTree = "<group>"; };
+		592032CA7B05DB2AF7078ADE /* UpdateInstallFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateInstallFlow.swift; sourceTree = "<group>"; };
+		5A13A053ABC104FF18DA711D /* SessionMarkdownExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionMarkdownExporter.swift; sourceTree = "<group>"; };
+		60BD2F5CAD7B326506141950 /* AgentRPGStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentRPGStore.swift; sourceTree = "<group>"; };
+		60CB420A93F43011A3FA6C09 /* PrismDeviceController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrismDeviceController.swift; sourceTree = "<group>"; };
+		6712122435D26B2E54B63ED2 /* NewSessionSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewSessionSheet.swift; sourceTree = "<group>"; };
+		6B748B129F3FA2A2C7B95F84 /* SyncApprovalPanelController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncApprovalPanelController.swift; sourceTree = "<group>"; };
+		70F21ACDBB51B4C78F02C882 /* SartoAppPaths.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SartoAppPaths.swift; sourceTree = "<group>"; };
+		733B4B70F2EAE1560AAB417A /* DisplayMapPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayMapPicker.swift; sourceTree = "<group>"; };
+		77DE437D5FA0433BFD01B6A9 /* AgentRPGCharacterPopover.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentRPGCharacterPopover.swift; sourceTree = "<group>"; };
+		780A6AFEAD08EC9B71588407 /* GlobalSessionSearchSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalSessionSearchSheet.swift; sourceTree = "<group>"; };
+		7CED7A7ED2873BB603608356 /* ProblemReportCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProblemReportCoordinator.swift; sourceTree = "<group>"; };
+		81E1A3C0B06A944F8CABC182 /* UpdatesSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdatesSettingsView.swift; sourceTree = "<group>"; };
+		85B7FDC05E4823D967460825 /* IslandProjection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IslandProjection.swift; sourceTree = "<group>"; };
+		85C2A422633CB24769BDDF5C /* SartoState+AgentAvailability.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SartoState+AgentAvailability.swift"; sourceTree = "<group>"; };
+		8992E1D1C10EA5BBED6C3C0F /* PrismBrowserPaneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrismBrowserPaneView.swift; sourceTree = "<group>"; };
+		8E923628483BC400FCE16D7F /* IslandModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IslandModels.swift; sourceTree = "<group>"; };
+		8EBCBDA9DCE3B77AA00EC56A /* AgentAvailability.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentAvailability.swift; sourceTree = "<group>"; };
+		949F2883FAF8DCF4033FE08F /* ComposerPopoversView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerPopoversView.swift; sourceTree = "<group>"; };
+		96E80FD288C519E51AD8D86C /* ComposerOverlaysAndPreviews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerOverlaysAndPreviews.swift; sourceTree = "<group>"; };
+		97EF65BB06EE0343203E4769 /* NewSessionStageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewSessionStageView.swift; sourceTree = "<group>"; };
+		9AAEBEF75C0101D9D12EC46D /* ProblemReportSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProblemReportSheetView.swift; sourceTree = "<group>"; };
+		9AB6944800D65D863968370A /* IslandAssets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IslandAssets.swift; sourceTree = "<group>"; };
+		9B2780604B2CE595B3263410 /* WorkspaceController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceController.swift; sourceTree = "<group>"; };
+		A25E840CE058002EEEDF82DA /* ComposerAttachments.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerAttachments.swift; sourceTree = "<group>"; };
+		A35A780F27808B934EAC09A6 /* SartoUpdater.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SartoUpdater.swift; sourceTree = "<group>"; };
+		A3A160385FD001F9CC82986D /* MacWorkbenchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacWorkbenchView.swift; sourceTree = "<group>"; };
+		A40F6543BEE473C6459F373E /* SartoUpdate */ = {isa = PBXFileReference; lastKnownFileType = folder; name = SartoUpdate; path = Packages/SartoUpdate; sourceTree = SOURCE_ROOT; };
+		A595FDCDC12819E3DD014710 /* SessionOverlayViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionOverlayViews.swift; sourceTree = "<group>"; };
+		A7E010ED9790E15599D83589 /* WorkspaceController+GitFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "WorkspaceController+GitFlow.swift"; sourceTree = "<group>"; };
+		AA1D753FDC726C09F4AB3CA9 /* SartoMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SartoMacApp.swift; sourceTree = "<group>"; };
+		AE2C17D8FF7A1DEB504A406F /* SidebarTreeModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarTreeModel.swift; sourceTree = "<group>"; };
+		BC8B1C288F030BC639CB1CFB /* SettingsExtensionsSectionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsExtensionsSectionView.swift; sourceTree = "<group>"; };
+		BFC492F881F8815831132C89 /* PrismDesign */ = {isa = PBXFileReference; lastKnownFileType = folder; name = PrismDesign; path = Packages/PrismDesign; sourceTree = SOURCE_ROOT; };
+		C22F2123D08D4044AD5B3BA0 /* AgentInstallSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentInstallSheet.swift; sourceTree = "<group>"; };
+		C6A5916E183DA224F2D8574F /* ThreadRichContentViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadRichContentViews.swift; sourceTree = "<group>"; };
+		CA1C9A93192EC5719BA1C7B9 /* ComposerTextEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerTextEditor.swift; sourceTree = "<group>"; };
+		CCB0CBD9D94ADC69A968A020 /* PrismBrowserEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrismBrowserEngine.swift; sourceTree = "<group>"; };
+		CD76702D5535D4CAD90FCE65 /* AppIconManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppIconManager.swift; sourceTree = "<group>"; };
+		D06BC03D60916F0B4C66377B /* PrismPreviewStageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrismPreviewStageView.swift; sourceTree = "<group>"; };
+		D0D4056CB7B1AE8F9853D380 /* UsageSettingsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageSettingsStore.swift; sourceTree = "<group>"; };
+		D53724818126E257758F3376 /* ImportCLISessionsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportCLISessionsSheet.swift; sourceTree = "<group>"; };
+		D88DFC685E7A0F2274AD0CEB /* SessionThreadView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionThreadView.swift; sourceTree = "<group>"; };
+		E35E125D4E2D292D9452893D /* ThreadEntryCardsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadEntryCardsView.swift; sourceTree = "<group>"; };
+		E86BA68646F5088BA716FD7E /* PrismSettingsWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrismSettingsWindowView.swift; sourceTree = "<group>"; };
+		E94215AF7808E5564055272C /* IslandLocalization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IslandLocalization.swift; sourceTree = "<group>"; };
+		F1236BB960F29C2A5F5ECB43 /* DaemonManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaemonManager.swift; sourceTree = "<group>"; };
+		F36D967EF11E87BC3FCFBF6D /* SartoState+MultiHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SartoState+MultiHost.swift"; sourceTree = "<group>"; };
+		F44B8A9AF9026D530B937926 /* MenuBarPanelViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarPanelViews.swift; sourceTree = "<group>"; };
+		F93282751CCEB90CE1D71427 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		FA52CBC99D86632D92784C00 /* UsageStoreModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageStoreModel.swift; sourceTree = "<group>"; };
+		FE0AE72E3902044CF58D12FF /* ThreadTimelineModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadTimelineModel.swift; sourceTree = "<group>"; };
+		FE1B1EFBFAAED74203FDE2C6 /* RunningSessionsRail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunningSessionsRail.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		7B271B5FEC60393F99CC792E /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				773BB57E80B6484D0A5AF7B2 /* SartoProtocol in Frameworks */,
+				8C7C1E24FD64096712775269 /* PrismDesign in Frameworks */,
+				270E2478ECB9E23EB8AE6F2B /* UsageCore in Frameworks */,
+				691DCF02D9A7B8AFA5AC99C1 /* MenuBarKit in Frameworks */,
+				D381532972FEAA12913D518E /* SartoUpdate in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		0B79C01641B9F036D9E3A1A2 /* AgentRPG */ = {
+			isa = PBXGroup;
+			children = (
+				77DE437D5FA0433BFD01B6A9 /* AgentRPGCharacterPopover.swift */,
+				473DBA9B121DF86F1817513D /* AgentRPGModels.swift */,
+				60BD2F5CAD7B326506141950 /* AgentRPGStore.swift */,
+			);
+			path = AgentRPG;
+			sourceTree = "<group>";
+		};
+		2B0CF18C90777DCE206E054E /* Settings */ = {
+			isa = PBXGroup;
+			children = (
+				01BB4D5EE8C0A275A969DF8D /* PrismSettingsRouter.swift */,
+				E86BA68646F5088BA716FD7E /* PrismSettingsWindowView.swift */,
+				2099C185F435C4298DAEBB5D /* SettingsClientSectionsView.swift */,
+				BC8B1C288F030BC639CB1CFB /* SettingsExtensionsSectionView.swift */,
+				3B185F253E10317EBB1B7944 /* SettingsHostSectionsView.swift */,
+				3EE22AE96A054D5D660C2D38 /* SettingsNetworkAndSystemView.swift */,
+			);
+			path = Settings;
+			sourceTree = "<group>";
+		};
+		4443164B68D0C8F3646B7965 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				1CD180FA8BFB1A9C52AB3614 /* SartoMac.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		63DD0921612CF11D159AAD9F /* Updates */ = {
+			isa = PBXGroup;
+			children = (
+				06C51E3E7A2FC4562753206C /* FileDownload.swift */,
+				A35A780F27808B934EAC09A6 /* SartoUpdater.swift */,
+				592032CA7B05DB2AF7078ADE /* UpdateInstallFlow.swift */,
+				81E1A3C0B06A944F8CABC182 /* UpdatesSettingsView.swift */,
+			);
+			path = Updates;
+			sourceTree = "<group>";
+		};
+		724D748C56007BBF85D06E13 /* ProblemReport */ = {
+			isa = PBXGroup;
+			children = (
+				7CED7A7ED2873BB603608356 /* ProblemReportCoordinator.swift */,
+				9AAEBEF75C0101D9D12EC46D /* ProblemReportSheetView.swift */,
+			);
+			path = ProblemReport;
+			sourceTree = "<group>";
+		};
+		A426059FD80B245979239C90 /* DynamicIsland */ = {
+			isa = PBXGroup;
+			children = (
+				9AB6944800D65D863968370A /* IslandAssets.swift */,
+				4787016FCA61C9367790DD97 /* IslandController.swift */,
+				0EB7307AAB278DF056623DC1 /* IslandCoordinator.swift */,
+				E94215AF7808E5564055272C /* IslandLocalization.swift */,
+				8E923628483BC400FCE16D7F /* IslandModels.swift */,
+				85B7FDC05E4823D967460825 /* IslandProjection.swift */,
+				3BC497E33D5236CDDE9FFDE8 /* IslandSignals.swift */,
+				4ABC19CF9AAEFCEF9877C2C7 /* IslandUsageViews.swift */,
+				1DFA362578C4452E75E6D340 /* IslandViews.swift */,
+			);
+			path = DynamicIsland;
+			sourceTree = "<group>";
+		};
+		AF2E06F32BECD56EEBA34E4E /* macOS */ = {
+			isa = PBXGroup;
+			children = (
+				C22F2123D08D4044AD5B3BA0 /* AgentInstallSheet.swift */,
+				CD76702D5535D4CAD90FCE65 /* AppIconManager.swift */,
+				F93282751CCEB90CE1D71427 /* Assets.xcassets */,
+				96E80FD288C519E51AD8D86C /* ComposerOverlaysAndPreviews.swift */,
+				949F2883FAF8DCF4033FE08F /* ComposerPopoversView.swift */,
+				CA1C9A93192EC5719BA1C7B9 /* ComposerTextEditor.swift */,
+				F1236BB960F29C2A5F5ECB43 /* DaemonManager.swift */,
+				40243CE65AE343967F5231A4 /* DaemonRuntime.swift */,
+				780A6AFEAD08EC9B71588407 /* GlobalSessionSearchSheet.swift */,
+				D53724818126E257758F3376 /* ImportCLISessionsSheet.swift */,
+				38942CAD0CE394A2CDE7A56D /* MacSidebarView.swift */,
+				A3A160385FD001F9CC82986D /* MacWorkbenchView.swift */,
+				97EF65BB06EE0343203E4769 /* NewSessionStageView.swift */,
+				286F49D38195DD675CA2CAF4 /* QuitCountdown.swift */,
+				FE1B1EFBFAAED74203FDE2C6 /* RunningSessionsRail.swift */,
+				70F21ACDBB51B4C78F02C882 /* SartoAppPaths.swift */,
+				AA1D753FDC726C09F4AB3CA9 /* SartoMacApp.swift */,
+				6B748B129F3FA2A2C7B95F84 /* SyncApprovalPanelController.swift */,
+				0B79C01641B9F036D9E3A1A2 /* AgentRPG */,
+				A426059FD80B245979239C90 /* DynamicIsland */,
+				F23F8E0205D449304D062BF5 /* MenuBar */,
+				724D748C56007BBF85D06E13 /* ProblemReport */,
+				2B0CF18C90777DCE206E054E /* Settings */,
+				63DD0921612CF11D159AAD9F /* Updates */,
+			);
+			path = macOS;
+			sourceTree = "<group>";
+		};
+		B5FA05E75C9696A4FA274D5A /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				BFC492F881F8815831132C89 /* PrismDesign */,
+				367E46E7B5838C63A26610B7 /* SartoProtocol */,
+				A40F6543BEE473C6459F373E /* SartoUpdate */,
+				18CC02915CA661B045A3D897 /* UsageIslandKit */,
+			);
+			path = Packages;
+			sourceTree = "<group>";
+		};
+		B65EDF02E6BF72AC5380FDBC = {
+			isa = PBXGroup;
+			children = (
+				AF2E06F32BECD56EEBA34E4E /* macOS */,
+				B5FA05E75C9696A4FA274D5A /* Packages */,
+				C4C5E46F75A22E19A67CBCD3 /* Shared */,
+				4443164B68D0C8F3646B7965 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		C4C5E46F75A22E19A67CBCD3 /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				8EBCBDA9DCE3B77AA00EC56A /* AgentAvailability.swift */,
+				A25E840CE058002EEEDF82DA /* ComposerAttachments.swift */,
+				34CDC75E31D5D926F3249B53 /* GitFlowViews.swift */,
+				6712122435D26B2E54B63ED2 /* NewSessionSheet.swift */,
+				CCB0CBD9D94ADC69A968A020 /* PrismBrowserEngine.swift */,
+				8992E1D1C10EA5BBED6C3C0F /* PrismBrowserPaneView.swift */,
+				60CB420A93F43011A3FA6C09 /* PrismDeviceController.swift */,
+				D06BC03D60916F0B4C66377B /* PrismPreviewStageView.swift */,
+				57911F287D767C7028EA8A51 /* SartoState.swift */,
+				85C2A422633CB24769BDDF5C /* SartoState+AgentAvailability.swift */,
+				F36D967EF11E87BC3FCFBF6D /* SartoState+MultiHost.swift */,
+				5A13A053ABC104FF18DA711D /* SessionMarkdownExporter.swift */,
+				A595FDCDC12819E3DD014710 /* SessionOverlayViews.swift */,
+				D88DFC685E7A0F2274AD0CEB /* SessionThreadView.swift */,
+				AE2C17D8FF7A1DEB504A406F /* SidebarTreeModel.swift */,
+				E35E125D4E2D292D9452893D /* ThreadEntryCardsView.swift */,
+				C6A5916E183DA224F2D8574F /* ThreadRichContentViews.swift */,
+				FE0AE72E3902044CF58D12FF /* ThreadTimelineModel.swift */,
+				3C30A38C1EB0C1227F36F8CD /* WorkbenchPanes.swift */,
+				9B2780604B2CE595B3263410 /* WorkspaceController.swift */,
+				A7E010ED9790E15599D83589 /* WorkspaceController+GitFlow.swift */,
+			);
+			path = Shared;
+			sourceTree = "<group>";
+		};
+		F23F8E0205D449304D062BF5 /* MenuBar */ = {
+			isa = PBXGroup;
+			children = (
+				733B4B70F2EAE1560AAB417A /* DisplayMapPicker.swift */,
+				F44B8A9AF9026D530B937926 /* MenuBarPanelViews.swift */,
+				D0D4056CB7B1AE8F9853D380 /* UsageSettingsStore.swift */,
+				FA52CBC99D86632D92784C00 /* UsageStoreModel.swift */,
+			);
+			path = MenuBar;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		D6B978271F954ADCA1C151F7 /* SartoMac */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B7E01D589E8A389857653DEE /* Build configuration list for PBXNativeTarget "SartoMac" */;
+			buildPhases = (
+				88138F646E4693E9CEA622FE /* Sources */,
+				35EB9126D175315C10B4D10D /* Resources */,
+				7B271B5FEC60393F99CC792E /* Frameworks */,
+				7DB608E0A2C49847105A9C78 /* Stamp Dev Build Metadata */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = SartoMac;
+			packageProductDependencies = (
+				A8B6FC8E2C6EA5823D4A89E6 /* SartoProtocol */,
+				8D0FA523F53CA6B9A148E1E6 /* PrismDesign */,
+				DBE37E286112AB22555CDF89 /* UsageCore */,
+				7462ED9D68864A47AC0FD91E /* MenuBarKit */,
+				F08FC6CB50DD9D89491EC387 /* SartoUpdate */,
+			);
+			productName = SartoMac;
+			productReference = 1CD180FA8BFB1A9C52AB3614 /* SartoMac.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		B076738A39243C6D321FC65A /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					D6B978271F954ADCA1C151F7 = {
+						ProvisioningStyle = Manual;
+					};
+				};
+			};
+			buildConfigurationList = FA89B16E9DE45833466F928B /* Build configuration list for PBXProject "Sarto" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = B65EDF02E6BF72AC5380FDBC;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				377F848C2BF8E54DBC9C51B3 /* XCLocalSwiftPackageReference "Packages/PrismDesign" */,
+				4495704E7959D12E1C635CC9 /* XCLocalSwiftPackageReference "Packages/SartoProtocol" */,
+				67F57F45075F34A0E099E3C6 /* XCLocalSwiftPackageReference "Packages/SartoUpdate" */,
+				786640BFC414411DF766469F /* XCLocalSwiftPackageReference "Packages/UsageIslandKit" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 4443164B68D0C8F3646B7965 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				D6B978271F954ADCA1C151F7 /* SartoMac */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		35EB9126D175315C10B4D10D /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AF6DBD51E61D346A89C920CC /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		7DB608E0A2C49847105A9C78 /* Stamp Dev Build Metadata */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)",
+			);
+			name = "Stamp Dev Build Metadata";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -eu\nif [ \"${SARTO_PACKAGING:-0}\" = \"1\" ]; then\n  exit 0\nfi\nplist=\"${TARGET_BUILD_DIR}/${INFOPLIST_PATH}\"\nif [ ! -f \"$plist\" ]; then\n  exit 0\nfi\nbuild_no=\"$(date -u +%y%m%d%H%M%S)\"\nbase_ver=\"${MARKETING_VERSION:-0.0.0}\"\nfull_ver=\"${base_ver}-dev.${build_no}\"\ncommit=\"\"\nif command -v git >/dev/null 2>&1; then\n  sha=\"$(git -C \"${SRCROOT}/../..\" rev-parse --short=7 HEAD 2>/dev/null || true)\"\n  if [ -n \"$sha\" ]; then\n    if [ -n \"$(git -C \"${SRCROOT}/../..\" status --porcelain --untracked-files=no 2>/dev/null || true)\" ]; then\n      commit=\"${sha}-dirty\"\n    else\n      commit=\"${sha}\"\n    fi\n  fi\nfi\nset_plist() {\n  /usr/bin/plutil -replace \"$1\" -string \"$2\" \"$plist\"\n}\nset_plist CFBundleVersion \"$build_no\"\nset_plist SartoVersion \"$full_ver\"\nset_plist SartoBuildChannel \"dev\"\nset_plist SartoGitCommit \"$commit\"\n# Xcode signs the app after this phase only when its own inputs changed, so an app it signed\n# before is signed again here, or the new Info.plist would break its signature.\napp=\"${TARGET_BUILD_DIR}/${WRAPPER_NAME}\"\nif /usr/bin/codesign -d \"$app\" >/dev/null 2>&1; then\n  /usr/bin/codesign --force --timestamp=none \\\n    --sign \"${EXPANDED_CODE_SIGN_IDENTITY:-${CODE_SIGN_IDENTITY:--}}\" \\\n    --preserve-metadata=identifier,entitlements,requirements,flags,runtime \"$app\"\nfi\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		88138F646E4693E9CEA622FE /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				16A692DB09F289AFAE7C0DB4 /* AgentAvailability.swift in Sources */,
+				7D5018586192D9CBE8E65EF7 /* AgentInstallSheet.swift in Sources */,
+				954AF266491D75E0EA2D3D9F /* AgentRPGCharacterPopover.swift in Sources */,
+				A15BC0133B58D26CA8B2E1A8 /* AgentRPGModels.swift in Sources */,
+				DF919AB9AC36E48BD460B978 /* AgentRPGStore.swift in Sources */,
+				8AB4C7A5963A0464CFDF2764 /* AppIconManager.swift in Sources */,
+				5B42EF668C5ADFD683A0591F /* ComposerAttachments.swift in Sources */,
+				9508E55FFEF66943F14B7BE5 /* ComposerOverlaysAndPreviews.swift in Sources */,
+				6B32471E3271593A149275C2 /* ComposerPopoversView.swift in Sources */,
+				BFCF7CB00EA122739F9B52C4 /* ComposerTextEditor.swift in Sources */,
+				2E0C3459373EF01F21A18F6A /* DaemonManager.swift in Sources */,
+				D01FCED31CD392A68AE16A95 /* DaemonRuntime.swift in Sources */,
+				D9CF872CAB78B4AF9D7D2E12 /* DisplayMapPicker.swift in Sources */,
+				F9856275D611EC9FD300670B /* FileDownload.swift in Sources */,
+				7F1A0DD5EC9599986F4C584D /* GitFlowViews.swift in Sources */,
+				5CF281ECBC24026BF24A428C /* GlobalSessionSearchSheet.swift in Sources */,
+				A6407B1050B32003A9EACB26 /* ImportCLISessionsSheet.swift in Sources */,
+				D3E49CE373C2E2E81F39A5B3 /* IslandAssets.swift in Sources */,
+				F1B7EFFD66CABBCB0E261DF6 /* IslandController.swift in Sources */,
+				A98036750192A71459F20C63 /* IslandCoordinator.swift in Sources */,
+				98A07F97597C47985446E12C /* IslandLocalization.swift in Sources */,
+				9E2F70A1994BC4DED337F8AB /* IslandModels.swift in Sources */,
+				A34A9999A6AD4548AF67D2D3 /* IslandProjection.swift in Sources */,
+				43A48D6EB849B755BF6940E6 /* IslandSignals.swift in Sources */,
+				E50502C9907BC3C83D72A16F /* IslandUsageViews.swift in Sources */,
+				2DA7D03E3F52328BAA78FE5A /* IslandViews.swift in Sources */,
+				61B394BD6EDA67D5D81F69D2 /* MacSidebarView.swift in Sources */,
+				38E975FA1D7E0C8D9B92E7A9 /* MacWorkbenchView.swift in Sources */,
+				903625ACFC070358C073B5CE /* MenuBarPanelViews.swift in Sources */,
+				0B75F77CDF798A622E1F92B3 /* NewSessionSheet.swift in Sources */,
+				6054F04722CD4A7578B03989 /* NewSessionStageView.swift in Sources */,
+				C4F3201A9EEED7035841FD28 /* PrismBrowserEngine.swift in Sources */,
+				C80EB2BA65065A37E796A618 /* PrismBrowserPaneView.swift in Sources */,
+				E9E4CCECAB66A158884B60AC /* PrismDeviceController.swift in Sources */,
+				811DDDECD257C9011C324844 /* PrismPreviewStageView.swift in Sources */,
+				1AE2BA7ACC8BE28D483607CF /* PrismSettingsRouter.swift in Sources */,
+				8A7C6FBED1C4484DC4C4EFC9 /* PrismSettingsWindowView.swift in Sources */,
+				D266A74415ADB63D29BEBCD1 /* ProblemReportCoordinator.swift in Sources */,
+				0297F6925F4EFC139718B504 /* ProblemReportSheetView.swift in Sources */,
+				E8E925A5A256B6B7B5D97B9D /* QuitCountdown.swift in Sources */,
+				D209E04550A00A942EEA3F01 /* RunningSessionsRail.swift in Sources */,
+				32BB0F3CE7E3A1607FD12EE5 /* SartoAppPaths.swift in Sources */,
+				B2FFF932DB8D22DF0BEBD940 /* SartoMacApp.swift in Sources */,
+				5B10054F5ABEF726B43867BE /* SartoState+AgentAvailability.swift in Sources */,
+				F32E69A32A44071ED8DE5BF3 /* SartoState+MultiHost.swift in Sources */,
+				7CA9E3524D365CD66430EDAE /* SartoState.swift in Sources */,
+				E92893E2BCD51CC09577B2B2 /* SartoUpdater.swift in Sources */,
+				5915C1703CCD8B3E87B2082E /* SessionMarkdownExporter.swift in Sources */,
+				C9F964095CFE35448DD050FA /* SessionOverlayViews.swift in Sources */,
+				8FA9BA0C168259B14439B2D9 /* SessionThreadView.swift in Sources */,
+				7F949A9117763C4B079D0C70 /* SettingsClientSectionsView.swift in Sources */,
+				5453E816E88EB4552BFAE04C /* SettingsExtensionsSectionView.swift in Sources */,
+				FD65351FCECE058F13196250 /* SettingsHostSectionsView.swift in Sources */,
+				EB76CED5658DF26EABFE0D28 /* SettingsNetworkAndSystemView.swift in Sources */,
+				07ECB6489628855792DF74D9 /* SidebarTreeModel.swift in Sources */,
+				F00E6F448C8232D9AE584AFB /* SyncApprovalPanelController.swift in Sources */,
+				3E78179362D653E9D48FDC05 /* ThreadEntryCardsView.swift in Sources */,
+				54681CF48E18C0017AC97EB6 /* ThreadRichContentViews.swift in Sources */,
+				1D6F9737EB949294ECD6127E /* ThreadTimelineModel.swift in Sources */,
+				115170A3CDDA9AE75F9E9C31 /* UpdateInstallFlow.swift in Sources */,
+				6E48ABB1076EDF73F2D64DF4 /* UpdatesSettingsView.swift in Sources */,
+				6ACDBD5D8F4008CB8D6C2A7F /* UsageSettingsStore.swift in Sources */,
+				794531FE02C80B2CCD06F057 /* UsageStoreModel.swift in Sources */,
+				862DEB2C3C1DD13E4F45EFC3 /* WorkbenchPanes.swift in Sources */,
+				ACFD06FCC8D0113D8F97BADD /* WorkspaceController+GitFlow.swift in Sources */,
+				ACBEFFF07263BC2FA9E2947D /* WorkspaceController.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		20DFDB0205CB41A9CEE9D9F1 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 4;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 0.3.2;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SARTO_BUILD_CHANNEL = "";
+				SARTO_GIT_COMMIT = "";
+				SARTO_VERSION = "";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		60DB07F97742F68101DB0500 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = macOS/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Sarto;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_LSMultipleInstancesProhibited = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = dev.sarto.mac;
+				PRODUCT_NAME = Sarto;
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		A6C5F6DB93A9D1F7278A9FD1 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = macOS/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Sarto;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_LSMultipleInstancesProhibited = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = dev.sarto.mac;
+				PRODUCT_NAME = Sarto;
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+		F0DFDE51F9532064C1BFFE4C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 4;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 0.3.2;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SARTO_BUILD_CHANNEL = "";
+				SARTO_GIT_COMMIT = "";
+				SARTO_VERSION = "";
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		B7E01D589E8A389857653DEE /* Build configuration list for PBXNativeTarget "SartoMac" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A6C5F6DB93A9D1F7278A9FD1 /* Debug */,
+				60DB07F97742F68101DB0500 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		FA89B16E9DE45833466F928B /* Build configuration list for PBXProject "Sarto" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				20DFDB0205CB41A9CEE9D9F1 /* Debug */,
+				F0DFDE51F9532064C1BFFE4C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		377F848C2BF8E54DBC9C51B3 /* XCLocalSwiftPackageReference "Packages/PrismDesign" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/PrismDesign;
+		};
+		4495704E7959D12E1C635CC9 /* XCLocalSwiftPackageReference "Packages/SartoProtocol" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/SartoProtocol;
+		};
+		67F57F45075F34A0E099E3C6 /* XCLocalSwiftPackageReference "Packages/SartoUpdate" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/SartoUpdate;
+		};
+		786640BFC414411DF766469F /* XCLocalSwiftPackageReference "Packages/UsageIslandKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/UsageIslandKit;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		7462ED9D68864A47AC0FD91E /* MenuBarKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MenuBarKit;
+		};
+		8D0FA523F53CA6B9A148E1E6 /* PrismDesign */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = PrismDesign;
+		};
+		A8B6FC8E2C6EA5823D4A89E6 /* SartoProtocol */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = SartoProtocol;
+		};
+		DBE37E286112AB22555CDF89 /* UsageCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = UsageCore;
+		};
+		F08FC6CB50DD9D89491EC387 /* SartoUpdate */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = SartoUpdate;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = B076738A39243C6D321FC65A /* Project object */;
+}

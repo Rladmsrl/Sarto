@@ -1,0 +1,2165 @@
+// The contract between the renderer and the agent host, over the agent host port.
+
+import type { CodebuddyShellOverride, CodebuddySite, PromptCacheTtl } from './agents'
+import type { CompactUnit } from './auto-compact'
+import type { DeviceAccessDecision } from './device-agent'
+import type {
+  BrowserCallAnswer,
+  BrowserDeviceCall,
+  BrowserOriginAnswer,
+  BrowserOriginDecision,
+} from './browser'
+import type { ComputerAppDecision } from './computer-use'
+import type { ControlOutcome, SurfaceAccessDecision } from './control'
+import type { ContextBreakdown, ContextEstimates } from './context'
+import type {
+  DeviceFileContent,
+  FileContent,
+  FileList,
+  FileSearch,
+  FileWritten,
+  FolderList,
+} from './files'
+import type { BackgroundWork } from './host-control'
+import type { HostLoad, HostLoadWatch } from './host-load'
+import type { IdleReleaseState } from './idle-release'
+import type {
+  ConnectStart,
+  InstalledPlugin,
+  MarketCatalog,
+  MarketConnection,
+  MarketConnections,
+  MarketKeyState,
+  MarketPlugins,
+  MarketSearch,
+  MarketSkill,
+  MarketSkillRepository,
+  MarketSkills,
+  McpOAuth,
+  PluginDetails,
+  PluginLogo,
+  PluginMarketplace,
+  PluginScope,
+  SkillSource,
+} from './marketplace'
+import type { MediaAuthorization, MediaOpenResult } from './media'
+import type { ModelRequestRaw, ModelRequestsOverview, ModelRequestsPage } from './model-requests'
+import type {
+  MemoryDecision,
+  MemoryDraft,
+  MemoryEntry,
+  MemoryImportResult,
+  MemoryImportScan,
+  MemoryOverview,
+  MemoryScope,
+} from './memory'
+import type {
+  BranchList,
+  ChangedFile,
+  CommitDetails,
+  FileDiff,
+  GitOperation,
+  GitStatus,
+  GitTools,
+  IssueLookup,
+  LogCommit,
+  PullRequest,
+  PullRequestState,
+  ProjectWorktreeSettings,
+  RepositoryVisibility,
+  SessionWorktree,
+  WorktreeInspection,
+} from './git'
+import type { PortConnectionState } from './port-rpc'
+import type {
+  ModelHostRef,
+  RemoteClaudeActiveRun,
+  RemoteClaudeClosedEvent,
+  RemoteClaudeHostInfo,
+  RemoteClaudeMcpAnswer,
+  RemoteClaudeMcpCall,
+  RemoteClaudeOpenParams,
+  RemoteClaudeOpenResult,
+  RemoteClaudeOutputEvent,
+  RemoteClaudePermissionAnswer,
+  RemoteClaudePermissionRequest,
+  RemoteClaudePromptParams,
+  RemoteClaudePromptResult,
+  RemoteClaudeSetConfigParams,
+  RemoteClaudeStatus,
+} from './remote-claude'
+import type { PathCompletion } from './remote/host-admin'
+import type { ReportOrigin } from './report'
+import type { AgentColor } from './settings'
+import type { SettingsSection } from './settings-catalog'
+import type { TurnPhase } from './turn-phase'
+import type {
+  ClockRequest,
+  UsageOverview,
+  UsageScope,
+  UsageStatus,
+  UsageSummary,
+  UsageTotal,
+} from './usage'
+import type { WorkFact } from './work-facts'
+import type {
+  AgentId,
+  HarnessId,
+  Attachment,
+  ConfigOption,
+  DigestedPage,
+  DigestedSnapshot,
+  OlderPage,
+  PatchBatch,
+  PlanItem,
+  PromptCache,
+  QueuedComments,
+  ProjectHooksDecision,
+  ProjectMcpDecision,
+  ProblemReportOutcome,
+  QuestionAnswer,
+  FormValues,
+  SessionSnapshot,
+  SessionStatus,
+  SlashCommand,
+  StopReason,
+  ThreadEntry,
+  ToolKind,
+  UserContent,
+} from './thread'
+
+export interface AttachmentBytes {
+  mimeType: string
+  bytes: ArrayBuffer
+}
+
+export interface AgentAccount {
+  kind: 'account' | 'api_key' | 'external' | 'gateway' | 'none'
+  label: string // "Claude Max", "ChatGPT Plus", "Anthropic API key"
+  email: string | null
+  /** The subscription's multiple of the base plan, such as "5x" of Claude Max; absent when unknown. */
+  tier?: string
+}
+
+export interface PlanLimit {
+  window: 'five_hour' | 'seven_day' | 'seven_day_opus' | 'seven_day_sonnet' | (string & {})
+  label: string // "5-hour", "Weekly", "Weekly · Opus"
+  usedPercent: number | null
+  resetsAt: number | null
+  state: 'ok' | 'warning' | 'reached' // from `status`: allowed, allowed_warning, rejected
+  observedAt: number
+  amount?: { used: number; total: number; unit: string }
+  /**
+   * The models a group's window counts, by the names the agent gives them, such as Antigravity's
+   * "Gemini 3.8 Flash"; absent for a window that counts the whole plan.
+   */
+  models?: string[]
+  /**
+   * Set while extra usage covers this used-up window: the plan refuses requests and extra usage
+   * lets them through. It ends with an event that says extra usage is not in use, when the window
+   * resets, or when a read shows it not used up.
+   */
+  extraUsage?: true
+}
+
+/** The rate-limit reset credits an account holds: spending one restarts its windows at once. */
+export interface PlanResets {
+  count: number
+  /**
+   * Each credit and when it runs out, null for never: the soonest first, those that never run out
+   * last. Absent when only the number could be read, so the expiries are unknown.
+   */
+  each?: { id: string; until: number | null }[]
+  observedAt: number
+}
+
+/** Why the last read of the reset credits fell short: the sign-in, their details, or the read. */
+export type ResetsError = 'sign-in-expired' | 'details' | 'failed'
+
+/** The vendor's answer to spending a reset credit; only `reset` started the windows again. */
+export type ResetSpendCode = 'reset' | 'nothing_to_reset' | 'no_credit' | 'already_redeemed'
+
+export type LimitsReason =
+  | 'vendor-disallows'
+  | 'harness-does-not-offer'
+  | 'administrator-managed'
+  | 'model-provider-managed'
+  | 'not-yet-supported'
+  // Signed in with an API key or a cloud project, whose use the provider's console shows.
+  | 'console-managed'
+
+export interface ProviderBalance {
+  label: string
+  amount: number
+  currency: string
+}
+
+export interface AgentProvider {
+  id: string
+  name: string
+  methods: { type: 'key' | 'oauth' | 'command' | 'external' | 'env'; label: string }[]
+  accounts: {
+    id: string | null
+    label: string
+    method: 'key' | 'oauth' | 'external' | 'env'
+    needsAuth: boolean
+    active?: boolean
+  }[]
+  loginCommand: string
+  usage: {
+    state: 'ready' | 'unsupported' | 'error'
+    limits: PlanLimit[]
+    balances: ProviderBalance[]
+    observedAt: number
+    error: string | null
+  } | null
+}
+
+/** A provider an agent lists models from, as the agent names it, and how many it lists. */
+export interface ModelProvider {
+  id: string
+  models: number
+}
+
+export interface AgentProviderAction {
+  agentId: AgentId
+  providerId: string
+  action: 'logout' | 'activate' | 'set-key'
+  credentialId?: string
+  key?: string
+}
+
+/** A user message in the message outline: its first line and the title a model wrote, if any. */
+export interface OutlineEntry {
+  pos: number
+  entryId: string
+  text: string
+  title: string | null
+}
+
+export interface OutlineTitle {
+  pos: number
+  title: string
+}
+
+/** The latest message of a session that holds every word of a search. */
+export interface ConversationHit {
+  sessionId: string
+  pos: number
+  entryId: string
+  role: 'user' | 'agent'
+  /** The message's text around the first match, on one line and cut at both ends. */
+  snippet: string
+  /** How many of the session's messages hold every word; absent from hosts before it was sent. */
+  matches?: number
+}
+
+/** A message of one session that holds every word of a search in it. */
+export interface SessionFindMatch {
+  pos: number
+  entryId: string
+  role: 'user' | 'agent'
+}
+
+/** The search index is still being built: sessions done of those it started with. */
+export interface SearchIndexing {
+  done: number
+  total: number
+}
+
+export type { ContextBreakdown, ContextList } from './context'
+
+export type AgentState =
+  | 'not-installed'
+  | 'node-missing'
+  | 'node-outdated'
+  | 'available'
+  | 'installing'
+  | 'starting'
+  | 'ready'
+  | 'stopping'
+  | 'failed'
+
+export interface AgentAuthMethod {
+  id: string
+  name: string
+  description?: string
+  type: 'agent' | 'terminal' | 'env'
+  envVars?: { name: string; optional: boolean; set: boolean }[]
+  command?: string // for terminal methods: the agent's named command or its launch, quoted
+  // For agent methods: hands its sign-in page to the client that asked, which opens it there.
+  delegated?: boolean
+}
+
+/** A newer adapter or CLI than the installed one, found by `agents.checkUpdates`. */
+export interface AgentUpdate {
+  adapterVersion: string // the adapter version a fresh install takes
+  cliVersion: string | null // the CLI that install carries, such as Claude Code or Codex
+}
+
+/** An install or update Sarto runs for an agent at the user's request. */
+export interface AgentTask {
+  kind: 'install' | 'update'
+  state: 'running' | 'failed'
+  command: string // what runs, quoted for the platform
+  method: ProgramMethod | null // the route a binary agent's install or a program's update took
+  progress: string[] // the latest output lines
+  error: string | null // why it failed, in the user's terms
+}
+
+/**
+ * Why Sarto's own install of a harness moved to another version: the ACP Registry lists it, Sarto's
+ * compatibility manifest recommends it, the manifest says the one before does not work, or this
+ * build of Sarto bundles it.
+ */
+export type VersionMoveReason = 'registry' | 'manifest' | 'broken' | 'bundled'
+
+/** The user's own program a start runs, such as Claude Code's or Codex's CLI. */
+export interface AgentCli {
+  command: string // looked up on PATH, such as claude
+  installed: InstalledCli | null // null: none found
+  // How it was installed, read from where it lives; null when Sarto cannot tell.
+  method: ProgramMethod | null
+  // A newer version, from the daily check, and the command that updates it the way it was
+  // installed; null when up to date, unchecked, or the way is unknown.
+  update: { version: string; command: string } | null
+  // Whether its newer versions can be read, by how it was installed; absent on older hosts.
+  checkable?: boolean
+}
+
+export interface InstalledCli {
+  path: string // as the adapter runs it, after resolving shims
+  version: string | null
+  variable: string | null // set by this variable in the environment, which then decides alone
+  problem: InstalledCliProblem | null // why it cannot run
+}
+
+export type InstalledCliProblem =
+  | { kind: 'unsupported' } // cannot run without a shell
+  | { kind: 'failed'; reason: string } // its version could not be read
+  | { kind: 'too-old'; minimum: string }
+
+/**
+ * Why detection found that a harness cannot run. `needs-node` carries the harness's own minimum
+ * (null when it names none) and the version found (null when none was, or `unreadable` when
+ * `node --version` did not answer); `needs-uv` the same for uv; `too-old` the user's program's;
+ * `cannot-run` says why in the user's terms; `no-version` is no version for this computer.
+ */
+export type HarnessReason =
+  | { kind: 'not-installed' }
+  | { kind: 'needs-node'; minimum: string | null; installed: string | null; unreadable?: true }
+  | { kind: 'needs-npm' }
+  | { kind: 'needs-uv'; minimum: string | null; installed: string | null }
+  | { kind: 'too-old'; minimum: string; installed: string | null }
+  | { kind: 'cannot-run'; why: string }
+  | { kind: 'no-version' }
+
+/**
+ * Why the user's own program of a harness Sarto also installs does not run: its version is outside
+ * `range`, the npm range of versions Sarto runs; Sarto's compatibility manifest says it does not
+ * work; or it cannot be run or asked its version (`detail`, in the user's terms).
+ */
+export type UnusedProgramReason =
+  { kind: 'range'; range: string } | { kind: 'manifest' } | { kind: 'unusable'; detail: string }
+
+/** A way Sarto can install a harness's program, such as OpenCode, in the order it prefers them. */
+export interface AgentInstallMethod {
+  id: 'brew' | 'npm' | 'script' | 'archive'
+  label: string // what the page shows for the route: its command, or the archive's file name
+  command: string // quoted for the platform, as the page shows it
+  available: boolean // the tool it needs was found on the agent environment's PATH
+}
+
+/**
+ * How the user's own program was installed: a route Sarto installs by, or a global install of
+ * another package manager, which updates and removes it with its own commands.
+ */
+export type ProgramMethod = AgentInstallMethod['id'] | 'pnpm' | 'bun' | 'yarn'
+
+/**
+ * Where an install downloads from: the npm registry the user's npm configuration names for the
+ * package (null when it could not be read), a release file the ACP Registry lists at its vendor's
+ * address, the vendor's own address, Homebrew, or PyPI through uv.
+ */
+export type InstallSource =
+  | { kind: 'npm'; registry: string | null }
+  | { kind: 'registry'; url: string }
+  | { kind: 'vendor'; url: string }
+  | { kind: 'brew' }
+  | { kind: 'pypi' }
+
+/** Something an install needs on the computer, and whether it is there. */
+export type InstallNeed =
+  // `minimum` is the harness's own, such as 22.19.0; `found` the version on PATH.
+  | { kind: 'node'; minimum: string | null; found: string | null; ok: boolean }
+  | { kind: 'npm'; ok: boolean }
+  | { kind: 'uv'; ok: boolean }
+
+/** What one way of installing a harness brings, which the install window shows before it runs. */
+export interface InstallDetails {
+  /** An npm or uvx package or a release archive, by name; a vendor's command, which its route holds. */
+  what: { kind: 'npm' | 'uvx' | 'archive'; name: string } | { kind: 'command' }
+  /** The version it installs; null where the vendor's route takes its newest. */
+  version: string | null
+  source: InstallSource
+  /** The folder it goes into; null where the route does not say, as for uv's cache or WinGet. */
+  folder: string | null
+  /** In bytes, when known; `packageOnly` when the package's dependencies are not counted. */
+  size: { bytes: number; packageOnly: boolean } | null
+  needs: InstallNeed[]
+}
+
+/** A way the install window offers to install a harness. */
+export interface InstallRoute {
+  /**
+   * `copy` is Sarto's own install of the harness's npm or uvx package, which `agents.install` takes
+   * without a method; the others are its methods.
+   */
+  id: 'copy' | AgentInstallMethod['id']
+  /** The command it runs, or the archive's address, quoted for the platform; null for `copy`. */
+  command: string | null
+  /** The tool it runs with was found on the agent environment's PATH. */
+  available: boolean
+  /** Nothing installs now: uv fetches a uvx package the first time a session starts. */
+  firstStart?: true
+  details: InstallDetails
+}
+
+/** The ways to install a harness, the recommended first. */
+export interface InstallOffer {
+  routes: InstallRoute[]
+  /** The vendor's install page; absent when it has none, and on older hosts. */
+  guide?: string
+}
+
+export interface AgentStatus {
+  id: AgentId
+  name: string // the agent's: the harness's own for its default agent
+  harnessId: HarnessId
+  harnessName: string
+  isDefault: boolean
+  registered?: boolean // absent on older hosts; catalog entries are not necessarily agents
+  uninstalled?: boolean // removed from Sarto; Install brings it back
+  /** The command that removes the user's own program, when its install route has one. */
+  uninstallCommand?: string | null
+  hidden: boolean // a default agent hidden from the agent menu
+  disabled?: boolean // turned off in Settings: never starts; absent on older hosts
+  color?: AgentColor // an added agent's dot on its mark; absent for a harness's default agent
+  // Whether Sarto handed this agent's harness an API key; null for a harness that takes none.
+  apiKey: { set: boolean; providers: boolean } | null
+  state: AgentState
+  // From `initialize`, a binary agent's `--version`, or the `requires` program's (Pi's `pi`); for
+  // Sarto's own install of a program that reports none, the release it installed.
+  version: string | null
+  // The adapter a start runs, the version it wants until one is installed; `isCli` for a package
+  // that is the agent's CLI itself, which runs with no adapter, and `isSdk` for the agent's SDK,
+  // which Sarto loads itself and which runs the agent's CLI.
+  package: {
+    name: string
+    version: string
+    installed: boolean
+    isCli?: true
+    isSdk?: true
+  } | null
+  // Sarto's own install that a start runs, a release archive or a uvx package, and its version;
+  // `registry` when the ACP Registry lists its updates. Null while the user's own program runs or
+  // nothing is installed, and absent on older hosts.
+  release?: { version: string; registry: boolean } | null
+  signIn: 'unknown' | 'signed-in' | 'required'
+  authMethods: AgentAuthMethod[]
+  canLogout: boolean
+  account: AgentAccount | null // what the agent reports through `_auth/status_update`
+  providers?: AgentProvider[]
+  providersError?: string | null
+  /**
+   * The providers a harness that signs in to each one itself has models from, as it names them,
+   * with how many models each lists (Pi); null until it first listed them, absent for the others
+   * and on older hosts.
+   */
+  modelProviders?: ModelProvider[] | null
+  /** A harness's balance at its vendor, read on its own: DeepSeek Harness's API key or account. */
+  balance?: AgentProvider['usage']
+  balances?: ProviderBalance[]
+  limitsReason?: LimitsReason
+  /** Its sign-in and session history are shared with the vendor's own apps (Antigravity). */
+  sharesSignIn?: boolean
+  /**
+   * Accounts its vendor moved to another harness: that harness, who this one is still for, and
+   * whether the agent refused its signed-in account as one of them (Gemini CLI to Antigravity).
+   */
+  movedAccounts?: { to: HarnessId; audience: string; refused: boolean }
+  limits: PlanLimit[] // subscription windows, see plan limits in the session model
+  limitsError?: string // why the last limits read failed, until one succeeds; `limits` stay
+  /** Codex's reset credits on a ChatGPT sign-in; absent when none were read or it holds none. */
+  resets?: PlanResets
+  resetsError?: ResetsError
+  detail: string | null // install hint or error message
+  // Why it cannot run while `state` is `not-installed`, `node-missing` or `node-outdated`; null
+  // otherwise, and absent on older hosts, which say it in `detail` alone.
+  reason?: HarnessReason | null
+  installUrl: string | null
+  installNotice?: string | null // the vendor installer's effects, shown before installation
+  progress: string[] // latest npm output or stderr lines while installing or starting
+  launchCommand: string // as shown in Settings › Agents, quoted for the platform
+  binaryOverride: string | null // the program picked in Settings, if any
+  binaryCommand: string | null // the command a binary agent's launch runs; null for the others
+  // The harness's program as its page names it, which one picked in Settings replaces; `onPath`
+  // when Sarto looks for the user's own on PATH first. Null for a harness that runs none of its
+  // own, and absent on older hosts.
+  program?: { command: string; onPath: boolean } | null
+  // The user's own program of a harness Sarto installs too, found but not run, and why: Sarto's
+  // own install runs instead, or Install is offered. Null when there is none, and absent on older
+  // hosts.
+  unusedProgram?: {
+    command: string
+    path: string
+    version: string | null
+    why: UnusedProgramReason
+  } | null
+  // Where that program was found: on PATH, the one picked in Settings or Sarto's install; null
+  // while none was, and for the others.
+  binaryPath?: string | null
+  update: AgentUpdate | null // from the last update check; null when up to date or unchecked
+  // When that check finished; null for a binary agent unless Sarto installed it from the registry
+  updateCheckedAt: number | null
+  // How Sarto's own install of a harness follows the version it is given, from the ACP Registry or
+  // Sarto's compatibility manifest (`follows`): whether it updates by itself, its last move, when
+  // and why (`withdrawn` when it went back to an older version), whether the update on offer
+  // goes back to an older version, and why, and whether it is an archive without a SHA-256 for
+  // this platform (`noChecksum`), which only installs by hand. Null for the other harnesses, and
+  // absent on older hosts; `follows`, the reasons and `noChecksum` are absent on older hosts too.
+  automatic?: {
+    on: boolean
+    moved: {
+      from: string
+      to: string
+      at: number
+      withdrawn: boolean
+      reason?: VersionMoveReason
+    } | null
+    back: boolean
+    backReason?: VersionMoveReason
+    follows?: 'registry' | 'sarto'
+    noChecksum?: true
+  } | null
+  // The user's own program is a version Sarto's compatibility manifest says does not work:
+  // `broken` when it names it, else it is outside `supported`; `recommended` is the version Sarto
+  // checked last. Null when it is fine or not known, and absent on older hosts.
+  versionWarning?: {
+    version: string
+    broken: boolean
+    supported: string | null
+    recommended: string | null
+  } | null
+  // A new version of Sarto's own install that failed to start, why, and the version that runs in
+  // its place; null when none did, and absent on older hosts.
+  failedVersion?: { version: string; reason: string; runs: string | null } | null
+  updateSkipped: boolean // the user dismissed this update in the sidebar's notice
+  task: AgentTask | null
+  installMethods: AgentInstallMethod[] // a binary agent's ways to install; empty for the others
+  cli: AgentCli | null // the user's own program a harness runs; null for the others
+  // The configuration folder a start uses and the one the running process uses (null while none
+  // runs); null for an agent whose folder cannot be chosen. `created`: Sarto made it.
+  configDir: { runs: string; active: string | null; created: boolean } | null
+  // Whether a start gets Sarto's MCP server, and whether the running process got it (null
+  // while none runs).
+  sartoServer: { runs: boolean; active: boolean | null }
+  capabilities: {
+    loadSession: boolean
+    listSessions: boolean
+    resumeSession: boolean
+    closeSession: boolean
+    deleteSession: boolean
+    forkSession: boolean
+    forkAtMessage: boolean // `session/fork` up to a message, through the adapters' fork point
+    additionalDirectories?: boolean // ACP `additionalDirectories` on session lifecycle requests
+    steering: boolean // `_session/steering` into a running turn
+    rewind?: boolean // cuts a session's conversation before a turn, for an edit from a message
+    rewindFiles?: boolean // that cut also takes back the files the agent changed since
+    reports: boolean // plan limits from its own report (`/usage`, `/status`)
+    context: boolean // what fills the context from its own report (`/context`)
+    liveContext: boolean // what fills the context from its connection through a running turn
+    contextEstimates?: boolean
+    account: boolean // names its account through `_auth/status_update` as it starts
+    authStatus?: boolean // supports ACP's draft `auth/status`
+    mcpHttp: boolean | null // MCP servers over HTTP: from `initialize` or the one remembered
+    prompt: PromptCapabilities | null // what a prompt may carry; null until the agent has started
+  }
+}
+
+/** ACP's `promptCapabilities`: the content a prompt may carry besides text and links. */
+export interface PromptCapabilities {
+  image: boolean
+  audio: boolean
+  embeddedContext: boolean
+}
+
+/**
+ * What New session shows for an agent before a session exists, since ACP lists the options only in
+ * answer to `session/new`. See config options in the session model.
+ */
+export interface AgentOptions {
+  agentId: AgentId
+  config: ConfigOption[] // from the agent's last `session/new`, at the agent's own values
+  levels: Record<string, ConfigOption> // the `thought_level` option each model offered, by model
+  remembered: Record<string, string | boolean> // the user's last values, by option id
+  // The agent's own values in each folder, by `pathKey`, as its last `session/new` there gave them.
+  defaults?: Record<string, Record<string, string | boolean>>
+  observedAt: number
+  provisional?: boolean // from a loaded or resumed session, so not the agent's own defaults
+  // The models the user pinned to the top of its model menu, by value, in the order pinned.
+  pinned?: string[]
+  // The models its sessions last started on or switched to, by value, the latest first.
+  recent?: string[]
+  // The permission mode its new sessions start in, from the host's settings: sent with the
+  // options, never stored with them.
+  startMode?: string
+}
+
+/** How many models an agent's model menu may have pinned, all of them in its main list. */
+export const MAX_PINNED_MODELS = 4
+/** How many of an agent's recently used models the host keeps. */
+export const MAX_RECENT_MODELS = 8
+
+/** An agent's page in Settings › Agents: what its status leaves out, read when the page opens. */
+export interface AgentDetails {
+  /** The CLI an adapter runs, such as Claude Code inside its ACP adapter; null for the others. */
+  cliVersion: string | null
+  config: AgentConfigItem[]
+}
+
+/** One model's row of a Claude Code agent's auto-compact window setting. */
+export interface ClaudeCompactRow {
+  /** The model id as the settings file keys it, without a date or a context suffix. */
+  model: string
+  /** The name the agent lists it by; null for a model only the file names. */
+  name: string | null
+  /** The window in tokens the file saves for it; null when it saves none, so Claude Code picks. */
+  window: number | null
+}
+
+/** The two settings a Claude Code agent's page edits, as its user settings file holds them. */
+export interface ClaudeSettings {
+  /** The window the file saves for every model without a row of its own; null when it has none. */
+  defaultWindow: number | null
+  compact: ClaudeCompactRow[]
+  /** The file's `promptCacheTtl`; null when it has none. */
+  promptCacheTtl: PromptCacheTtl | null
+}
+
+/** One change to those settings; a null value removes the key, and a null model means all. */
+export type ClaudeSettingChange =
+  | { setting: 'autoCompactWindow'; model: string | null; value: number | null }
+  | { setting: 'promptCacheTtl'; value: PromptCacheTtl | null }
+
+/** One model's row of an agent's auto-compact setting. */
+export interface AutoCompactRow {
+  /** The model as the harness's file keys it. */
+  model: string
+  /** The name the agent lists it by; null for a model only the file names. */
+  name: string | null
+  /** The value in the setting's unit; null when the file holds none, so the harness picks. */
+  value: number | null
+  /** What the file holds when it is no number of the unit, shown as written. */
+  other: string | null
+}
+
+/** When an agent's harness compacts on its own, as its configuration holds it, in its own unit. */
+export interface AutoCompactSettings {
+  unit: CompactUnit
+  /** The range a value is written in: tokens, or a whole percent for `percent`. */
+  min: number
+  max: number
+  /** The value for every model without a row of its own; null when none is set. */
+  all: number | null
+  allOther: string | null
+  /** A row per model for a harness that sets one per model; null when it sets one for all. */
+  models: AutoCompactRow[] | null
+  /** The file the value is kept in; null when the harness writes its own configuration. */
+  file: string | null
+}
+
+/** One change; a null value removes the key, so the harness picks, and a null model means all. */
+export interface AutoCompactChange {
+  model: string | null
+  value: number | null
+}
+
+/** What a Codebuddy Code agent's page edits in its settings file, and what overrides it. */
+export interface CodebuddySettings {
+  /**
+   * The site the file names; `automatic` when it names none, so the agent follows its sign-in,
+   * and `other` for a deployment Settings does not offer, whose value is `otherSite`.
+   */
+  site: CodebuddySite | 'automatic' | 'other'
+  otherSite: string | null
+  /** Shell variables set where the agent runs that win over these settings. */
+  shellOverrides: CodebuddyShellOverride[]
+}
+
+/** The site to write; `automatic` removes the key. */
+export type CodebuddySiteChange = { site: CodebuddySite | 'automatic' }
+
+/** A place the agent reads its own configuration from, in the order Settings lists them. */
+export interface AgentConfigItem {
+  id: 'folder' | 'settings' | 'instructions'
+  path: string
+  exists: boolean
+  env: string | null // the variable that moved it, such as CLAUDE_CONFIG_DIR; null at the default
+  chosen: boolean // the agent's own folder, set by Sarto, whose env is then null
+}
+
+/** The groups Sarto's own tools are listed in, on its server's page in the Marketplace. */
+export type McpToolGroup =
+  'sessions' | 'browser' | 'computer' | 'devices' | 'terminal' | 'memory' | 'reports' | 'settings'
+
+export interface McpToolSummary {
+  name: string
+  description: string
+  group: McpToolGroup
+  /** It waits for the user's answer in the session before it acts. */
+  asks: boolean
+}
+
+/** For Marketplace › Installed: Sarto's own server, and where each agent keeps its own servers. */
+export interface McpStatus {
+  servers: {
+    name: string // as agents know it: sarto
+    title: string // Sarto
+    builtIn: boolean // Sarto's own; the only server today
+    running: boolean // it listens on 127.0.0.1
+    error: string | null // why it does not, from its last try
+    tools: McpToolSummary[] // as tools/list answers them, first sentence each
+  }[]
+  places: {
+    agentId: AgentId // each agent that keeps MCP servers of its own in a file, in catalog order
+    path: string // that file, found as the agent finds it
+    exists: boolean
+    env: string | null // the variable that moved it, such as CLAUDE_CONFIG_DIR; null at the default
+    chosen: boolean // in the agent's own folder, set by Sarto, whose env is then null
+    project: string // a project's own file, relative to its folder, such as .mcp.json
+    listCommand: string | null // what lists them with their status in a session, /mcp, or null
+  }[]
+}
+
+/** Where the agent environment came from, for Settings › Agents. */
+export interface EnvironmentInfo {
+  source: 'pending' | 'login-shell' | 'inherited' | 'fallback'
+  shell: string | null
+  resolvedAt: number | null
+  durationMs: number | null
+  warning: string | null // why it fell back, or a note such as the Windows PATH hint
+  nodeVersion: string | null
+  npmPath: string | null
+}
+
+export interface Project {
+  path: string
+  name: string
+  missing: boolean // the folder no longer exists
+  lastOpenedAt: number
+  pinnedAt?: number | null // absent on hosts that do not support project pins
+  // Its place in the host's order: null until the user moves a project there, absent on hosts
+  // that cannot reorder projects. `projects.list` already gives them in this order.
+  order?: number | null
+}
+
+/** The sidebar's No project group, which holds the sessions started without a project. */
+export interface NoProject {
+  pinnedAt: number | null
+}
+
+export type SessionAttention = 'none' | 'permission' | 'unread' | 'error'
+
+/**
+ * The `reason` in the `data` of the `not_found` that `sessions.create` fails with when its new
+ * session was deleted, or its project removed, while it started: nothing is left to show.
+ */
+export const REMOVED_WHILE_STARTING = 'removed_while_starting'
+
+/**
+ * The `reason` in the `data` of the `not_found` that `permissions.respond` and
+ * `browser.answerOrigin` and `computer.answerApp` fail with when another window or device answered
+ * first; `device` there is
+ * the one that did, null for a host's window.
+ */
+export const ALREADY_ANSWERED = 'already_answered'
+
+/** A message the host kept to give back, to a session's composer or New session's (null). */
+export interface ReturnedMessage {
+  sessionId: string | null
+  content: UserContent[]
+}
+
+/** One of a session's pull requests for its sidebar row; `state` null until gh has answered. */
+export interface SessionPullRequest {
+  url: string
+  owner: string
+  repo: string
+  number: number
+  state: PullRequestState | null
+  failing: boolean // an open one has a failing check
+}
+
+/** Where a client's copy of a host's session index stands, as `sessions.changes` gave it last. */
+export interface SessionsCursor {
+  /** The run of the agent host that numbered the changes. */
+  boot: string
+  rev: number
+}
+
+export interface SessionChanges {
+  cursor: SessionsCursor
+  /** Whether `summaries` is the whole index, as for a cursor of another run or none. */
+  full: boolean
+  /** The summaries the host sent after the cursor; every one when `full`. */
+  summaries: SessionSummary[]
+  /** Every listed session's id, so a client drops the ones it has that went. */
+  ids: string[]
+}
+
+export interface SessionSummary {
+  id: string
+  agentId: AgentId
+  projectPath: string
+  scratch: boolean // started with No project: projectPath is its own scratch folder
+  title: string | null
+  status: SessionStatus
+  attention: SessionAttention
+  // What waits for the user in this session alone: its requests, and on newer hosts its workflow
+  // suggestions that wait for an answer, until answered or the session's next turn starts
+  permissionCount: number
+  createdAt: number
+  updatedAt: number
+  parentId: string | null
+  origin: 'user' | 'subagent'
+  description: string | null // a subagent's purpose, as its parent described it
+  missing: boolean // a subagent the parent's replay did not mention
+  branch: string | null // the branch checked out when its last turn ended
+  pr: { number: number; state: PullRequestState; url: string } | null
+  prs?: SessionPullRequest[] // opened in it, then its branch's; absent from older hosts
+  cache: PromptCache | null // the main thread's prompt cache as its last turn or request left it
+  model: string | null // the model option then, for an estimate of the cache's lifetime
+  pinnedAt: number | null // when the user pinned it; a top-level session only
+  archivedAt: number | null // when the user archived it; off the sidebar while set
+  acpSessionId: string | null // the harness's own id for it, which its CLI resumes; null until known
+  prepared?: PreparedInfo // a prepared session, outside the index until its first message
+  worktree?: SessionWorktree // the worktree it works in; absent when it works in projectPath
+  agentWorktree?: { path: string; branch: string | null } // one its agent made for this subagent
+  // Its latest plan's progress; null without one and for a closed session; absent from older hosts
+  plan?: PlanProgress | null
+  // When its running turn started; null between turns; absent from older hosts
+  turnStartedAt?: number | null
+  // The tool its running turn calls now; null while none runs; absent from older hosts
+  activity?: SessionActivity | null
+  // What its running turn does now, as the thread's nine dots act it out; null between turns;
+  // absent from older hosts
+  phase?: TurnPhase['phase'] | null
+  // How its last turn ended; null while a turn runs and before any ended; absent from older hosts
+  lastTurn?: LastTurn | null
+  // What runs on after its turn ended; null while a turn runs or nothing does; absent from older
+  // hosts
+  stillRunning?: StillRunning | null
+  // When set, this local session runs its Claude Code process on that paired same-account computer.
+  modelHost?: ModelHostRef | null
+}
+
+/**
+ * What a session's agent still runs between turns, by its own reports: the background tasks the
+ * session board lists and the subagents at work. Agents that list no tasks count subagents alone.
+ */
+export interface StillRunning {
+  commands: number
+  subagents: number
+  /** The agent starts a turn of its own to report once that work ends. */
+  reportsBack: boolean
+}
+
+/**
+ * How a session's last turn ended. `failed` and `limit` are turns that ended with an error, the
+ * latter refused by a used-up plan limit window; the others are the agent's own stop reasons.
+ */
+export interface LastTurn {
+  reason: StopReason | 'failed' | 'limit'
+  /** When it ended, in ms since the epoch. */
+  endedAt: number
+  /** The error's first line, for `failed` and `limit`. */
+  error?: string
+  /** The window that stopped it, for `limit`. */
+  limit?: LastTurnLimit
+  /**
+   * When Sarto sends the session a message to carry on once the window has reset, in ms since the
+   * epoch; null once the user chose not to, absent when none is planned.
+   */
+  continuesAt?: number | null
+}
+
+export interface LastTurnLimit {
+  window: PlanLimit['window']
+  /** The window's name, such as "5-hour". */
+  label: string
+  /** The account as the agent names it, or the agent's name without one. */
+  account: string
+  /** When the window resets, in ms since the epoch; null when unknown. */
+  resetsAt: number | null
+}
+
+/**
+ * What ending a session's agent stops: its turn, what waits for the user's answer and what it runs
+ * in the background. Its subagents count with it; the commands of its terminals are not here.
+ */
+export interface RunningWork extends BackgroundWork {
+  sessionId: string
+  agentId: AgentId
+  title: string | null
+  turn: boolean
+  /** Requests waiting for the user: approvals, questions, plan approvals and MCP requests. */
+  waiting: number
+}
+
+/** An agent the lightweight tasks' model may be pinned to: one that can ask in a hidden session. */
+export interface LightAgent {
+  agentId: AgentId
+  name: string
+}
+
+/**
+ * The tool call a session's main thread runs now, as its summary carries it: the latest one to
+ * start of those still running. It changes when a call starts or ends, not with its output.
+ */
+export interface SessionActivity {
+  /** The call's entry in the thread. */
+  entryId: string
+  toolKind: ToolKind
+  title: string
+  /** Its key argument: a command's first line, a file's path, a search's words or an address. */
+  detail: string | null
+  /** When the call started, in ms since the epoch. */
+  startedAt: number
+}
+
+/** How far a session's latest plan got, as its summary carries it. */
+export interface PlanProgress {
+  done: number
+  total: number
+  /** The step in progress, by its index from 0, and the first line of its text; null for none. */
+  current: { index: number; text: string } | null
+}
+
+/** What a session made, read from its stored thread for its card in the sidebar. */
+export interface SessionOutputs {
+  /** The artifacts its turns wrote and did not delete, by their latest write, latest first. */
+  artifacts: { id: string; title: string }[]
+  /** The github.com pull requests and issues its replies link, canonical, latest first. */
+  references: string[]
+  /** The start of its last reply, in Markdown. */
+  reply: string | null
+  /** How long its last ended turn took, in ms. */
+  turnMs: number | null
+  /** Its latest plan's items; absent from older hosts. */
+  plan?: PlanItem[] | null
+  /** When its running turn started; absent from older hosts. */
+  turnStartedAt?: number | null
+}
+
+/**
+ * Why a prepared session starts with another value than the one chosen: the agent does not offer
+ * it, refused it, or a change outside Sarto replaced a remembered one. Names, not values.
+ */
+export interface StartNotice {
+  reason: 'not_offered' | 'refused' | 'replaced'
+  optionId: string
+  category: ConfigOption['category']
+  option: string
+  type: 'select' | 'boolean'
+  wanted: string | boolean
+  actual: string | boolean | null // null when the session has no such option
+}
+
+/**
+ * What only a prepared session carries: New session shows its options and slash commands before
+ * the first message.
+ */
+export interface PreparedInfo {
+  config: ConfigOption[]
+  /** The slash commands its agent reported; absent from older hosts. */
+  commands?: SlashCommand[]
+  notices: StartNotice[]
+  openedAt: number
+}
+
+export interface ImportableSession {
+  acpSessionId: string
+  title: string | null
+  updatedAt: string | null
+  imported: boolean // already in the session index
+  /** Its prompt cache as its last request left it, for a Claude Code session used in the last hour. */
+  cache?: PromptCache | null
+  /** A Claude Code process outside Sarto, such as a terminal, still has it open. */
+  held?: boolean
+}
+
+export interface TrafficRecord {
+  at: number
+  direction: 'in' | 'out'
+  method: string | null
+  size: number
+  message: unknown
+}
+
+export interface AgentDiagnostics {
+  status: AgentStatus
+  capabilities: unknown
+  traffic: TrafficRecord[]
+  stderr: string
+  events: { at: number; event: string; detail?: string }[]
+  /** The installed adapter's `installed.json` and `package-lock.json`, for a package agent. */
+  adapter: { installed: unknown; lock: unknown } | null
+}
+
+export interface DiagnosticsBundle {
+  createdAt: number
+  appVersion: string
+  platform: string
+  environment: { PATH: string | null; SHELL: string | null; node: string | null }
+  environmentInfo: EnvironmentInfo
+  agents: AgentDiagnostics[]
+  sessions: SessionSummary[]
+  log: { at: number; level: 'info' | 'warn' | 'error'; message: string }[]
+}
+
+/** Every request the agent host accepts, keyed by method name. */
+export interface HostContract {
+  'agents.list': { params: void; result: AgentStatus[] }
+  'agents.check': { params: { agentId?: AgentId }; result: AgentStatus[] }
+  'agents.reloadEnvironment': { params: void; result: AgentStatus[] }
+  // Detects again, then names the harnesses whose user program is found, in the order to add them.
+  'agents.detectedPrograms': { params: void; result: HarnessId[] }
+  'agents.environment': { params: void; result: EnvironmentInfo }
+  // Its page, when it hands one over, comes to the asking port as `agents.signInLink`. A paired
+  // device may not run an agent method that opens a browser on this computer instead.
+  'agents.authenticate': { params: { agentId: AgentId; methodId: string }; result: void }
+  // Stops the agent's sign-in in progress, whose `agents.authenticate` then rejects.
+  'agents.cancelSignIn': { params: { agentId: AgentId }; result: void }
+  'agents.logout': { params: { agentId: AgentId }; result: void }
+  'agents.providerAction': { params: AgentProviderAction; result: void }
+  'agents.retry': { params: { agentId: AgentId }; result: void }
+  'agents.reinstall': { params: { agentId: AgentId }; result: void }
+  // Asks npm for each package agent's latest adapter and the CLI it carries.
+  'agents.checkUpdates': { params: void; result: AgentStatus[] }
+  // Skips the agent's current update in the sidebar's notice, until a newer one.
+  'agents.skipUpdate': { params: { agentId: AgentId }; result: void }
+  // Offers the skipped update in the sidebar's notice again.
+  'agents.unskipUpdate': { params: { agentId: AgentId }; result: void }
+  // Both resolve once the task is done or cancelled, and reject with its error.
+  'agents.update': { params: { agentId: AgentId }; result: void }
+  // Updates the user's own program (Claude Code, Codex, OpenCode) the way it was installed.
+  'agents.updateCli': { params: { agentId: AgentId }; result: void }
+  // Hands the agent's harness an API key to keep; Sarto keeps no copy and never reads it back.
+  'agents.setApiKey': {
+    params: { agentId: AgentId; key: string; baseUrl?: string; model?: string }
+    result: void
+  }
+  'agents.clearApiKey': { params: { agentId: AgentId }; result: void }
+  'agents.install': {
+    params: { agentId: AgentId; method?: AgentInstallMethod['id'] }
+    result: void
+  }
+  // What each way of installing the harness brings, for the install window before it runs.
+  'agents.installOffer': { params: { agentId: AgentId }; result: InstallOffer }
+  // Removes Sarto's copy for the harness, and its own program too when asked.
+  'agents.uninstall': {
+    params: { agentId: AgentId; removeProgram?: boolean }
+    result: { command: string | null; error: string | null }
+  }
+  // Stops a running task, or clears a failed one.
+  'agents.cancelTask': { params: { agentId: AgentId }; result: void }
+  // Reads the options of a running agent again, in the project's folder, when they are stale.
+  'agents.readOptions': { params: { agentId: AgentId; projectPath: string | null }; result: void }
+  // Reads the options of an agent none are cached for, starting it if need be, before New session
+  // has a folder; rejects with the reason.
+  'agents.readFirstOptions': { params: { agentId: AgentId }; result: void }
+  'agents.refreshLimits': { params: { agentId: AgentId; force?: boolean }; result: void }
+  /** Spends one reset credit, which cannot be undone; `requestId` makes a retry spend no second. */
+  'agents.spendReset': {
+    params: { agentId: AgentId; creditId: string; requestId: string }
+    result: { code: ResetSpendCode }
+  }
+  'agents.details': { params: { agentId: AgentId }; result: AgentDetails }
+  // A Claude Code agent's auto-compact windows and prompt cache duration, read from its settings
+  // file; rejects with the reason when the file cannot be read.
+  'agents.claudeSettings': { params: { agentId: AgentId }; result: ClaudeSettings }
+  // Writes one of them into that file and nothing else in it.
+  'agents.setClaudeSetting': {
+    params: { agentId: AgentId; change: ClaudeSettingChange }
+    result: void
+  }
+  // When the agent's harness compacts, read from its configuration in the harness's own unit;
+  // rejects with the reason when that cannot be read.
+  'agents.autoCompact': { params: { agentId: AgentId }; result: AutoCompactSettings }
+  // Writes one value there and nothing else.
+  'agents.setAutoCompact': { params: { agentId: AgentId; change: AutoCompactChange }; result: void }
+  // A Codebuddy Code agent's site, read from its settings file, and what overrides it; rejects
+  // with the reason when the file cannot be read.
+  'agents.codebuddySettings': { params: { agentId: AgentId }; result: CodebuddySettings }
+  // Writes the site into that file and nothing else in it.
+  'agents.setCodebuddySite': {
+    params: { agentId: AgentId; change: CodebuddySiteChange }
+    result: void
+  }
+  'agents.refreshAccount': { params: { agentId: AgentId; force?: boolean }; result: void }
+  'agents.listSessions': {
+    params: { agentId: AgentId; projectPath: string; cursor?: string }
+    result: { sessions: ImportableSession[]; nextCursor: string | null }
+  }
+  'agents.options': { params: void; result: AgentOptions[] }
+  // Pins a model to the top of the agent's model menu, or unpins it; a fifth pin is refused.
+  'agents.pinModel': { params: { agentId: AgentId; model: string; pinned: boolean }; result: void }
+  // Sets the agent's pins in the order given, at most four, or clears them with none; older hosts
+  // lack it, as their info's `pinnedModels` says.
+  'agents.setPinnedModels': { params: { agentId: AgentId; models: string[] }; result: void }
+  // The agents the lightweight tasks' model may be pinned to; older hosts lack it.
+  'agents.lightAgents': { params: void; result: { agents: LightAgent[] } }
+  // A draft of a problem report's description, written by the current session's agent/model (else
+  // the new session's last remembered agent/model) at medium effort, from where the report was
+  // opened, the error and the host's recent warnings; a null draft when there is neither an error
+  // nor a recent record to write from. `language` is the tag the user reads.
+  'agents.draftReport': {
+    params: {
+      origin: ReportOrigin | null
+      sessionId: string | null
+      agentId: AgentId | null
+      error: string | null
+      language: string
+      draftAgentId?: AgentId | null
+      draftModel?: string | null
+      fallbackAgentId?: AgentId | null
+      fallbackModel?: string | null
+    }
+    result: { draft: string | null; agent: string | null }
+  }
+  // For Marketplace › Installed: Sarto's own server and each agent's own file.
+  // Neither starts an agent, and neither reads an agent's configuration file.
+  'mcp.status': { params: void; result: McpStatus }
+  // Listens again when Sarto's MCP server does not, then sends main its port.
+  'mcp.retry': { params: void; result: McpStatus }
+  // The Marketplace's catalog of MCP servers from the registry, cached for a day; refresh skips the
+  // cache, and cached answers from it however old, unless there is none.
+  'market.catalog': { params: { refresh?: boolean; cached?: boolean }; result: MarketCatalog }
+  // The registry's servers whose name has `query` in it, for the Marketplace's search.
+  'market.search': { params: { query: string }; result: MarketSearch }
+  // Which inputs of the servers Sarto keeps have a value; never the values.
+  'market.keys': { params: void; result: MarketKeyState }
+  // Signs in to a server Sarto keeps that uses OAuth; it must already be in the settings. The window
+  // opens the browser page or shows the code; `market.connectionChanged` tells how it ended.
+  'market.connect': { params: { serverId: string }; result: ConnectStart }
+  // How a URL the user is adding by hand signs in, asked with the headers they typed: an OAuth flow
+  // Sarto can do, or null when it needs none or offers none Sarto can do.
+  'market.detectSignIn': {
+    params: { url: string; headers: { name: string; value: string }[] }
+    result: { oauth: McpOAuth | null }
+  }
+  'market.cancelConnect': { params: { loginId: string }; result: void }
+  // Clears a server's tokens and keeps the server; every agent loses it at once.
+  'market.disconnect': { params: { serverId: string }; result: void }
+  'market.connections': { params: void; result: MarketConnections }
+  // Plugins from Claude Code's and Codex's own marketplaces, and the ones each agent has installed;
+  // adds Claude's official marketplace to an agent that has none, as Claude Code does on first start.
+  'market.plugins': { params: { refresh?: boolean; cached?: boolean }; result: MarketPlugins }
+  'market.pluginDetails': { params: { agentId: AgentId; pluginId: string }; result: PluginDetails }
+  'market.pluginLogo': { params: { pluginId: string }; result: PluginLogo }
+  // Installs, removes or switches a plugin through the agent's own harness, in its configuration.
+  'market.installPlugin': {
+    params: { agentId: AgentId; pluginId: string; scope: PluginScope; projectPath?: string }
+    result: InstalledPlugin
+  }
+  'market.uninstallPlugin': {
+    params: { agentId: AgentId; pluginId: string; scope: PluginScope; projectPath?: string }
+    result: void
+  }
+  'market.setPluginEnabled': {
+    params: {
+      agentId: AgentId
+      pluginId: string
+      enabled: boolean
+      scope: PluginScope
+      projectPath?: string
+    }
+    result: void
+  }
+  'market.addMarketplace': {
+    params: { agentId: AgentId; source: string }
+    result: PluginMarketplace
+  }
+  'market.removeMarketplace': { params: { agentId: AgentId; name: string }; result: void }
+  // The skills catalog and each agent's own skills.
+  'market.skills': { params: { refresh?: boolean; cached?: boolean }; result: MarketSkills }
+  // One repository of the skills catalog, `<owner>/<repo>`, read as market.skills reads each.
+  'market.skillRepository': {
+    params: { id: string; refresh?: boolean }
+    result: MarketSkillRepository
+  }
+  // Copies a skill's files onto the host; the caller then adds the entry to settings.marketplace.skills.
+  'market.addSkill': { params: { source: SkillSource }; result: MarketSkill }
+  // Any window's or device's answer to a card an agent's change_settings shows: Change or Don't
+  // change; the first counts.
+  'settings.answerChange': {
+    params: { sessionId: string; entryId: string; decision: 'change' | 'keep' }
+    result: void
+  }
+  // Undo on a settings line: the rows go back to what they were, refused with `conflict` once one
+  // of them changed again since, which takes the undo away.
+  'settings.undoChange': { params: { sessionId: string; entryId: string }; result: void }
+  'projects.list': { params: void; result: Project[] }
+  'projects.add': { params: { path: string }; result: Project }
+  'projects.remove': { params: { path: string }; result: void }
+  'projects.touch': { params: { path: string }; result: void }
+  // A null path pins the No project group.
+  'projects.pin': { params: { path: string | null; pinned: boolean }; result: void }
+  // Puts a project just before another of the same host, or last with a null `before`.
+  'projects.move': { params: { path: string; before: string | null }; result: void }
+  'projects.noProject': { params: void; result: NoProject }
+  // How the project names and prepares its sessions' worktrees.
+  'projects.worktreeSettings': { params: { path: string }; result: ProjectWorktreeSettings }
+  // A device needs the owner's leave to use the terminal to change these, as they run a command.
+  'projects.setWorktreeSettings': {
+    params: { path: string; settings: ProjectWorktreeSettings }
+    result: void
+  }
+  // The entries of a folder on the host that start as `path`'s last part does, for a path being
+  // typed: absolute, or `~` for the home folder. It only reads; a folder it cannot read lists none.
+  'paths.complete': { params: { path: string }; result: PathCompletion }
+  'sessions.list': { params: { projectPath?: string }; result: SessionSummary[] }
+  // What changed in the index since a client's last cursor; without one, or with another run's,
+  // the whole index, as `sessions.list` gives it.
+  'sessions.changes': { params: { since?: SessionsCursor }; result: SessionChanges }
+  // The kinds of event this port takes from now on, as a port that follows one thing asks.
+  'events.select': { params: { types: string[] }; result: void }
+  'sessions.create': {
+    // projectPath null: No project, in a new scratch folder.
+    // options: config values to start with, by option id.
+    // prompt: the first message, sent as the first turn once the session has started.
+    // preparedId: the window's prepared session, adopted instead of a new `session/new`.
+    params: {
+      agentId: AgentId
+      projectPath: string | null
+      parentId?: string
+      options?: Record<string, string | boolean>
+      prompt?: UserContent[]
+      preparedId?: string
+      // A new worktree, cut from `base`, to work in; `branch` is the user's name for its branch.
+      worktree?: { base: string; branch?: string }
+      // Run this local Claude Code session on another computer of the same account.
+      modelHostId?: string
+    }
+    result: SessionSummary
+  }
+  // The window's prepared session for New session; `replace` opens a new one even when it holds one.
+  'sessions.prepare': {
+    params: {
+      agentId: AgentId
+      projectPath: string | null
+      parentId?: string
+      options?: Record<string, string | boolean>
+      replace?: boolean
+      modelHostId?: string
+    }
+    result: SessionSummary
+  }
+  'sessions.discard': { params: { sessionId: string }; result: void }
+  // `fork`: a copy of the session is imported instead, for one another program still has open.
+  'sessions.import': {
+    params: { agentId: AgentId; projectPath: string; acpSessionId: string; fork?: boolean }
+    result: SessionSummary
+  }
+  'sessions.open': {
+    params: { sessionId: string }
+    result: SessionSnapshot
+    deviceResult: SessionSnapshot | DigestedSnapshot
+  }
+  // With `from`, every entry from that position on, as a replica that holds older pages needs.
+  'sessions.snapshot': {
+    params: { sessionId: string; from?: number }
+    result: SessionSnapshot
+    deviceResult: SessionSnapshot | DigestedSnapshot
+  }
+  // With `from`, reaching back to the turn holding that position, for a jump in the outline.
+  'sessions.page': {
+    params: { sessionId: string; before: number; from?: number }
+    result: OlderPage
+    deviceResult: OlderPage | DigestedPage
+  }
+  // One entry whole, as a device whose page held its tool output as a digest opens it.
+  'sessions.entry': { params: { sessionId: string; entryId: string }; result: ThreadEntry }
+  // What waits for the user's answer in the session, in thread order: what its summary's
+  // `permissionCount` counts. No entries for a closed session, where none waits. `askedAt`: when
+  // each began to wait, by entry id, in ms since the epoch; absent from older hosts.
+  // `suggestions`: the workflow suggestions that wait for Start or Do it here, which the count
+  // includes, until answered or the session's next turn starts; `workflows.answerSuggestion`
+  // answers them, and one a turn passed too. Absent from older hosts.
+  'sessions.requests': {
+    params: { sessionId: string }
+    result: {
+      entries: ThreadEntry[]
+      askedAt?: Record<string, number>
+    }
+  }
+  'sessions.outline': { params: { sessionId: string }; result: { entries: OutlineEntry[] } }
+  // The session's requests to its model, read from the agent's own record of the session: the
+  // newest page, or the one before `before`. Null when Sarto cannot read this agent's record.
+  'sessions.modelRequests': {
+    params: { sessionId: string; before?: string }
+    result: ModelRequestsPage | null
+  }
+  // What the whole record holds beyond its pages: the request count, the cost the agent reckons
+  // and the system prompt and tools. Null as for `sessions.modelRequests`.
+  'sessions.modelRequestsOverview': {
+    params: { sessionId: string }
+    result: ModelRequestsOverview | null
+  }
+  // A request's records as the agent wrote them, `raw` naming them as a page gave it, or `system`
+  // for the system prompt and tools; long strings folded unless `full`.
+  'sessions.modelRequestRaw': {
+    params: { sessionId: string; raw: string; full?: boolean }
+    result: ModelRequestRaw
+  }
+  // The sessions whose messages hold every word of `query`, most recently updated first, each
+  // with its latest such message; the sessions a session list shows, at most 100. Empty for a
+  // query of fewer than 2 characters. `indexing` is present while the index is built, and the
+  // hits may then be fewer than there are.
+  'sessions.search': {
+    params: { query: string }
+    result: { hits: ConversationHit[]; indexing?: SearchIndexing | null }
+  }
+  // The messages of one session that hold every word of `query`, oldest first, for finding in the
+  // session on screen: user messages and replies as in `sessions.search`, at most 500, the
+  // newest when there are more (`capped`). Empty for a query of fewer than 2 characters.
+  'sessions.find': {
+    params: { sessionId: string; query: string }
+    result: { matches: SessionFindMatch[]; capped: boolean; indexing?: SearchIndexing | null }
+  }
+  // What the session made, for its card in the sidebar; empty for a session without a thread.
+  'sessions.outputs': { params: { sessionId: string }; result: SessionOutputs }
+  // Summarizes the messages without a title; empty while a summary of the session runs.
+  'sessions.outlineTitles': { params: { sessionId: string }; result: { titles: OutlineTitle[] } }
+  'sessions.watch': { params: { sessionId: string }; result: void }
+  'sessions.unwatch': { params: { sessionId: string }; result: void }
+  // The sessions a port shows in front, none for a page; a turn that ends out of view is unread.
+  'sessions.show': { params: { sessionIds: string[] }; result: void }
+  'sessions.prompt': { params: { sessionId: string; content: UserContent[] }; result: void }
+  // The user started typing in it: a Claude Code session whose agent was let go attaches now, so
+  // the message need not wait for its start. Nothing is sent; unused, it is let go again.
+  'sessions.attachEarly': { params: { sessionId: string }; result: void }
+  'sessions.cancel': { params: { sessionId: string }; result: void }
+  // What ending these sessions and their sub-sessions would stop, for the ones with any.
+  'sessions.runningWork': { params: { sessionIds: string[] }; result: { sessions: RunningWork[] } }
+  // The memory state, the rule idle Claude Code sessions follow and any version in fallback.
+  'sessions.idleRelease': { params: void; result: IdleReleaseState }
+  // Stops one background task of the session, as the session board's Stop does.
+  'sessions.stopTask': { params: { sessionId: string; taskId: string }; result: void }
+  // The end of a background task's output, at most 8 KiB, for the session board.
+  'sessions.taskOutput': {
+    params: { sessionId: string; taskId: string }
+    result: { output: string; truncated: boolean }
+  }
+  'sessions.retry': { params: { sessionId: string }; result: void }
+  // Drops the continuation Sarto planned after the plan window that stopped the last turn resets.
+  'sessions.cancelContinue': { params: { sessionId: string }; result: void }
+  // Takes the session back to before `entryId`, one of the user's messages: the turns from it on
+  // are set aside until the next send, and its content comes back for the composer. `draft` is
+  // what the composer held, which Put back gives back.
+  'sessions.rewind': {
+    params: { sessionId: string; entryId: string; draft: UserContent[] }
+    result: { content: UserContent[] }
+  }
+  // Brings back the turns an edit set aside, with the draft the composer held before it.
+  'sessions.putBack': { params: { sessionId: string }; result: { draft: UserContent[] } }
+  // `entryId`: a reply's agent message, to fork the session up to its turn; see the session model.
+  // A fork of a session in a worktree gets its own, from the source's branch, unless `same`.
+  'sessions.fork': {
+    params: { sessionId: string; entryId?: string; worktree?: 'new' | 'same' }
+    result: SessionSummary
+  }
+  // What removing the session's worktree would lose, and the other sessions still in it.
+  'worktrees.inspect': {
+    params: { sessionId: string }
+    result: WorktreeInspection & { others: string[] }
+  }
+  // Removes it, and its branch when `delete` and safe; refused with `conflict` when it changed
+  // since `expected` was read.
+  'worktrees.remove': {
+    params: { sessionId: string; branch: 'keep' | 'delete'; expected: WorktreeInspection }
+    result: SessionSummary
+  }
+  'worktrees.retrySetup': { params: { sessionId: string }; result: void }
+  // Goes on without the setup command; what waited for it is sent.
+  'worktrees.skipSetup': { params: { sessionId: string }; result: void }
+  // The output kept of the last setup run, or with `from` what it wrote after that offset:
+  // `log` starts at `start` and ends at `end`, counted in characters from the run's start, and a
+  // `start` other than `from` means the kept output no longer reaches back there.
+  'worktrees.setupLog': {
+    params: { sessionId: string; from?: number }
+    result: { log: string; start?: number; end?: number }
+  }
+  // Hands the session to another agent between turns and sends `content` as its first turn;
+  // `options` are the values chosen for that agent, `summarize` asks it to summarize first.
+  'sessions.switchAgent': {
+    params: {
+      sessionId: string
+      agentId: AgentId
+      content: UserContent[]
+      options?: Record<string, string | boolean>
+      summarize?: boolean
+    }
+    result: void
+  }
+  'sessions.context': { params: { sessionId: string }; result: ContextBreakdown | null }
+  'sessions.contextEstimates': { params: { sessionId: string }; result: ContextEstimates | null }
+  'sessions.queue': {
+    /** `comments` for a message built from comments on passages, which its queue row shows. */
+    params: { sessionId: string; content: UserContent[]; comments?: QueuedComments }
+    result: { itemId: string | null } // null when it was sent at once
+  }
+  /**
+   * Runs a shell code block of the session's agent's reply in a new terminal of the session, and
+   * unless `notify` is false tells the agent which, queued while a turn runs. `notified` is false
+   * when that message could not go, while the terminal runs anyway.
+   */
+  'sessions.runCommand': {
+    params: { sessionId: string; command: string; notify: boolean }
+    result: { terminalId: string; notified: boolean }
+  }
+  'sessions.unqueue': { params: { sessionId: string; itemId: string }; result: void }
+  'sessions.steer': { params: { sessionId: string; itemId: string }; result: void }
+  // Steers where the agent can; otherwise stops the turn and sends the prompt as the next one.
+  'sessions.sendNow': { params: { sessionId: string; itemId: string }; result: void }
+  'sessions.resumeQueue': { params: { sessionId: string }; result: void }
+  // An image or pasted text the thread store keeps for a sent attachment, by its hash.
+  'sessions.blob': { params: { sessionId: string; hash: string }; result: AttachmentBytes }
+  'sessions.setConfigOption': {
+    params: { sessionId: string; optionId: string; value: string | boolean }
+    result: void
+  }
+  // Lists the models the agent offers now in a session that listed them when it attached.
+  'sessions.refreshModels': { params: { sessionId: string }; result: void }
+  // title null: back to the agent's title.
+  'sessions.rename': { params: { sessionId: string; title: string | null }; result: void }
+  'sessions.close': { params: { sessionId: string }; result: void }
+  'sessions.pin': { params: { sessionId: string; pinned: boolean }; result: void }
+  /**
+   * `subSessions: false` archives the session alone, its sub-sessions staying in the list on their
+   * own until it is restored; without it, its whole tree is archived.
+   */
+  'sessions.archive': { params: { sessionId: string; subSessions?: boolean }; result: void }
+  'sessions.unarchive': { params: { sessionId: string }; result: void }
+  // unread false: seen, as showing it would mark it.
+  'sessions.markUnread': { params: { sessionId: string; unread: boolean }; result: void }
+  'sessions.delete': { params: { sessionId: string }; result: void }
+  // Once per index: the sessions left with no message go, except `keep`, those with a draft.
+  'sessions.removeEmpty': { params: { keep: string[] }; result: void }
+  // Messages the host kept to give back, oldest first, for a session or for New session (null);
+  // with no sessionId, every one.
+  'sessions.takeReturned': { params: { sessionId?: string | null }; result: ReturnedMessage[] }
+  'sessions.removeAll': { params: void; result: void }
+  // One of `optionId`, `answers` and `values`: a question's answers go together, only those given;
+  // `values` submits an MCP server's form. `note` goes with an option that takes one.
+  'permissions.respond': {
+    params: {
+      sessionId: string
+      requestId: string
+      optionId?: string
+      note?: string
+      answers?: QuestionAnswer[]
+      values?: FormValues
+    }
+    result: void
+  }
+  // Reading the status also keeps the project live on the connection, until `git.unwatch`. A
+  // client that watches a project from several screens gives each a `watcher` of its own, which
+  // `git.unwatch` names, so one screen leaving leaves the others watching.
+  'git.status': { params: { projectPath: string; watcher?: string }; result: GitStatus }
+  'git.unwatch': { params: { projectPath: string; watcher?: string }; result: void }
+  'git.fetch': { params: { projectPath: string }; result: GitOperation }
+  'git.pull': { params: { projectPath: string }; result: GitOperation }
+  // Publishes the branch when it has no upstream.
+  'git.push': {
+    params: { projectPath: string; remote: string; branch: string }
+    result: GitOperation
+  }
+  'git.publish': {
+    params: { projectPath: string; name: string; visibility: RepositoryVisibility }
+    result: GitOperation
+  }
+  'git.createPullRequest': {
+    params: { projectPath: string; title: string; body: string; base: string; draft: boolean }
+    result: PullRequest
+  }
+  'git.commit': { params: { projectPath: string; oid: string }; result: CommitDetails }
+  'git.changes': { params: { projectPath: string }; result: ChangedFile[] }
+  // A commit message for the files' working tree changes, paths as `git.commitChanges` takes them,
+  // written by the project's preferred agent from the diffs and the repository's recent commits.
+  'git.commitMessage': { params: { projectPath: string; paths: string[] }; result: string }
+  // A pull request's title and description for the branch against `base`, written by the
+  // project's preferred agent from the branch's commits and files.
+  'git.pullRequestDraft': {
+    params: { projectPath: string; base: string }
+    result: { title: string; body: string }
+  }
+  'git.incoming': {
+    params: { projectPath: string; from: 'upstream' | 'base' }
+    result: LogCommit[]
+  }
+  // ref null: the working tree against HEAD; otherwise the commit against its first parent.
+  'git.fileDiff': {
+    params: { projectPath: string; path: string; oldPath: string | null; ref: string | null }
+    result: FileDiff
+  }
+  'git.branches': { params: { projectPath: string }; result: BranchList }
+  // Switches to a local branch, or creates it from HEAD and switches to it.
+  'git.switchBranch': {
+    params: { projectPath: string; branch: string; create: boolean }
+    result: GitOperation
+  }
+  // Pushes the branch, which has no upstream yet, to one of the repository's remotes and tracks it.
+  'git.publishBranch': { params: { projectPath: string; remote: string }; result: GitOperation }
+  // Commits the files' working tree changes, paths relative to the repository root, and nothing else.
+  'git.commitChanges': {
+    params: { projectPath: string; message: string; paths: string[] }
+    result: GitOperation
+  }
+  // Puts the files back as HEAD has them; an untracked or added file is removed.
+  'git.discardChanges': { params: { projectPath: string; paths: string[] }; result: GitOperation }
+  'git.pullRequest': { params: { url: string }; result: PullRequest }
+  // A github.com issue URL, which may turn out to be a pull request.
+  'git.issue': { params: { url: string }; result: IssueLookup }
+  'git.watchReferences': { params: { urls: string[] }; result: void }
+  // A chip's author; null when GitHub's avatar host has no picture for the login.
+  'git.avatarUrl': { params: { login: string }; result: string | null }
+  'git.currentPullRequest': { params: { projectPath: string }; result: PullRequest | null }
+  'git.tools': { params: void; result: GitTools }
+  // A draft's attachment, kept until it is sent or removed; see attachments in the session model.
+  // `grantId`: a file or folder main granted for a pick or a drop. `projectPath` and `path`: one
+  // an `@` mention named, relative to the project and checked as `files.read` checks a path.
+  'attachments.add': {
+    params: {
+      source:
+        | { bytes: ArrayBuffer; mimeType: string; name: string }
+        | { grantId: string }
+        | { projectPath: string; path: string }
+      thumb: string | null
+    }
+    result: Attachment
+  }
+  'attachments.read': { params: { id: string }; result: AttachmentBytes }
+  // An image's thumbnail, and its bytes scaled to fit when it was too large: `scaled` null keeps them.
+  'attachments.update': {
+    params: {
+      id: string
+      thumb: string | null
+      scaled: { bytes: ArrayBuffer; mimeType: string } | null
+    }
+    result: Attachment
+  }
+  'attachments.remove': { params: { id: string }; result: void }
+  // The ids of these the host still holds, for the drafts that name them; each is kept from now.
+  'attachments.held': { params: { ids: string[] }; result: string[] }
+  'files.list': { params: { projectPath: string }; result: FileList }
+  // Keeps the connection told, with `files.changed`, when the project's folder changes on disk,
+  // until `files.unwatch`.
+  'files.watch': { params: { projectPath: string }; result: void }
+  'files.unwatch': { params: { projectPath: string }; result: void }
+  // A folder's direct children, for an ignored folder that `files.list` leaves unread.
+  'files.listFolder': { params: { projectPath: string; path: string }; result: FolderList }
+  // `asText` reads a media file as any other file, as an SVG's source.
+  'files.read': {
+    params: { projectPath: string; path: string; asText?: boolean }
+    result: FileContent
+    deviceResult: DeviceFileContent
+  }
+  'files.search': { params: { projectPath: string; query: string }; result: FileSearch }
+  // The folder where the session's agent keeps files of its own outside the project, such as agy's
+  // Plan mode plan; null when it keeps none.
+  'files.agentFolder': { params: { sessionId: string }; result: string | null }
+  // A file of that folder, by its absolute path; read-only and never media.
+  'files.readAgentFile': { params: { sessionId: string; path: string }; result: FileContent }
+  // A null `version` overwrites whatever the file holds.
+  'files.write': {
+    params: { projectPath: string; path: string; text: string; version: string | null }
+    result: FileWritten
+  }
+  // A new empty file or folder; the folders above it are made when missing. Never replaces one.
+  'files.create': {
+    params: { projectPath: string; path: string; kind: 'file' | 'folder' }
+    result: void
+  }
+  // Renames or moves a file or folder, a link itself rather than what it points to; the folders
+  // above `to` are made when missing. `conflict` when something is at `to` already.
+  'files.rename': { params: { projectPath: string; from: string; to: string }; result: void }
+  // Copies each into `folder` ('' is the project's), naming a copy `name copy.ext` when its name
+  // is taken there; the copies' paths, in order.
+  'files.copy': {
+    params: { projectPath: string; paths: string[]; folder: string }
+    result: string[]
+  }
+  // Puts bytes or a main-granted path at `path`; `conflict` unless `replace` is true.
+  'files.upload': {
+    params: {
+      projectPath: string
+      path: string
+      source: { bytes: ArrayBuffer } | { grantId: string }
+      replace?: boolean
+    }
+    result: void
+  }
+  // To the system's trash, or for good with `permanently`; what is gone already is skipped.
+  // `unavailable` when the host could not put them in a trash.
+  'files.delete': {
+    params: { projectPath: string; paths: string[]; permanently?: boolean }
+    result: void
+  }
+  // The address at which the agent host serves an HTML file of the session's folder, read-only on
+  // the loopback address, for Sarto's browser on the same computer; `path` is relative to that
+  // folder. A paired device is refused it.
+  'files.preview': { params: { sessionId: string; path: string }; result: string }
+  // `path` as the thread writes it: absolute, `~/`, a `file:` URI, or relative to `projectPath`,
+  // the session's folder. `sessionId` lets a file outside it through when that thread names it.
+  'media.open': {
+    params: { projectPath: string; path: string; sessionId: string }
+    result: MediaOpenResult
+  }
+  // The same file and check for a paired device's remote host, which streams it from the real
+  // path in the answer; main is granted nothing, and a window is refused. Without `sessionId`,
+  // only a file in the project is let through, as for `files.read`.
+  'media.authorize': {
+    params: { projectPath: string; path: string; sessionId?: string }
+    result: MediaAuthorization
+  }
+  // `dayStarts`: the periods to sum, local days or a day's hours, as n + 1 ascending boundaries.
+  // `clock`: a range to sum by hour of the day as well.
+  'usage.summary': {
+    params: {
+      dayStarts: number[]
+      from: number
+      to: number
+      scope: UsageScope
+      clock?: ClockRequest
+    }
+    result: UsageSummary
+  }
+  // Everything Sarto's Mac app shows of usage under a scope, computed by the host: today's figures,
+  // the latest requests, the account quotas with their forecasts, the ranked models, the hourly
+  // and daily series and the sync's computers. See `UsageOverview`.
+  'usage.overview': { params: { scope: UsageScope }; result: UsageOverview }
+  'usage.total': { params: { from: number; to: number }; result: UsageTotal }
+  'usage.status': { params: void; result: UsageStatus }
+  // Resolves once the scan is done; does nothing while Usage on this computer is off.
+  'usage.sync': { params: void; result: void }
+  'usage.reimport': { params: { agentId: AgentId }; result: void }
+  'usage.clearRecord': { params: void; result: void }
+  // Removes an account, by its fingerprint, from the usage views and what this computer shares:
+  // its quota readings measured until now no longer show, and a later one shows again.
+  'usage.forgetAccount': { params: { agentId: AgentId; account: string }; result: void }
+  // A desktop app's side of the browser calls the host sent its port, as main's is for the host's
+  // own windows: the answer, the call's wait on a new site, and the site's question and its end,
+  // which the session's thread shows. A window is refused them.
+  'browser.answer': { params: { callId: number; answer: BrowserCallAnswer }; result: void }
+  'browser.waiting': { params: { callId: number; waiting: boolean }; result: void }
+  'browser.origin': {
+    params: { sessionId: string; requestId: number; origin: string }
+    result: void
+  }
+  'browser.originSettled': {
+    params: { requestId: number; decision: BrowserOriginAnswer }
+    result: void
+  }
+  // The desktop app's user handed its page back after taking it over in the session's turn.
+  'browser.handedBack': { params: { sessionId: string; durationMs: number }; result: void }
+  // Any window's or device's Done or Skip on the card of a step an agent asked the user to do,
+  // which goes to the page; the first counts.
+  'control.answerAsk': {
+    params: { sessionId: string; entryId: string; outcome: ControlOutcome }
+    result: void
+  }
+  // Any window's or device's answer to a new site's card, `entryId`, which goes to the page that
+  // asked; the first counts, as for `permissions.respond`.
+  'browser.answerOrigin': {
+    params: { sessionId: string; entryId: string; decision: BrowserOriginDecision }
+    result: void
+  }
+  // Any window's or device's answer to a mobile device card; the first counts.
+  'devices.answerAccess': {
+    params: { sessionId: string; entryId: string; decision: DeviceAccessDecision }
+    result: void
+  }
+  // Any window's or device's answer to a card asking whether the agent may use a terminal or a
+  // browser tab the user opened, or rename a terminal of theirs; the first counts.
+  'surfaces.answerAccess': {
+    params: { sessionId: string; entryId: string; decision: SurfaceAccessDecision }
+    result: void
+  }
+  // Takes back the use of a terminal the user opened from the session's agent, which asks again.
+  'terminals.revokeAccess': { params: { sessionId: string; terminalId: string }; result: void }
+  // Takes back the allow a session's agent has for a device, so its next use asks again.
+  'devices.revokeAccess': { params: { sessionId: string; deviceId: string }; result: void }
+  // The mobile devices agents may always use on this host, and taking one off that list.
+  'devices.allowed': { params: Record<string, never>; result: { deviceIds: string[] } }
+  'devices.forget': { params: { deviceId: string }; result: void }
+  // Any window's or device's answer to a session's first use of an app, `entryId`, which goes to
+  // the call that asked; the first counts, as for `permissions.respond`.
+  'computer.answerApp': {
+    params: { sessionId: string; entryId: string; decision: ComputerAppDecision }
+    result: void
+  }
+  // Any window's or device's answer to a card holding the MCP servers a session's folder declares
+  // itself; the first counts, as for `permissions.respond`, and settles the folder's other cards.
+  'sessions.answerProjectMcp': {
+    params: { sessionId: string; entryId: string; decision: ProjectMcpDecision }
+    result: void
+  }
+  // The same for a card holding the hooks a session's folder declares in its own settings.
+  'sessions.answerProjectHooks': {
+    params: { sessionId: string; entryId: string; decision: ProjectHooksDecision }
+    result: void
+  }
+  // What became of a problem report the agent drafted, from the window or device that sent, saved
+  // or dropped it; the first answer counts.
+  'sessions.answerReport': {
+    params: { sessionId: string; entryId: string; outcome: ProblemReportOutcome }
+    result: void
+  }
+  // The answer to an agent's proposed write to global memory, from the window or device that gave
+  // it first; `remember` writes it.
+  'sessions.answerMemory': {
+    params: { sessionId: string; entryId: string; decision: MemoryDecision }
+    result: void
+  }
+  // Takes an agent's project memory write back, while the entry is as that write left it.
+  'sessions.undoMemory': {
+    params: { sessionId: string; entryId: string }
+    result: void
+  }
+  // Settings › Memory: the switch, global memory, the projects with their counts, and how many
+  // entries the agents' own memories hold that could be imported.
+  'memory.overview': { params: void; result: MemoryOverview }
+  'memory.list': { params: { scope: MemoryScope }; result: MemoryEntry[] }
+  // Writes the user's entry: a new one when `id` is null, else that entry changed.
+  'memory.save': {
+    params: { scope: MemoryScope; id: string | null; draft: MemoryDraft }
+    result: MemoryEntry
+  }
+  'memory.remove': { params: { scope: MemoryScope; id: string }; result: void }
+  // Moves a project's entry to global memory; the user asking is the consent global writes need.
+  'memory.moveToGlobal': { params: { project: string; id: string }; result: MemoryEntry }
+  // Off: no index and no memory tools, and each harness keeps its own memory as it had it.
+  'memory.setEnabled': { params: { enabled: boolean }; result: void }
+  // What the agents' own memories hold for projects Sarto knows, not yet imported.
+  'memory.importScan': { params: void; result: MemoryImportScan }
+  // Copies those sources into their projects' memory; `global` names the entries the user ticked
+  // to go to global memory instead. The originals stay as they are.
+  'memory.import': {
+    params: { sources: { agentId: AgentId; project: string }[]; global: string[] }
+    result: MemoryImportResult
+  }
+  // The label's Stop using: the session stops using the computer for the rest of its turn.
+  'computer.stop': {
+    params: { sessionId: string }
+    result: void
+  }
+  // Take over: the user holds the app the session uses, and its calls wait until Hand back.
+  'computer.takeOver': {
+    params: { sessionId: string }
+    result: void
+  }
+  'computer.handBack': {
+    params: { sessionId: string }
+    result: void
+  }
+  // Show app: brings the window the session uses to the front; from this computer's windows only.
+  'computer.show': {
+    params: { sessionId: string }
+    result: void
+  }
+  // Not now on a setup card, `entryId`, from any window or device: the call that waits on it fails.
+  'computer.declineSetup': {
+    params: { sessionId: string; entryId: string }
+    result: void
+  }
+  // Current Sarto app version and updater state on this computer, for multi-device Settings.
+  'app.updateStatus': { params: void; result: AppUpdateStatus }
+  // Local desktop app publishes its SartoUpdater state; refused from paired remote devices.
+  'app.reportUpdateState': { params: AppUpdateStatus; result: void }
+  // Asks this computer's running Sarto.app to check for or install an update via SartoUpdater.
+  'app.requestUpdate': {
+    params: { action: AppUpdateRequestAction }
+    result: AppUpdateRequestResult
+  }
+  // Host CPU, memory and battery load; `host.load` events stream updates while watched.
+  'host.load.watch': { params: void; result: HostLoadWatch }
+  'host.load.unwatch': { params: void; result: void }
+  // Own-account remote Claude Code: local discovery and management (refused from paired devices).
+  'remoteClaude.hosts': { params: void; result: RemoteClaudeHostInfo[] }
+  'remoteClaude.active': { params: void; result: RemoteClaudeActiveRun[] }
+  'remoteClaude.disconnectAll': { params: void; result: { closed: number } }
+  // Own-account remote Claude Code: peer-to-peer hosted execution on a remote computer.
+  'remoteClaude.status': { params: void; result: RemoteClaudeStatus }
+  'remoteClaude.open': { params: RemoteClaudeOpenParams; result: RemoteClaudeOpenResult }
+  'remoteClaude.prompt': { params: RemoteClaudePromptParams; result: RemoteClaudePromptResult }
+  'remoteClaude.cancel': { params: { runId: string }; result: void }
+  'remoteClaude.setConfig': { params: RemoteClaudeSetConfigParams; result: ConfigOption[] }
+  'remoteClaude.close': { params: { runId: string }; result: void }
+  'remoteClaude.mcpAnswer': { params: RemoteClaudeMcpAnswer; result: void }
+  'remoteClaude.permissionAnswer': { params: RemoteClaudePermissionAnswer; result: void }
+}
+
+export type AppUpdateStateKind =
+  'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'restarting' | 'error' | 'off'
+
+export type AppUpdateModeKind = 'install' | 'link' | 'unavailable'
+
+export type AppUpdateRequestAction = 'check' | 'install'
+
+export interface AppUpdateStatus {
+  currentVersion: string
+  state: AppUpdateStateKind
+  mode: AppUpdateModeKind
+  canInstall: boolean
+  availableVersion?: string
+  progress?: number
+  error?: string
+  updatedAt: number
+}
+
+export interface AppUpdateRequestResult {
+  accepted: boolean
+  reason?: 'app_not_running' | 'install_unavailable'
+  status: AppUpdateStatus
+}
+
+export type HostMethod = keyof HostContract
+export type HostParams<M extends HostMethod> = HostContract[M]['params']
+export type HostResult<M extends HostMethod> = HostContract[M]['result']
+/** What a paired device's port gets: a method's `deviceResult` where it has one, else its result. */
+export type DeviceResult<M extends HostMethod> = HostContract[M] extends { deviceResult: infer R }
+  ? R
+  : HostResult<M>
+
+export const HOST_METHODS = [
+  'agents.list',
+  'agents.check',
+  'agents.reloadEnvironment',
+  'agents.detectedPrograms',
+  'agents.environment',
+  'agents.authenticate',
+  'agents.cancelSignIn',
+  'agents.logout',
+  'agents.providerAction',
+  'agents.retry',
+  'agents.reinstall',
+  'agents.checkUpdates',
+  'agents.skipUpdate',
+  'agents.unskipUpdate',
+  'agents.update',
+  'agents.updateCli',
+  'agents.setApiKey',
+  'agents.clearApiKey',
+  'agents.install',
+  'agents.installOffer',
+  'agents.uninstall',
+  'agents.cancelTask',
+  'agents.readOptions',
+  'agents.readFirstOptions',
+  'agents.refreshLimits',
+  'agents.spendReset',
+  'agents.details',
+  'agents.claudeSettings',
+  'agents.setClaudeSetting',
+  'agents.autoCompact',
+  'agents.setAutoCompact',
+  'agents.codebuddySettings',
+  'agents.setCodebuddySite',
+  'agents.refreshAccount',
+  'agents.listSessions',
+  'agents.options',
+  'agents.pinModel',
+  'agents.setPinnedModels',
+  'agents.lightAgents',
+  'agents.draftReport',
+  'mcp.status',
+  'mcp.retry',
+  'market.catalog',
+  'market.search',
+  'market.keys',
+  'market.connect',
+  'market.detectSignIn',
+  'market.cancelConnect',
+  'market.disconnect',
+  'market.connections',
+  'market.plugins',
+  'market.pluginDetails',
+  'market.pluginLogo',
+  'market.installPlugin',
+  'market.uninstallPlugin',
+  'market.setPluginEnabled',
+  'market.addMarketplace',
+  'market.removeMarketplace',
+  'market.skills',
+  'market.skillRepository',
+  'market.addSkill',
+  'settings.answerChange',
+  'settings.undoChange',
+  'projects.list',
+  'projects.add',
+  'projects.remove',
+  'projects.touch',
+  'projects.pin',
+  'projects.move',
+  'projects.noProject',
+  'projects.worktreeSettings',
+  'projects.setWorktreeSettings',
+  'paths.complete',
+  'sessions.list',
+  'sessions.changes',
+  'events.select',
+  'sessions.create',
+  'sessions.prepare',
+  'sessions.discard',
+  'sessions.import',
+  'sessions.open',
+  'sessions.snapshot',
+  'sessions.page',
+  'sessions.entry',
+  'sessions.requests',
+  'sessions.outline',
+  'sessions.modelRequests',
+  'sessions.modelRequestsOverview',
+  'sessions.modelRequestRaw',
+  'sessions.search',
+  'sessions.find',
+  'sessions.outputs',
+  'sessions.outlineTitles',
+  'sessions.watch',
+  'sessions.unwatch',
+  'sessions.show',
+  'sessions.prompt',
+  'sessions.attachEarly',
+  'sessions.cancel',
+  'sessions.runningWork',
+  'sessions.idleRelease',
+  'sessions.stopTask',
+  'sessions.taskOutput',
+  'sessions.retry',
+  'sessions.cancelContinue',
+  'sessions.rewind',
+  'sessions.putBack',
+  'sessions.fork',
+  'worktrees.inspect',
+  'worktrees.remove',
+  'worktrees.retrySetup',
+  'worktrees.skipSetup',
+  'worktrees.setupLog',
+  'sessions.switchAgent',
+  'sessions.context',
+  'sessions.contextEstimates',
+  'sessions.queue',
+  'sessions.runCommand',
+  'sessions.unqueue',
+  'sessions.steer',
+  'sessions.sendNow',
+  'sessions.resumeQueue',
+  'sessions.blob',
+  'sessions.setConfigOption',
+  'sessions.refreshModels',
+  'sessions.rename',
+  'sessions.close',
+  'sessions.pin',
+  'sessions.archive',
+  'sessions.unarchive',
+  'sessions.markUnread',
+  'sessions.delete',
+  'sessions.removeEmpty',
+  'sessions.takeReturned',
+  'sessions.removeAll',
+  'permissions.respond',
+  'git.status',
+  'git.unwatch',
+  'git.fetch',
+  'git.pull',
+  'git.push',
+  'git.publish',
+  'git.createPullRequest',
+  'git.commit',
+  'git.changes',
+  'git.commitMessage',
+  'git.pullRequestDraft',
+  'git.incoming',
+  'git.fileDiff',
+  'git.branches',
+  'git.switchBranch',
+  'git.publishBranch',
+  'git.commitChanges',
+  'git.discardChanges',
+  'git.pullRequest',
+  'git.issue',
+  'git.watchReferences',
+  'git.avatarUrl',
+  'git.currentPullRequest',
+  'git.tools',
+  'attachments.add',
+  'attachments.read',
+  'attachments.update',
+  'attachments.remove',
+  'attachments.held',
+  'files.list',
+  'files.watch',
+  'files.unwatch',
+  'files.listFolder',
+  'files.read',
+  'files.search',
+  'files.agentFolder',
+  'files.readAgentFile',
+  'files.write',
+  'files.create',
+  'files.rename',
+  'files.copy',
+  'files.upload',
+  'files.delete',
+  'files.preview',
+  'media.open',
+  'media.authorize',
+  'usage.summary',
+  'usage.overview',
+  'usage.total',
+  'usage.status',
+  'usage.sync',
+  'usage.reimport',
+  'usage.clearRecord',
+  'usage.forgetAccount',
+  'browser.answer',
+  'browser.waiting',
+  'browser.origin',
+  'browser.originSettled',
+  'browser.handedBack',
+  'control.answerAsk',
+  'browser.answerOrigin',
+  'devices.answerAccess',
+  'devices.revokeAccess',
+  'surfaces.answerAccess',
+  'terminals.revokeAccess',
+  'devices.allowed',
+  'devices.forget',
+  'computer.answerApp',
+  'sessions.answerProjectMcp',
+  'sessions.answerProjectHooks',
+  'sessions.answerReport',
+  'sessions.answerMemory',
+  'sessions.undoMemory',
+  'memory.overview',
+  'memory.list',
+  'memory.save',
+  'memory.remove',
+  'memory.moveToGlobal',
+  'memory.setEnabled',
+  'memory.importScan',
+  'memory.import',
+  'computer.stop',
+  'computer.takeOver',
+  'computer.handBack',
+  'computer.show',
+  'computer.declineSetup',
+  'app.updateStatus',
+  'app.reportUpdateState',
+  'app.requestUpdate',
+  'host.load.watch',
+  'host.load.unwatch',
+  'remoteClaude.hosts',
+  'remoteClaude.active',
+  'remoteClaude.disconnectAll',
+  'remoteClaude.status',
+  'remoteClaude.open',
+  'remoteClaude.prompt',
+  'remoteClaude.cancel',
+  'remoteClaude.setConfig',
+  'remoteClaude.close',
+  'remoteClaude.mcpAnswer',
+  'remoteClaude.permissionAnswer',
+] as const satisfies readonly HostMethod[]
+
+/** One that has a session in front: the host's own windows as one, or a paired device. */
+export type SessionViewer = { kind: 'host' } | { kind: 'device'; id: string; name: string }
+
+export type HostEvent =
+  | { type: 'session.patches'; batch: PatchBatch }
+  | { type: 'session.summary'; summary: SessionSummary }
+  | { type: 'session.removed'; sessionId: string }
+  | { type: 'session.returned'; sessionId: string | null }
+  // To a port that watches the session: the others that have it in front, never the port's own
+  // computer or device.
+  | { type: 'session.viewers'; sessionId: string; viewers: SessionViewer[] }
+  // What the host's own sessions' work came to, for the Agent RPG (`work-facts.ts`).
+  | { type: 'work.facts'; facts: WorkFact[] }
+  | { type: 'agent.status'; status: AgentStatus }
+  | { type: 'agent.removed'; agentId: AgentId }
+  | { type: 'agent.options'; options: AgentOptions }
+  // To the port whose `agents.authenticate` runs: the agent's sign-in page, for its device to open.
+  | { type: 'agents.signInLink'; agentId: AgentId; url: string }
+  // `noProject` is absent from hosts that cannot pin No project.
+  | { type: 'projects.changed'; projects: Project[]; noProject?: NoProject }
+  | { type: 'environment.changed'; info: EnvironmentInfo }
+  | { type: 'git.changed'; status: GitStatus }
+  | { type: 'git.pr'; projectPath: string; pr: PullRequest | null }
+  | { type: 'git.reference'; url: string; found: IssueLookup } // to the ports watching `url`
+  | { type: 'git.tools'; tools: GitTools }
+  // To the ports watching the project's files, by the path each named it: list and read them again.
+  | { type: 'files.changed'; projectPath: string }
+  | { type: 'usage.changed' } // the figures changed; a page showing them reads again
+  | { type: 'market.keysChanged' } // the Marketplace's keys changed; a page showing them reads again
+  // The account, what it published or the drafts changed; Marketplace › Published reads again.
+  // To the windows showing a session: its agent's open_settings, Settings at a row.
+  | { type: 'settings.open'; section: SettingsSection; item: string | null; row: string }
+  | { type: 'memory.changed' } // Sarto's memory or its switch changed; a page showing it reads again
+  // A server's sign-in changed; `loginId` and `error` close a Connect the window started.
+  | {
+      type: 'market.connectionChanged'
+      serverId: string
+      connection: MarketConnection
+      loginId?: string
+      error?: string
+    }
+  | { type: 'usage.status'; status: UsageStatus }
+  | { type: 'idleRelease.changed'; state: IdleReleaseState }
+  // To the port of the desktop app that sent the turn: a call for its main to run on the session's
+  // page, answered by `browser.answer`.
+  | { type: 'browser.call'; call: BrowserDeviceCall }
+  // To that port: the answer a window or device gave its page's new site, for its main to give.
+  | {
+      type: 'browser.originDecided'
+      sessionId: string
+      requestId: number
+      decision: BrowserOriginDecision
+    }
+  // To that port: the last running turn that used the session's page ended.
+  | { type: 'browser.turnEnded'; sessionId: string }
+  // To that port: Done or Skip on the card of the step the agent asked for on the page.
+  | { type: 'browser.askAnswered'; sessionId: string; outcome: ControlOutcome }
+  // To all ports: this computer's desktop app updater state changed.
+  | { type: 'app.updateState'; status: AppUpdateStatus }
+  // To local desktop ports only: a paired device asked this Mac's app to check or install an update.
+  | { type: 'app.updateCommand'; action: AppUpdateRequestAction }
+  // To ports watching host load: CPU, memory and battery metrics sample.
+  | { type: 'host.load'; load: HostLoad }
+  // Own-account remote Claude Code events from the model host to the owning controller port.
+  | { type: 'remoteClaude.output'; event: RemoteClaudeOutputEvent }
+  | { type: 'remoteClaude.mcpCall'; call: RemoteClaudeMcpCall }
+  | { type: 'remoteClaude.permission'; request: RemoteClaudePermissionRequest }
+  | { type: 'remoteClaude.closed'; event: RemoteClaudeClosedEvent }
+  // To local ports: active hosted Claude Code runs on this computer changed (for Settings).
+  | { type: 'remoteClaude.activeChanged'; active: RemoteClaudeActiveRun[] }
+
+export interface AgentsApi {
+  request<M extends HostMethod>(method: M, params: HostParams<M>): Promise<HostResult<M>>
+  onEvent(listener: (event: HostEvent) => void): () => void
+  /** Calls the listener with the current state, if there is one yet, and then on every change. */
+  onConnection(listener: (state: PortConnectionState) => void): () => void
+  /** Starts the host again after it failed (crashed too often); does nothing otherwise. */
+  restart(): Promise<void>
+}

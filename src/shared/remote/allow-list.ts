@@ -1,0 +1,32 @@
+// What a device may ask of the agent host: everything a window can, except what needs main. The
+// remote host and the agent host both check it, so a remote host that misbehaves cannot widen it.
+
+import type { HostMethod } from '../agent-host'
+
+// A file main's media scheme serves, a page Sarto's browser loads from this computer's loopback
+// address, local-only desktop app state reporting, and local-only remote-Claude host
+// discovery/control calls.
+const MAIN_ONLY: ReadonlySet<string> = new Set<HostMethod>([
+  'media.open',
+  'files.preview',
+  'app.reportUpdateState',
+  'remoteClaude.hosts',
+  'remoteClaude.active',
+  'remoteClaude.disconnectAll',
+])
+
+function hasGrant(params: unknown): boolean {
+  if (typeof params !== 'object' || params === null) return false
+  const source = (params as { source?: unknown }).source
+  return typeof source === 'object' && source !== null && 'grantId' in source
+}
+
+/**
+ * Whether a device is refused this request: a host method that needs main, or an attachment or
+ * upload from a file main granted to a window. A method the host does not know is not this list's
+ * to refuse.
+ */
+export function forbiddenToDevices(method: string, params: unknown): boolean {
+  if (MAIN_ONLY.has(method)) return true
+  return (method === 'attachments.add' || method === 'files.upload') && hasGrant(params)
+}

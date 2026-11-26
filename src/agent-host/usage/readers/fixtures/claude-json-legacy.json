@@ -1,0 +1,14 @@
+{
+  "oauthAccount": {
+    "emailAddress": "someone@example.com",
+    "organizationType": "claude_max",
+    "userRateLimitTier": "default_claude_max_20x"
+  },
+  "cachedUsageUtilization": {
+    "fetchedAtMs": 1795200000000,
+    "utilization": {
+      "five_hour": { "utilization": 42.5, "resets_at": "2026-11-21T15:00:00Z" },
+      "seven_day": { "utilization": 7, "resets_at": 1795700000 }
+    }
+  }
+}

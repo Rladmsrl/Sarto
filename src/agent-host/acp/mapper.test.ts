@@ -1,0 +1,1834 @@
+import type { SessionUpdate, ToolCallUpdate } from '@agentclientprotocol/sdk/unstable'
+import { describe, expect, it } from 'vitest'
+import type { PlanLimit } from '@shared/agent-host'
+import {
+  applyPatches,
+  threadEntries,
+  threadFromSnapshot,
+  type SessionView,
+  type ThreadEntry,
+  type ThreadState,
+} from '@shared/thread'
+import { promptBlocks } from '../connection'
+import {
+  addTokenTotals,
+  mergeConfig,
+  newTurnScope,
+  type MapperEffect,
+  type TurnScope,
+} from '../session-updates'
+import claudeReplay from './fixtures/replay-claude.json'
+import codexReplay from './fixtures/replay-codex.json'
+import opencodeReplay from './fixtures/replay-opencode.json'
+import {
+  CARRIED_DATA_LIMIT,
+  chunkTokens,
+  contentRef,
+  gooseCallUsage,
+  mapAuthStatus,
+  mapReportedAuthStatus,
+  mapConfig,
+  mapModelUsage,
+  mapPermissionOptions,
+  mapPermissionToolCall,
+  mapSessionUpdate,
+  mapTokenTotals,
+} from './mapper'
+import {
+  allowedLimit,
+  coverWithExtraUsage,
+  endExtraUsage,
+  mapRateLimits,
+  mergeReadLimit,
+  mergeReadLimits,
+  rateLimitEffects,
+  rawInputText,
+} from '../session-updates'
+
+const baseSession: SessionView = {
+  id: 's1',
+  agentId: 'fake-agent',
+  projectPath: '/repo',
+  acpSessionId: 'acp-1',
+  status: 'running',
+  title: null,
+  config: [],
+  commands: [],
+  usage: null,
+  error: null,
+  turnStartedAt: 1,
+  turnStartUsed: null,
+  createdAt: 1,
+  updatedAt: 1,
+  parentId: null,
+  origin: 'user',
+  subagent: null,
+  queue: [],
+  queuePaused: false,
+}
+
+interface RunOptions {
+  replaying?: boolean
+  cancelling?: boolean
+  thread?: ThreadState
+  scope?: TurnScope
+  session?: Partial<SessionView>
+}
+
+/** Runs a fixture of updates and returns the final thread and every effect. */
+function run(updates: SessionUpdate[], options: RunOptions = {}) {
+  let thread =
+    options.thread ??
+    threadFromSnapshot({ session: { ...baseSession, ...options.session }, entries: [], seq: 0 })
+  let counter = thread.order.length
+  let now = 1_000
+  const scope = options.scope ?? newTurnScope()
+  const effects: MapperEffect[] = []
+  for (const update of updates) {
+    const out = mapSessionUpdate(update, {
+      thread,
+      replaying: options.replaying ?? false,
+      cancelling: options.cancelling ?? false,
+      scope,
+      now,
+      nextId: () => `e:${++counter}`,
+      sessionIdFor: (id) => (id === 'acp-parent' ? 'parent' : null),
+    })
+    thread = applyPatches(thread, out.patches)
+    effects.push(...out.effects)
+    now += 100
+  }
+  return { thread, entries: threadEntries(thread), effects, scope }
+}
+
+const text = (value: string, messageId?: string): SessionUpdate => ({
+  sessionUpdate: 'agent_message_chunk',
+  content: { type: 'text', text: value },
+  ...(messageId ? { messageId } : {}),
+})
+
+describe('message chunks', () => {
+  it('appends by messageId, else to the last agent entry, else starts a new one', () => {
+    const { entries } = run([
+      text('Hel', 'a'),
+      text('lo', 'a'),
+      { sessionUpdate: 'tool_call', toolCallId: 't1', title: 'Read' },
+      text(' late', 'a'),
+      text('No id'),
+      text(' still'),
+    ])
+    expect(entries.map((e) => e.id)).toEqual(['m:a', 't:t1', 'e:1'])
+    expect(entries[0]).toMatchObject({ kind: 'agent', markdown: 'Hello late', streaming: true })
+    expect(entries[2]).toMatchObject({ kind: 'agent', markdown: 'No id still' })
+  })
+
+  it('keeps images and links as attachments and other content as unsupported refs', () => {
+    const { entries } = run([
+      text('See', 'a'),
+      {
+        sessionUpdate: 'agent_message_chunk',
+        messageId: 'a',
+        content: { type: 'image', mimeType: 'image/png', data: 'AA' },
+      },
+      {
+        sessionUpdate: 'agent_message_chunk',
+        messageId: 'a',
+        content: { type: 'resource_link', uri: 'file:///x.md', name: 'x.md', title: 'X' },
+      },
+      {
+        sessionUpdate: 'agent_message_chunk',
+        messageId: 'a',
+        content: { type: 'audio', mimeType: 'audio/wav', data: 'AA' },
+      },
+      {
+        sessionUpdate: 'agent_message_chunk',
+        messageId: 'a',
+        content: { type: 'resource', resource: { uri: 'file:///n.txt', text: 'n' } },
+      },
+    ])
+    expect(entries[0]).toMatchObject({
+      markdown: 'See',
+      attachments: [
+        { kind: 'image', mimeType: 'image/png', data: 'AA' },
+        { kind: 'link', uri: 'file:///x.md', name: 'X' },
+        { kind: 'audio', mimeType: 'audio/wav', data: 'AA', size: 1, name: null },
+        { kind: 'unsupported', label: 'Embedded resource file:///n.txt' },
+      ],
+    })
+  })
+
+  it('keeps sounds and clips with their bytes, from audio blocks and resource blobs', () => {
+    const blob = (mimeType: string) => ({
+      type: 'resource' as const,
+      resource: { uri: 'file:///out/x', mimeType, blob: 'AAAAAA==' },
+    })
+    expect(contentRef({ type: 'audio', mimeType: 'audio/mpeg', data: 'AAAA' })).toEqual({
+      kind: 'audio',
+      mimeType: 'audio/mpeg',
+      data: 'AAAA',
+      size: 3,
+      name: null,
+    })
+    // A resource is named by the file its URI ends in.
+    expect(contentRef(blob('video/mp4'))).toEqual({
+      kind: 'video',
+      mimeType: 'video/mp4',
+      data: 'AAAAAA==',
+      size: 4,
+      name: 'x',
+    })
+    expect(
+      contentRef({
+        type: 'resource',
+        resource: { uri: 'file:///out/my%20clip.webm', mimeType: 'video/webm', blob: 'AAAA' },
+      }),
+    ).toMatchObject({ name: 'my clip.webm' })
+    expect(contentRef(blob('Audio/Ogg'))).toMatchObject({ kind: 'audio', mimeType: 'Audio/Ogg' })
+    // Pictures and text in a resource stay as they were, and so does a sound without its bytes.
+    expect(contentRef(blob('image/png'))).toEqual({
+      kind: 'unsupported',
+      label: 'Embedded resource file:///out/x',
+    })
+    expect(
+      contentRef({
+        type: 'resource',
+        resource: { uri: 'file:///out/a.wav', mimeType: 'audio/wav', text: 'not bytes' },
+      }),
+    ).toMatchObject({ kind: 'unsupported' })
+  })
+
+  it('names a sound or a clip over 20 MB of base64 by its kind and size instead', () => {
+    const edge = 'A'.repeat(CARRIED_DATA_LIMIT)
+    expect(contentRef({ type: 'audio', mimeType: 'audio/wav', data: edge })).toMatchObject({
+      kind: 'audio',
+      size: (CARRIED_DATA_LIMIT / 4) * 3,
+    })
+    const over = edge + 'AAAA'
+    expect(contentRef({ type: 'audio', mimeType: 'audio/wav', data: over })).toEqual({
+      kind: 'unsupported',
+      label: 'Audio, 16 MB, too large to show',
+    })
+    expect(
+      contentRef({
+        type: 'resource',
+        resource: { uri: 'file:///big.mp4', mimeType: 'video/mp4', blob: over },
+      }),
+    ).toEqual({ kind: 'unsupported', label: 'Video, 16 MB, too large to show' })
+  })
+
+  it('starts an agent entry from an attachment alone', () => {
+    const { entries } = run([
+      {
+        sessionUpdate: 'agent_message_chunk',
+        content: { type: 'image', mimeType: 'image/png', data: 'AA' },
+      },
+    ])
+    expect(entries[0]).toMatchObject({
+      kind: 'agent',
+      markdown: '',
+      attachments: [{ kind: 'image' }],
+    })
+  })
+
+  it('streams thoughts and closes them, with their duration, when something follows', () => {
+    const { entries, scope } = run([
+      { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'Hmm' } },
+      { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: ', yes' } },
+      text('Answer'),
+    ])
+    expect(entries[0]).toMatchObject({
+      kind: 'thought',
+      markdown: 'Hmm, yes',
+      streaming: false,
+      durationMs: 200,
+    })
+    expect(entries[1]).toMatchObject({ kind: 'agent', markdown: 'Answer' })
+    expect(scope.thoughts.size).toBe(0)
+  })
+
+  it('separates a thought and a message that share one messageId', () => {
+    const { entries } = run([
+      {
+        sessionUpdate: 'agent_thought_chunk',
+        messageId: 'x',
+        content: { type: 'text', text: 'think' },
+      },
+      text('say', 'x'),
+    ])
+    expect(entries.map((e) => [e.kind, e.id])).toEqual([
+      ['thought', 'm:x'],
+      ['agent', 'm:x#agent'],
+    ])
+  })
+
+  it('adds replayed entries as not streaming', () => {
+    const { entries } = run([text('Old answer', 'h1')], { replaying: true })
+    expect(entries[0]).toMatchObject({ streaming: false })
+  })
+
+  it('runs the parts of a replayed thought together as sent', () => {
+    const part = (value: string): SessionUpdate => ({
+      sessionUpdate: 'agent_thought_chunk',
+      messageId: 'r1',
+      content: { type: 'text', text: value },
+    })
+    const { entries } = run([part('**A**'), part('**B**')], { replaying: true })
+    expect(entries.map((e) => (e.kind === 'thought' ? e.markdown : null))).toEqual(['**A****B**'])
+  })
+})
+
+describe('user message chunks', () => {
+  it('are ignored during a live turn', () => {
+    const { entries } = run([
+      { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: 'echo' } },
+    ])
+    expect(entries).toEqual([])
+  })
+
+  it('build user entries during a replay and start a new plan scope', () => {
+    const { entries } = run(
+      [
+        {
+          sessionUpdate: 'user_message_chunk',
+          messageId: 'u1',
+          content: { type: 'text', text: 'Fix ' },
+        },
+        {
+          sessionUpdate: 'user_message_chunk',
+          messageId: 'u1',
+          content: { type: 'text', text: 'it' },
+        },
+        { sessionUpdate: 'plan', entries: [{ content: 'A', priority: 'high', status: 'pending' }] },
+        { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: 'Again' } },
+        {
+          sessionUpdate: 'user_message_chunk',
+          content: { type: 'image', mimeType: 'image/png', data: 'AA' },
+        },
+        { sessionUpdate: 'plan', entries: [{ content: 'B', priority: 'low', status: 'pending' }] },
+      ],
+      { replaying: true },
+    )
+    expect(entries.map((e) => e.kind)).toEqual(['user', 'plan', 'user', 'plan'])
+    expect(entries[0]).toMatchObject({ id: 'm:u1', content: [{ type: 'text', text: 'Fix it' }] })
+    expect(entries[2]).toMatchObject({
+      content: [
+        { type: 'text', text: 'Again' },
+        {
+          type: 'ref',
+          ref: {
+            kind: 'attachment',
+            attachment: { type: 'image', name: 'Image 1', sent: 'image', thumb: null, blob: null },
+          },
+        },
+      ],
+    })
+  })
+})
+
+describe("Sarto's memory in a replay", () => {
+  const index = '<sarto-memory>\nSarto keeps this memory.\n- [run] How to run\n</sarto-memory>'
+
+  it('leaves the memory index sent ahead of a prompt out of its user message', () => {
+    const { entries } = run(
+      [
+        {
+          sessionUpdate: 'user_message_chunk',
+          content: { type: 'text', text: `${index}\n\nFix the build` },
+        },
+        text('Done'),
+        {
+          sessionUpdate: 'user_message_chunk',
+          messageId: 'u2',
+          content: { type: 'text', text: `${index}\n\n` },
+        },
+        {
+          sessionUpdate: 'user_message_chunk',
+          messageId: 'u2',
+          content: { type: 'text', text: 'And the tests' },
+        },
+        text('Done too'),
+        { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: `Quote ${index}` } },
+      ],
+      { replaying: true },
+    )
+    expect(entries.filter((e) => e.kind === 'user').map((e) => e.content)).toEqual([
+      [{ type: 'text', text: 'Fix the build' }],
+      [{ type: 'text', text: 'And the tests' }],
+      [{ type: 'text', text: `Quote ${index}` }],
+    ])
+  })
+
+  it("leaves Sarto's guide sent ahead of a prompt out of its user message, with or without memory", () => {
+    const guide = '<sarto-guide>\nYou are working in Sarto.\n</sarto-guide>'
+    const { entries } = run(
+      [
+        {
+          sessionUpdate: 'user_message_chunk',
+          content: { type: 'text', text: `${guide}\n\n${index}\n\nFix the build` },
+        },
+        text('Done'),
+        {
+          sessionUpdate: 'user_message_chunk',
+          messageId: 'u2',
+          content: { type: 'text', text: `${guide}\n\n` },
+        },
+        {
+          sessionUpdate: 'user_message_chunk',
+          messageId: 'u2',
+          content: { type: 'text', text: 'And the tests' },
+        },
+        text('Done too'),
+        { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: `Quote ${guide}` } },
+      ],
+      { replaying: true },
+    )
+    expect(entries.filter((e) => e.kind === 'user').map((e) => e.content)).toEqual([
+      [{ type: 'text', text: 'Fix the build' }],
+      [{ type: 'text', text: 'And the tests' }],
+      [{ type: 'text', text: `Quote ${guide}` }],
+    ])
+  })
+})
+
+describe('replayed attachments', () => {
+  const fixture = (updates: unknown): SessionUpdate[] => updates as SessionUpdate[]
+  const userOf = (entries: ThreadEntry[]) => {
+    const entry = entries.find((item) => item.kind === 'user')
+    if (entry?.kind !== 'user') throw new Error('no user entry')
+    return entry
+  }
+  const attachments = (entries: ThreadEntry[]) =>
+    userOf(entries).content.flatMap((item) =>
+      item.type === 'ref' && item.ref.kind === 'attachment' ? [item.ref.attachment] : [],
+    )
+
+  it('maps Claude Code a file left as a link and its context block to one embedded tile', () => {
+    const { entries, effects } = run(fixture(claudeReplay), { replaying: true })
+    expect(entries.map((entry) => entry.kind)).toEqual(['user'])
+    expect(userOf(entries).content).toHaveLength(3)
+    expect(userOf(entries).content[0]).toEqual({
+      type: 'text',
+      text: 'Please look at these and reply OK.',
+    })
+    expect(attachments(entries)).toMatchObject([
+      {
+        type: 'image',
+        name: 'Image 1',
+        uri: null,
+        mimeType: 'image/png',
+        sent: 'image',
+        thumb: null,
+        blob: null,
+      },
+      {
+        type: 'file',
+        name: 'notes.txt',
+        uri: 'file:///tmp/sarto-140-proj/notes.txt',
+        sent: 'embedded',
+        thumb: null,
+        blob: null,
+      },
+    ])
+    const image = attachments(entries)[0]!
+    const entryId = userOf(entries).id
+    expect(image.id).toBe(`${entryId}:a1`)
+    expect(effects).toContainEqual({
+      kind: 'replayImage',
+      entryId,
+      attachmentId: image.id,
+      mimeType: 'image/png',
+      data: expect.any(String),
+    })
+  })
+
+  it('maps Codex one text block with the file link and its context block', () => {
+    const { entries, effects } = run(fixture(codexReplay), { replaying: true })
+    expect(entries.map((entry) => entry.kind)).toEqual(['user'])
+    expect(userOf(entries).content[0]).toEqual({
+      type: 'text',
+      text: 'Please look at these and reply OK.',
+    })
+    expect(attachments(entries)).toMatchObject([
+      { type: 'image', name: 'Image 1', sent: 'image' },
+      { type: 'file', name: 'notes.txt', sent: 'embedded' },
+    ])
+    expect(effects.filter((effect) => effect.kind === 'replayImage')).toHaveLength(1)
+  })
+
+  it('maps OpenCode resource, resource link and image blocks', () => {
+    const { entries } = run(fixture(opencodeReplay), { replaying: true })
+    expect(entries.map((entry) => entry.kind)).toEqual(['user'])
+    expect(attachments(entries)).toMatchObject([
+      { type: 'image', name: 'Image 1', uri: 'file:///private/tmp/sarto-140-proj/image' },
+      {
+        type: 'file',
+        name: 'notes.txt',
+        uri: 'file:///private/tmp/sarto-140-proj/notes.txt',
+        mimeType: 'text/plain',
+        size: 23,
+        sent: 'embedded',
+      },
+      {
+        type: 'file',
+        name: 'notes.txt',
+        uri: 'file:///tmp/sarto-140-proj/notes.txt',
+        mimeType: 'text/plain',
+        sent: 'linked',
+      },
+    ])
+  })
+
+  it('keeps the text around a file link and drops the context block', () => {
+    const { entries } = run(
+      [
+        {
+          sessionUpdate: 'user_message_chunk',
+          content: {
+            type: 'text',
+            text: 'Review this\n[@a file.md](file:///repo/a%20file.md)\n<context ref="file:///repo/a%20file.md">\n# A\n\n```ts\nconst a = 1\n```\n</context>\nThanks',
+          },
+        },
+      ],
+      { replaying: true },
+    )
+    const user = userOf(entries)
+    expect(user.content).toMatchObject([
+      { type: 'text', text: 'Review this' },
+      {
+        type: 'ref',
+        ref: {
+          kind: 'attachment',
+          attachment: {
+            type: 'file',
+            name: 'a file.md',
+            uri: 'file:///repo/a%20file.md',
+            sent: 'embedded',
+          },
+        },
+      },
+      { type: 'text', text: 'Thanks' },
+    ])
+  })
+
+  it('keeps a link that is not a file or a data image as text', () => {
+    const { entries, effects } = run(
+      [
+        {
+          sessionUpdate: 'user_message_chunk',
+          content: {
+            type: 'text',
+            text: 'See [@docs](https://example.com/docs) and [notes](file:///repo/notes.txt)',
+          },
+        },
+      ],
+      { replaying: true },
+    )
+    expect(userOf(entries).content).toEqual([
+      {
+        type: 'text',
+        text: 'See [@docs](https://example.com/docs) and [notes](file:///repo/notes.txt)',
+      },
+    ])
+    expect(effects).toEqual([])
+  })
+
+  it('keeps a link with no context block as a linked tile', () => {
+    const { entries } = run(
+      [
+        {
+          sessionUpdate: 'user_message_chunk',
+          content: { type: 'text', text: '[@notes.txt](file:///repo/notes.txt)' },
+        },
+      ],
+      { replaying: true },
+    )
+    expect(attachments(entries)).toMatchObject([
+      { type: 'file', name: 'notes.txt', sent: 'linked', thumb: null, blob: null },
+    ])
+  })
+})
+
+describe('tool calls', () => {
+  it('keeps a sound or a clip in the content of a call', () => {
+    const { entries } = run([
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'c1',
+        title: 'Render',
+        kind: 'other',
+        status: 'completed',
+        content: [
+          { type: 'content', content: { type: 'audio', mimeType: 'audio/wav', data: 'AAAA' } },
+          {
+            type: 'content',
+            content: {
+              type: 'resource',
+              resource: { uri: 'file:///out/clip.mp4', mimeType: 'video/mp4', blob: 'AAAA' },
+            },
+          },
+        ],
+      },
+    ])
+    expect(entries[0]).toMatchObject({
+      content: [
+        { type: 'ref', ref: { kind: 'audio', mimeType: 'audio/wav', data: 'AAAA', size: 3 } },
+        {
+          type: 'ref',
+          ref: { kind: 'video', mimeType: 'video/mp4', data: 'AAAA', size: 3, name: 'clip.mp4' },
+        },
+      ],
+    })
+  })
+
+  it('adds a call, updates only the fields present and replaces lists', () => {
+    const { entries, effects } = run([
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'c1',
+        title: 'Run tests',
+        kind: 'execute',
+        status: 'pending',
+        locations: [{ path: '/repo/a.ts', line: 3 }],
+        rawInput: { command: 'pnpm test', cwd: '/repo' },
+      },
+      { sessionUpdate: 'tool_call_update', toolCallId: 'c1', status: 'in_progress' },
+      {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'c1',
+        status: 'completed',
+        content: [
+          { type: 'content', content: { type: 'text', text: 'ok\r\nall passed\r\n' } },
+          { type: 'diff', path: '/repo/a.ts', oldText: 'a\r\n', newText: 'b\r\n' },
+          { type: 'diff', path: '/repo/new.ts', newText: 'new' },
+        ],
+        locations: [{ path: '/repo/b.ts', line: null }],
+      },
+    ])
+    expect(entries).toEqual<ThreadEntry[]>([
+      {
+        kind: 'tool',
+        id: 't:c1',
+        title: 'Run tests',
+        toolKind: 'execute',
+        status: 'completed',
+        content: [
+          { type: 'markdown', markdown: 'ok\nall passed\n' },
+          { type: 'diff', path: '/repo/a.ts', oldText: 'a\n', newText: 'b\n' },
+          { type: 'diff', path: '/repo/new.ts', oldText: null, newText: 'new' },
+        ],
+        locations: [{ path: '/repo/b.ts' }],
+        permission: null,
+        permissionResult: null,
+        rawInput: 'pnpm test',
+      },
+    ])
+    expect(effects).toEqual([
+      {
+        kind: 'tool',
+        phase: 'started',
+        toolCallId: 'c1',
+        entryId: 't:c1',
+        toolKind: 'execute',
+        output: '',
+      },
+      {
+        kind: 'tool',
+        phase: 'ended',
+        toolCallId: 'c1',
+        entryId: 't:c1',
+        toolKind: 'execute',
+        output: 'ok\nall passed\n',
+      },
+    ])
+  })
+
+  it('updates a call announced twice instead of duplicating it', () => {
+    const { entries } = run([
+      { sessionUpdate: 'tool_call', toolCallId: 'c1', title: 'Read', kind: 'read' },
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'c1',
+        title: 'Read src/a.ts',
+        rawInput: 'src/a.ts',
+      },
+    ])
+    expect(entries).toHaveLength(1)
+    expect(entries[0]).toMatchObject({
+      title: 'Read src/a.ts',
+      toolKind: 'read',
+      rawInput: 'src/a.ts',
+    })
+  })
+
+  it('adds the entry when an update arrives before the call, with defaults', () => {
+    const { entries, effects } = run([
+      {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'late',
+        status: 'failed',
+        kind: 'bogus' as 'other',
+      },
+    ])
+    expect(entries[0]).toMatchObject({ title: 'Tool call', toolKind: 'other', status: 'failed' })
+    expect(effects.map((e) => (e.kind === 'tool' ? e.phase : e.kind))).toEqual(['started', 'ended'])
+  })
+
+  it('reports work that runs on in the background after its call, live only', () => {
+    const background = (update: Partial<ToolCallUpdate>): SessionUpdate => ({
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 'bg',
+      status: 'completed',
+      ...update,
+    })
+    const kinds = (updates: SessionUpdate[], replaying = false) =>
+      run(updates, { replaying }).effects.map((e) => e.kind)
+    const command = { rawInput: { command: 'npm run dev', run_in_background: true } }
+    expect(kinds([background(command)])).toContain('background')
+    expect(kinds([background({ _meta: { claudeCode: { toolName: 'Monitor' } } })])).toContain(
+      'background',
+    )
+    expect(kinds([background(command)], true)).not.toContain('background')
+    expect(kinds([background({ rawInput: { command: 'ls' } })])).not.toContain('background')
+    // A background agent is a subagent, whose own state says when it ends.
+    expect(
+      kinds([background({ rawInput: { prompt: 'Explore', run_in_background: true } })]),
+    ).not.toContain('background')
+  })
+
+  it("keeps a command's description", () => {
+    const { entries } = run([
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'c1',
+        title: 'pnpm test',
+        kind: 'execute',
+        rawInput: { command: 'pnpm test', description: 'Run the login tests' },
+      },
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'c2',
+        title: 'ls',
+        kind: 'execute',
+        rawInput: { command: 'ls', command_description: 'List the files' },
+      },
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'c3',
+        title: 'Publish',
+        kind: 'other',
+        rawInput: { title: 'Notes', description: 'Shared notes' },
+      },
+    ])
+    expect(entries.map((e) => (e.kind === 'tool' ? e.description : null))).toEqual([
+      'Run the login tests',
+      'List the files',
+      undefined,
+    ])
+    expect(entries[2]).not.toHaveProperty('description')
+  })
+
+  it('keeps a description to one line of at most 200 characters', () => {
+    const described = (description: string) =>
+      run([
+        {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'c1',
+          title: 'ls',
+          kind: 'execute',
+          rawInput: { command: 'ls', description },
+        },
+      ]).entries[0]
+    expect(described('  List\nthe \t files\r\n')).toMatchObject({ description: 'List the files' })
+    expect(described('x'.repeat(300))).toMatchObject({ description: `${'x'.repeat(200)}…` })
+    expect(described(' \n ')).not.toHaveProperty('description')
+  })
+
+  it('updates the description as the input streams in', () => {
+    const { entries } = run([
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'c1',
+        title: 'Terminal',
+        kind: 'execute',
+        rawInput: {},
+      },
+      {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'c1',
+        rawInput: { command: 'pnpm test', description: 'Run the' },
+      },
+      {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'c1',
+        rawInput: { command: 'pnpm test', description: 'Run the login tests' },
+      },
+    ])
+    expect(entries[0]).toMatchObject({ rawInput: 'pnpm test', description: 'Run the login tests' })
+  })
+
+  it('renders raw input as text', () => {
+    expect(rawInputText(undefined)).toBeUndefined()
+    expect(rawInputText('ls\r\n')).toBe('ls\n')
+    expect(rawInputText({ command: ['git', 'status'] })).toBe('git status')
+    expect(rawInputText({ path: '/a' })).toBe('{\n  "path": "/a"\n}')
+  })
+})
+
+describe('plans', () => {
+  it('replaces the current plan in a turn and starts a new one in the next', () => {
+    const scope = newTurnScope()
+    const first = run(
+      [
+        {
+          sessionUpdate: 'plan',
+          entries: [{ content: 'A', priority: 'high', status: 'in_progress' }],
+        },
+        {
+          sessionUpdate: 'plan',
+          entries: [{ content: 'A', priority: 'high', status: 'completed' }],
+        },
+      ],
+      { scope },
+    )
+    expect(first.entries).toEqual([
+      { kind: 'plan', id: 'e:1', items: [{ content: 'A', priority: 'high', status: 'completed' }] },
+    ])
+    const second = run(
+      [{ sessionUpdate: 'plan', entries: [{ content: 'B', priority: 'low', status: 'pending' }] }],
+      { thread: first.thread, scope: newTurnScope() },
+    )
+    expect(second.entries.map((e) => e.id)).toEqual(['e:1', 'e:2'])
+  })
+})
+
+describe('session-level updates', () => {
+  it('maps commands, config, modes, titles and usage', () => {
+    const { thread, effects } = run(
+      [
+        {
+          sessionUpdate: 'available_commands_update',
+          availableCommands: [
+            { name: 'compact', description: 'Compact' },
+            { name: 'review', description: 'Review', input: { hint: '<branch>' } },
+          ],
+        },
+        {
+          sessionUpdate: 'config_option_update',
+          configOptions: [
+            {
+              id: 'model',
+              name: 'Model',
+              category: 'model',
+              type: 'select',
+              currentValue: 'b',
+              options: [
+                { value: 'a', name: 'A' },
+                { value: 'b', name: 'B' },
+              ],
+            },
+          ],
+        },
+        { sessionUpdate: 'current_mode_update', currentModeId: 'plan' },
+        {
+          sessionUpdate: 'session_info_update',
+          title: 'Fix login',
+          updatedAt: '2026-10-20T10:00:00Z',
+        },
+        {
+          sessionUpdate: 'usage_update',
+          used: 1200,
+          size: 200000,
+          cost: { amount: 0.42, currency: 'USD' },
+          _meta: {
+            '_claude/rateLimit': {
+              status: 'allowed_warning',
+              rateLimitType: 'five_hour',
+              utilization: 0.823,
+              resetsAt: 1_800_000_000,
+            },
+          },
+        },
+      ],
+      {
+        session: {
+          config: mapConfig([], {
+            currentModeId: 'ask',
+            availableModes: [
+              { id: 'ask', name: 'Ask' },
+              { id: 'plan', name: 'Plan', description: 'Plans first' },
+            ],
+          }),
+          usage: {
+            used: 0,
+            size: 1,
+            cost: null,
+            tokens: {
+              total: 9,
+              input: 5,
+              output: 4,
+              thought: null,
+              cacheRead: null,
+              cacheWrite: null,
+            },
+          },
+        },
+      },
+    )
+    expect(thread.session.commands).toEqual([
+      { name: 'compact', description: 'Compact' },
+      { name: 'review', description: 'Review', inputHint: '<branch>' },
+    ])
+    expect(thread.session.config.map((o) => [o.id, o.value])).toEqual([
+      ['__mode', 'plan'],
+      ['model', 'b'],
+    ])
+    expect(thread.session.title).toBe('Fix login')
+    expect(thread.session.updatedAt).toBe(Date.parse('2026-10-20T10:00:00Z'))
+    expect(thread.session.usage).toEqual({
+      used: 1200,
+      size: 200000,
+      cost: { amount: 0.42, currency: 'USD' },
+      tokens: { total: 9, input: 5, output: 4, thought: null, cacheRead: null, cacheWrite: null },
+    })
+    expect(effects).toEqual([
+      { kind: 'title', title: 'Fix login' },
+      {
+        kind: 'limit',
+        limit: {
+          window: 'five_hour',
+          label: '5-hour',
+          usedPercent: 82.3,
+          resetsAt: 1_800_000_000_000,
+          state: 'warning',
+          observedAt: 1400,
+        },
+      },
+      { kind: 'limits-allowed' },
+    ])
+  })
+
+  it('updates a real mode option and reports a mode update without one', () => {
+    const withMode = run([{ sessionUpdate: 'current_mode_update', currentModeId: 'code' }], {
+      session: {
+        config: [
+          { id: 'mode', name: 'Mode', category: 'mode', type: 'select', value: 'ask', choices: [] },
+        ],
+      },
+    })
+    expect(withMode.thread.session.config[0]!.value).toBe('code')
+    const without = run([{ sessionUpdate: 'current_mode_update', currentModeId: 'code' }])
+    expect(without.effects).toEqual([
+      { kind: 'ignored', variant: 'current_mode_update', detail: 'no mode option' },
+    ])
+  })
+
+  it('reports a cleared title so the host can fall back', () => {
+    const { thread, effects } = run([{ sessionUpdate: 'session_info_update', title: null }], {
+      session: { title: 'Old' },
+    })
+    expect(thread.session.title).toBeNull()
+    expect(effects).toEqual([{ kind: 'title', title: null }])
+  })
+})
+
+describe("Sarto's memory in an agent's title", () => {
+  const index = '<sarto-memory>\nSarto keeps this memory.\n- [run] How to run\n</sarto-memory>'
+  const guide = '<sarto-guide>\nYou are working in Sarto.\n</sarto-guide>'
+  const titled = (title: string | null) =>
+    run(
+      [
+        { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: 'Fix the build' } },
+        { sessionUpdate: 'session_info_update', title },
+      ],
+      { replaying: true },
+    )
+
+  it('is no title when it is the first message with what went ahead of it', () => {
+    for (const title of [
+      `${index}\n\nFix the build`,
+      `${guide}\n\n${index}\n\nFix the build`,
+      `${guide} ${index} Fix the build`,
+    ]) {
+      const { thread, effects } = titled(title)
+      expect(thread.session.title).toBeNull()
+      expect(effects).toEqual([])
+    }
+  })
+
+  it('is no title when it is only what went ahead of the message, or cut inside it', () => {
+    for (const title of [
+      '<sarto-memory>',
+      '<sarto-guide>',
+      '<sarto-memory> Sarto keeps this memory. - [run] How to run…',
+      `${guide}\n\n<sarto-memory>\nSarto keeps`,
+      index,
+    ]) {
+      const { thread, effects } = titled(title)
+      expect(thread.session.title).toBeNull()
+      expect(effects).toEqual([])
+    }
+  })
+
+  it("keeps the agent's own words after what went ahead of them", () => {
+    const { thread, effects } = titled(`${index}\n\nFix login`)
+    expect(thread.session.title).toBe('Fix login')
+    expect(effects).toEqual([{ kind: 'title', title: 'Fix login' }])
+  })
+
+  it('still takes a plain title and a cleared one', () => {
+    expect(titled('Fix the build errors').thread.session.title).toBe('Fix the build errors')
+    expect(titled(null).effects).toEqual([{ kind: 'title', title: null }])
+  })
+})
+
+describe('notices and compactions', () => {
+  it('adds notices and shows unknown severities as info', () => {
+    const { entries } = run([
+      { sessionUpdate: 'notice', severity: 'warning', title: 'Careful', description: 'Really' },
+      { sessionUpdate: 'notice', severity: 'debug', title: 'Odd' },
+    ])
+    expect(entries).toEqual([
+      { kind: 'notice', id: 'e:1', severity: 'warning', title: 'Careful', description: 'Really' },
+      { kind: 'notice', id: 'e:2', severity: 'info', title: 'Odd' },
+    ])
+  })
+
+  it('tracks a compaction by id and streams its summary', () => {
+    const { entries } = run([
+      { sessionUpdate: 'compaction_update', compactionId: 'k', status: 'in_progress' },
+      {
+        sessionUpdate: 'compaction_summary_chunk',
+        compactionId: 'k',
+        content: { type: 'text', text: 'We ' },
+      },
+      {
+        sessionUpdate: 'compaction_summary_chunk',
+        compactionId: 'k',
+        content: { type: 'text', text: 'fixed it' },
+      },
+      { sessionUpdate: 'compaction_update', compactionId: 'k', status: 'completed' },
+      {
+        sessionUpdate: 'compaction_summary_chunk',
+        compactionId: 'j',
+        content: { type: 'text', text: 'Early' },
+      },
+      {
+        sessionUpdate: 'compaction_update',
+        compactionId: 'f',
+        status: 'failed',
+        error: 'Too long',
+      },
+      { sessionUpdate: 'compaction_update', compactionId: 'f', status: 'something_new' },
+    ])
+    expect(entries).toEqual([
+      { kind: 'compaction', id: 'c:k', status: 'completed', summary: 'We fixed it' },
+      { kind: 'compaction', id: 'c:j', status: 'in_progress', summary: 'Early' },
+      { kind: 'compaction', id: 'c:f', status: 'failed', summary: 'Too long' },
+    ])
+  })
+})
+
+describe('subagents', () => {
+  it('reports announcements and changes, with null clearing', () => {
+    const { effects, entries } = run([
+      {
+        sessionUpdate: 'subagent_update',
+        sessionId: 'child-1',
+        title: 'Explore',
+        description: 'Find clock reads',
+        capabilities: { cancel: {} },
+        state: { state: 'running' },
+      },
+      {
+        sessionUpdate: 'subagent_update',
+        sessionId: 'child-1',
+        state: { state: 'requires_action' },
+      },
+      { sessionUpdate: 'subagent_update', sessionId: 'child-1', capabilities: null, title: null },
+      {
+        sessionUpdate: 'subagent_update',
+        sessionId: 'child-1',
+        state: {
+          state: 'idle',
+          stopReason: 'end_turn',
+          usage: { totalTokens: 3, inputTokens: 2, outputTokens: 1 },
+        },
+      },
+      {
+        sessionUpdate: 'subagent_update',
+        sessionId: 'child-1',
+        state: { state: 'idle', stopReason: 'error', error: { code: -32603, message: 'Boom' } },
+      },
+      { sessionUpdate: 'subagent_update', sessionId: 'child-1', state: { state: 'unknown' } },
+      { sessionUpdate: 'subagent_update', sessionId: 'child-1', state: null },
+    ])
+    expect(entries).toEqual([])
+    expect(effects).toEqual([
+      {
+        kind: 'subagent',
+        sessionId: 'child-1',
+        title: 'Explore',
+        description: 'Find clock reads',
+        canCancel: true,
+        state: { kind: 'running' },
+      },
+      { kind: 'subagent', sessionId: 'child-1', state: { kind: 'requires_action' } },
+      { kind: 'subagent', sessionId: 'child-1', title: null, canCancel: false },
+      {
+        kind: 'subagent',
+        sessionId: 'child-1',
+        state: {
+          kind: 'idle',
+          stopReason: 'end_turn',
+          error: null,
+          tokens: {
+            total: 3,
+            input: 2,
+            output: 1,
+            thought: null,
+            cacheRead: null,
+            cacheWrite: null,
+          },
+        },
+      },
+      {
+        kind: 'subagent',
+        sessionId: 'child-1',
+        state: { kind: 'idle', stopReason: 'error', error: { message: 'Boom' }, tokens: null },
+      },
+      { kind: 'subagent', sessionId: 'child-1', state: { kind: 'unknown' } },
+      { kind: 'subagent', sessionId: 'child-1', state: { kind: 'cleared' } },
+    ])
+  })
+
+  it('adds and replaces session messages, and appends their chunks', () => {
+    const { entries } = run([
+      {
+        sessionUpdate: 'session_message',
+        messageId: 'd1',
+        senderSessionId: 'acp-parent',
+        recipientSessionId: 'acp-1',
+        content: [{ type: 'text', text: 'Find it' }],
+      },
+      {
+        sessionUpdate: 'session_message_chunk',
+        messageId: 'd1',
+        content: { type: 'text', text: ' fast' },
+      },
+      {
+        sessionUpdate: 'session_message',
+        messageId: 'd2',
+        senderSessionId: 'stranger',
+        content: null,
+      },
+      { sessionUpdate: 'session_message', messageId: 'd1' },
+    ])
+    expect(entries).toEqual([
+      {
+        kind: 'session_message',
+        id: 'sm:d1',
+        senderId: 'parent',
+        content: [{ type: 'text', text: 'Find it fast' }],
+      },
+      { kind: 'session_message', id: 'sm:d2', senderId: null, content: [] },
+    ])
+  })
+})
+
+describe('unknown updates', () => {
+  it('are ignored and reported', () => {
+    const { entries, effects } = run([
+      { sessionUpdate: 'future_update', value: 1 } as unknown as SessionUpdate,
+      { sessionUpdate: 'plan_removed', planId: 'p' },
+    ])
+    expect(entries).toEqual([])
+    expect(effects.map((e) => e.kind === 'ignored' && e.variant)).toEqual([
+      'future_update',
+      'plan_removed',
+    ])
+  })
+})
+
+describe('permissions', () => {
+  it('adds the tool entry for an unseen call and maps the options', () => {
+    const thread = threadFromSnapshot({ session: baseSession, entries: [], seq: 0 })
+    const { entryId, output } = mapPermissionToolCall(
+      { toolCallId: 'p1', title: 'Run rm', kind: 'execute', rawInput: { command: 'rm -rf x' } },
+      {
+        thread,
+        replaying: false,
+        cancelling: false,
+        scope: newTurnScope(),
+        now: 1,
+        nextId: () => 'e:1',
+        sessionIdFor: () => null,
+      },
+    )
+    expect(entryId).toBe('t:p1')
+    expect(applyPatches(thread, output.patches).byId['t:p1']).toMatchObject({
+      kind: 'tool',
+      title: 'Run rm',
+      status: 'pending',
+      rawInput: 'rm -rf x',
+    })
+    expect(
+      mapPermissionOptions([
+        { optionId: 'a', name: 'Allow', kind: 'allow_once' },
+        { optionId: 'r', name: 'Never', kind: 'reject_always' },
+      ]),
+    ).toEqual([
+      { id: 'a', name: 'Allow', kind: 'allow_once' },
+      { id: 'r', name: 'Never', kind: 'reject_always' },
+    ])
+  })
+})
+
+describe('config options', () => {
+  it('flattens groups, keeps booleans and treats unknown categories as other', () => {
+    expect(
+      mapConfig(
+        [
+          {
+            id: 'model',
+            name: 'Model',
+            category: 'model',
+            type: 'select',
+            currentValue: 'deep',
+            options: [
+              { group: 'fast', name: 'Fast', options: [{ value: 'swift', name: 'Swift' }] },
+              {
+                group: 'smart',
+                name: 'Smart',
+                options: [{ value: 'deep', name: 'Deep', description: 'Slow' }],
+              },
+            ],
+          },
+          {
+            id: 'fast',
+            name: 'Fast mode',
+            category: 'vendor_thing',
+            type: 'boolean',
+            currentValue: true,
+          },
+        ],
+        null,
+      ),
+    ).toEqual([
+      {
+        id: 'model',
+        name: 'Model',
+        category: 'model',
+        type: 'select',
+        value: 'deep',
+        choices: [
+          { value: 'swift', name: 'Swift', group: 'Fast' },
+          { value: 'deep', name: 'Deep', description: 'Slow', group: 'Smart' },
+        ],
+      },
+      { id: 'fast', name: 'Fast mode', category: 'other', type: 'boolean', value: true },
+    ])
+  })
+
+  it('adds a synthetic mode only when no option covers modes', () => {
+    const modes = { currentModeId: 'a', availableModes: [{ id: 'a', name: 'A' }] }
+    expect(mapConfig(null, modes)[0]).toMatchObject({
+      id: '__mode',
+      value: 'a',
+      choices: [{ value: 'a', name: 'A' }],
+    })
+    expect(
+      mapConfig(
+        [
+          {
+            id: 'mode',
+            name: 'Mode',
+            category: 'mode',
+            type: 'select',
+            currentValue: 'a',
+            options: [],
+          },
+        ],
+        modes,
+      ).map((o) => o.id),
+    ).toEqual(['mode'])
+    const synthetic = mapConfig(null, modes)
+    expect(mergeConfig(synthetic, []).map((o) => o.id)).toEqual(['__mode'])
+  })
+})
+
+describe('extensions and helpers', () => {
+  it('reads _auth/status_update', () => {
+    expect(
+      mapAuthStatus({
+        authStatus: {
+          kind: 'account',
+          label: 'Claude Max',
+          account: { plan: 'max', email: 'me@x.dev' },
+        },
+      }),
+    ).toEqual({ kind: 'account', label: 'Claude Max', email: 'me@x.dev' })
+    expect(mapAuthStatus({ authStatus: { kind: 'none', label: 'Not logged in' } })).toEqual({
+      kind: 'none',
+      label: 'Not logged in',
+      email: null,
+    })
+    expect(mapAuthStatus({ authStatus: { kind: 'weird', label: 'x' } })).toBeNull()
+    expect(mapAuthStatus(null)).toBeNull()
+  })
+
+  it('maps ACP auth status without carrying account metadata', () => {
+    expect(
+      mapReportedAuthStatus({
+        state: 'authenticated',
+        accounts: [
+          { label: 'Team', email: 'dev@example.com', active: true, _meta: { token: 'secret' } },
+        ],
+      }),
+    ).toEqual({
+      state: 'authenticated',
+      account: { kind: 'account', label: 'Team', email: 'dev@example.com' },
+    })
+    expect(mapReportedAuthStatus({ state: 'unauthenticated', accounts: [] })).toEqual({
+      state: 'unauthenticated',
+      account: null,
+    })
+    expect(mapReportedAuthStatus({ state: 'unexpected' })).toBeNull()
+  })
+
+  it('reads rate limits defensively', () => {
+    expect(mapRateLimits({ status: 'rejected', rateLimitType: 'seven_day_opus' }, 5)).toEqual({
+      allowed: false,
+      limits: [
+        {
+          window: 'seven_day_opus',
+          label: 'Weekly · Opus',
+          usedPercent: null,
+          resetsAt: null,
+          state: 'reached',
+          observedAt: 5,
+        },
+      ],
+    })
+    expect(
+      mapRateLimits(
+        { status: 'allowed', rateLimitType: 'seven_day_overage_included', utilization: 1.5 },
+        5,
+      )?.limits,
+    ).toEqual([
+      expect.objectContaining({
+        window: 'seven_day_fable',
+        label: 'Weekly · Fable',
+        usedPercent: 100,
+        state: 'ok',
+      }),
+    ])
+    expect(
+      mapRateLimits(
+        {
+          status: 'rejected',
+          rateLimitType: 'seven_day_overage_included',
+          unifiedWindows: { seven_day_fable: { status: 'rejected', utilization: 1 } },
+        },
+        5,
+      )?.limits.map((l) => l.window),
+    ).toEqual(['seven_day_fable'])
+    expect(mapRateLimits({ status: 'allowed' }, 5)).toEqual({ allowed: true, limits: [] })
+    expect(mapRateLimits({ rateLimitType: 'five_hour' }, 5)).toBeNull()
+    expect(mapRateLimits('nope', 5)).toBeNull()
+  })
+
+  it('takes each window from its own reading, not the rejection of the plan', () => {
+    const event = {
+      status: 'rejected',
+      resetsAt: 1_794_661_200,
+      rateLimitType: 'seven_day',
+      unifiedWindows: {
+        five_hour: { utilization: 0.81, resetsAt: 1_794_489_000, status: 'allowed' },
+        seven_day: { utilization: 0.39, resetsAt: 1_794_661_200, status: 'allowed' },
+      },
+    }
+    expect(mapRateLimits(event, 5)).toEqual({
+      allowed: false,
+      limits: [
+        {
+          window: 'five_hour',
+          label: '5-hour',
+          usedPercent: 81,
+          resetsAt: 1_794_489_000_000,
+          state: 'ok',
+          observedAt: 5,
+        },
+        {
+          window: 'seven_day',
+          label: 'Weekly',
+          usedPercent: 39,
+          resetsAt: 1_794_661_200_000,
+          state: 'ok',
+          observedAt: 5,
+        },
+      ],
+    })
+    // A window the readings leave out comes from the event itself.
+    expect(
+      mapRateLimits(
+        {
+          status: 'rejected',
+          rateLimitType: 'seven_day_opus',
+          unifiedWindows: { five_hour: { utilization: 1, status: 'rejected' } },
+        },
+        5,
+      )?.limits.map((limit) => [limit.window, limit.state]),
+    ).toEqual([
+      ['five_hour', 'reached'],
+      ['seven_day_opus', 'reached'],
+    ])
+  })
+
+  it('does not take a rejection as reached when its window is not used up', () => {
+    expect(
+      mapRateLimits({ status: 'rejected', rateLimitType: 'seven_day', utilization: 0.39 }, 5)
+        ?.limits,
+    ).toMatchObject([{ window: 'seven_day', usedPercent: 39, state: 'ok' }])
+    expect(
+      mapRateLimits({ status: 'rejected', rateLimitType: 'seven_day', utilization: 1 }, 5)?.limits,
+    ).toMatchObject([{ window: 'seven_day', usedPercent: 100, state: 'reached' }])
+  })
+
+  it('lets a read below the full window replace a pushed reached state', () => {
+    const reached = {
+      window: 'seven_day',
+      label: 'Weekly',
+      usedPercent: null,
+      resetsAt: 2_000,
+      state: 'reached' as const,
+      observedAt: 1,
+    }
+    const read = { ...reached, usedPercent: 42, state: 'ok' as const, observedAt: 10 }
+    expect(mergeReadLimit(reached, read, 10)).toEqual(read)
+    // A read without its use keeps the block until the window resets.
+    const unknown = { ...read, usedPercent: null }
+    expect(mergeReadLimit(reached, unknown, 10)).toEqual({ ...unknown, state: 'reached' })
+    expect(mergeReadLimit(reached, unknown, 3_000)).toEqual(unknown)
+    const warning = { ...reached, usedPercent: 80, state: 'warning' as const }
+    expect(mergeReadLimit(warning, read, 10)).toEqual({ ...read, state: 'warning' })
+  })
+
+  it('drops a window the read no longer lists, unless the read found none', () => {
+    const window = (id: string, usedPercent: number, observedAt: number) => ({
+      window: id,
+      label: id,
+      usedPercent,
+      resetsAt: 9_000,
+      state: 'ok' as const,
+      observedAt,
+    })
+    const known = [window('five_hour', 0, 1), window('seven_day', 3, 5), window('overage', 20, 5)]
+    expect(mergeReadLimits(known, [window('seven_day', 4, 10)], 10)).toEqual([
+      window('seven_day', 4, 10),
+    ])
+    expect(mergeReadLimits(known, [], 10)).toEqual(known)
+  })
+
+  describe('extra usage', () => {
+    // A rate limit event while the plan refuses requests and extra usage lets them through.
+    const inUse = {
+      status: 'rejected',
+      rateLimitType: 'five_hour',
+      resetsAt: 1_794_489_000,
+      overageStatus: 'allowed',
+      overageResetsAt: 1_796_000_000,
+      isUsingOverage: true,
+      unifiedWindows: {
+        five_hour: { utilization: 1, resetsAt: 1_794_489_000, status: 'rejected' },
+        seven_day: { utilization: 0.4, resetsAt: 1_794_661_200 },
+      },
+    }
+    const over = {
+      status: 'allowed',
+      rateLimitType: 'five_hour',
+      resetsAt: 1_794_500_000,
+      isUsingOverage: false,
+      unifiedWindows: {
+        five_hour: { utilization: 0.1, resetsAt: 1_794_500_000 },
+        seven_day: { utilization: 0.4, resetsAt: 1_794_661_200 },
+      },
+    }
+    const window = (id: string, patch: Partial<PlanLimit> = {}): PlanLimit => ({
+      window: id,
+      label: id,
+      usedPercent: 100,
+      resetsAt: 9_000,
+      state: 'reached',
+      observedAt: 1,
+      ...patch,
+    })
+
+    it('reads whether an event says extra usage is in use, and leaves it out when it does not', () => {
+      expect(mapRateLimits(inUse, 5)?.extraUsage).toBe(true)
+      expect(mapRateLimits(over, 5)?.extraUsage).toBe(false)
+      expect(mapRateLimits({ status: 'rejected', overageInUse: true }, 5)?.extraUsage).toBe(true)
+      // The service's own word counts too.
+      expect(
+        mapRateLimits({ status: 'rejected', isUsingOverage: false, overageInUse: true }, 5)
+          ?.extraUsage,
+      ).toBe(true)
+      expect(
+        mapRateLimits({ status: 'rejected', rateLimitType: 'five_hour' }, 5),
+      ).not.toHaveProperty('extraUsage')
+      expect(mapRateLimits({ status: 'allowed', isUsingOverage: 'yes' }, 5)).not.toHaveProperty(
+        'extraUsage',
+      )
+    })
+
+    it('starts extra usage after the windows an event reports, and ends it before them', () => {
+      const kinds = (value: unknown) => rateLimitEffects(value, 5).map((effect) => effect.kind)
+      expect(kinds(inUse)).toEqual(['limit', 'limit', 'extra-usage'])
+      expect(rateLimitEffects(inUse, 5).at(-1)).toEqual({ kind: 'extra-usage', inUse: true })
+      expect(kinds(over)).toEqual(['extra-usage', 'limit', 'limit', 'limits-allowed'])
+      expect(rateLimitEffects(over, 5)[0]).toEqual({ kind: 'extra-usage', inUse: false })
+      expect(kinds({ status: 'allowed', rateLimitType: 'five_hour' })).toEqual([
+        'limit',
+        'limits-allowed',
+      ])
+    })
+
+    it('maps an ACP usage update the same way', () => {
+      const { effects } = run([
+        {
+          sessionUpdate: 'usage_update',
+          used: 1200,
+          size: 200000,
+          _meta: { '_claude/rateLimit': inUse },
+        },
+      ])
+      expect(effects.map((effect) => effect.kind)).toEqual(['limit', 'limit', 'extra-usage'])
+    })
+
+    it('covers the used-up windows that have not reset, and nothing else', () => {
+      const covered = coverWithExtraUsage(
+        [
+          window('five_hour'),
+          window('seven_day', { usedPercent: 40, state: 'ok' }),
+          // At 100% with no rejection in its reading, which the plan's refusal makes one.
+          window('seven_day_fable', { state: 'ok' }),
+          window('seven_day_opus', { resetsAt: 4 }),
+          window('overage'),
+        ],
+        5,
+      )
+      expect(covered.map((limit) => [limit.window, limit.extraUsage, limit.state])).toEqual([
+        ['five_hour', true, 'reached'],
+        ['seven_day', undefined, 'ok'],
+        ['seven_day_fable', true, 'reached'],
+        ['seven_day_opus', undefined, 'reached'],
+        ['overage', undefined, 'reached'],
+      ])
+    })
+
+    it('ends with an event that says it is not in use, with its gauge unless that is used up', () => {
+      const limits = [
+        window('five_hour', { extraUsage: true }),
+        window('overage', { usedPercent: 91, state: 'warning' }),
+      ]
+      expect(endExtraUsage(limits, 5)).toEqual([window('five_hour')])
+      const spent = window('overage', { state: 'reached' })
+      expect(endExtraUsage([spent], 5)).toEqual([spent])
+      expect(endExtraUsage([spent], 9_000)).toEqual([])
+    })
+
+    it('is over when the plan accepts requests again', () => {
+      expect(allowedLimit(window('five_hour', { usedPercent: null, extraUsage: true }))).toEqual(
+        window('five_hour', { usedPercent: null, state: 'ok' }),
+      )
+      const full = window('five_hour', { extraUsage: true })
+      expect(allowedLimit(full)).toBe(full)
+    })
+
+    it('holds through a read that still shows the window used up, until it resets', () => {
+      const before = window('five_hour', { extraUsage: true })
+      const used = window('five_hour', { observedAt: 10 })
+      expect(mergeReadLimit(before, used, 10)).toEqual({ ...used, extraUsage: true })
+      // A read without its use keeps the block, and extra usage with it.
+      const unknown = window('five_hour', { usedPercent: null, state: 'ok', observedAt: 10 })
+      expect(mergeReadLimit(before, unknown, 10)).toEqual({
+        ...unknown,
+        state: 'reached',
+        extraUsage: true,
+      })
+      expect(mergeReadLimit(before, unknown, 9_000)).toEqual(unknown)
+      expect(mergeReadLimit(before, used, 9_000)).toEqual(used)
+    })
+
+    it('ends when a read shows the window not used up', () => {
+      const before = window('five_hour', { extraUsage: true })
+      const read = window('five_hour', { usedPercent: 38, state: 'ok', observedAt: 10 })
+      expect(mergeReadLimit(before, read, 10)).toEqual(read)
+    })
+
+    it('keeps the extra usage window through a read only while it is in use or used up', () => {
+      const gauge = window('overage', { usedPercent: 91, state: 'warning' })
+      const covered = window('five_hour', { extraUsage: true })
+      const read = [
+        window('five_hour', { observedAt: 10 }),
+        window('seven_day', { usedPercent: 4 }),
+      ]
+      expect(mergeReadLimits([covered, gauge], read, 10).map((limit) => limit.window)).toEqual([
+        'five_hour',
+        'seven_day',
+        'overage',
+      ])
+      // The window is no longer covered: a read that shows it not used up.
+      const notUsedUp = [window('five_hour', { usedPercent: 38, state: 'ok', observedAt: 10 })]
+      expect(mergeReadLimits([covered, gauge], notUsedUp, 10).map((l) => l.window)).toEqual([
+        'five_hour',
+      ])
+      // Nor once the extra usage window itself has reset.
+      expect(mergeReadLimits([covered, gauge], read, 9_000).map((l) => l.window)).toEqual([
+        'five_hour',
+        'seven_day',
+      ])
+      // A used-up budget stays until it resets, whether or not extra usage is in use.
+      const spent = window('overage')
+      expect(mergeReadLimits([spent], notUsedUp, 10).map((l) => l.window)).toEqual([
+        'five_hour',
+        'overage',
+      ])
+    })
+  })
+
+  it('clears a reached state once the plan is allowed again, unless the window is used up', () => {
+    const limit = {
+      window: 'seven_day',
+      label: 'Weekly',
+      usedPercent: 42,
+      resetsAt: 2_000,
+      state: 'reached' as const,
+      observedAt: 1,
+    }
+    expect(allowedLimit(limit)).toEqual({ ...limit, state: 'ok' })
+    expect(allowedLimit({ ...limit, usedPercent: null })).toEqual({
+      ...limit,
+      usedPercent: null,
+      state: 'ok',
+    })
+    const full = { ...limit, window: 'seven_day_fable', usedPercent: 100 }
+    expect(allowedLimit(full)).toBe(full)
+    const warning = { ...limit, state: 'warning' as const }
+    expect(allowedLimit(warning)).toBe(warning)
+  })
+
+  it('adds a turn to the token totals', () => {
+    const turn = { total: 10, input: 4, output: 3, thought: null, cacheRead: 2, cacheWrite: null }
+    expect(addTokenTotals(null, turn)).toBe(turn)
+    expect(
+      addTokenTotals(turn, {
+        total: 7,
+        input: 1,
+        output: 2,
+        thought: 3,
+        cacheRead: null,
+        cacheWrite: null,
+      }),
+    ).toEqual({ total: 17, input: 5, output: 5, thought: 3, cacheRead: 2, cacheWrite: null })
+  })
+
+  it('reads the tokens per model, with either name for the cache write', () => {
+    const claude = {
+      quota: {
+        model_usage: [
+          {
+            model: 'claude-opus-5-5',
+            token_count: {
+              totalTokens: 166_135,
+              inputTokens: 8,
+              cachedInputTokens: 80_289,
+              cachedWriteTokens: 85_417,
+              outputTokens: 421,
+              reasoningOutputTokens: 0,
+            },
+          },
+          { model: 'broken', token_count: { inputTokens: -1, outputTokens: 2 } },
+        ],
+      },
+    }
+    expect(mapModelUsage(claude)).toEqual([
+      {
+        model: 'claude-opus-5-5',
+        tokens: {
+          total: 166_135,
+          input: 8,
+          output: 421,
+          thought: 0,
+          cacheRead: 80_289,
+          cacheWrite: 85_417,
+        },
+      },
+    ])
+    const codex = {
+      quota: {
+        model_usage: [
+          {
+            model: 'gpt-5.6-sol',
+            token_count: {
+              inputTokens: 5,
+              cachedInputTokens: 10,
+              cacheWriteInputTokens: 2,
+              outputTokens: 7,
+            },
+          },
+        ],
+      },
+    }
+    expect(mapModelUsage(codex)[0]?.tokens).toEqual({
+      total: 24,
+      input: 5,
+      output: 7,
+      thought: null,
+      cacheRead: 10,
+      cacheWrite: 2,
+    })
+    expect(mapModelUsage(undefined)).toEqual([])
+    expect(mapModelUsage({ quota: { model_usage: 'x' } })).toEqual([])
+  })
+
+  it('keeps the cache out of the input, whichever way the agent counted it', () => {
+    const usage = (totalTokens: number, inputTokens: number, more: object = {}) => ({
+      totalTokens,
+      inputTokens,
+      outputTokens: 20,
+      cachedReadTokens: 3000,
+      cachedWriteTokens: 50,
+      ...more,
+    })
+    const input = (u: ReturnType<typeof usage>) => mapTokenTotals(u)?.input
+    // Counted apart, with the reasoning inside the output or beside it.
+    expect(input(usage(3170, 100))).toBe(100)
+    expect(input(usage(3175, 100, { thoughtTokens: 5 }))).toBe(100)
+    // Held in the input, as an OpenAI or Gemini count holds it.
+    expect(input(usage(3170, 3150))).toBe(100)
+    expect(input(usage(3175, 3150, { thoughtTokens: 5 }))).toBe(100)
+    // The reads held, the writes apart.
+    expect(input(usage(3170, 3100))).toBe(100)
+    // A total that adds up neither way, or an input under its cache, is taken as it stands.
+    expect(input(usage(9999, 3150))).toBe(3150)
+    expect(input(usage(120, 100))).toBe(100)
+    expect(input(usage(120, 100, { cachedReadTokens: null, cachedWriteTokens: null }))).toBe(100)
+    const codex = {
+      quota: {
+        model_usage: [
+          {
+            model: 'gpt-5.6-sol',
+            token_count: {
+              inputTokens: 3100,
+              cachedInputTokens: 3000,
+              outputTokens: 20,
+              reasoningOutputTokens: 5,
+              totalTokens: 3120,
+            },
+          },
+        ],
+      },
+    }
+    expect(mapModelUsage(codex)[0]?.tokens).toMatchObject({ total: 3120, input: 100 })
+  })
+
+  it("reads a model call's tokens from a chunk's _meta.usage, as Qwen Code sends them", () => {
+    // Qwen Code 0.28.4: one empty chunk per model call, its input holding the cache reads.
+    const chunk = (usage: unknown, sessionUpdate = 'agent_message_chunk') =>
+      ({
+        sessionUpdate,
+        content: { type: 'text', text: '' },
+        _meta: { usage, durationMs: 1800 },
+      }) as SessionUpdate
+    expect(
+      chunkTokens(
+        chunk({
+          inputTokens: 12800,
+          outputTokens: 150,
+          totalTokens: 12950,
+          thoughtTokens: 40,
+          cachedReadTokens: 12000,
+        }),
+      ),
+    ).toEqual({
+      total: 12950,
+      input: 800,
+      output: 150,
+      thought: 40,
+      cacheRead: 12000,
+      cacheWrite: null,
+    })
+    expect(chunkTokens(chunk({ inputTokens: 10, outputTokens: 2 }))).toBeNull()
+    expect(chunkTokens(chunk({ inputTokens: -1, outputTokens: 2, totalTokens: 1 }))).toBeNull()
+    expect(chunkTokens(chunk('12950'))).toBeNull()
+    expect(
+      chunkTokens(
+        chunk({ inputTokens: 10, outputTokens: 2, totalTokens: 12 }, 'agent_thought_chunk'),
+      ),
+    ).toBeNull()
+    expect(
+      chunkTokens({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Hi' } }),
+    ).toBeNull()
+  })
+
+  it("reads one model call's usage from goose's message_usage notification", () => {
+    expect(
+      gooseCallUsage({
+        update: {
+          sessionUpdate: 'message_usage',
+          messageId: 'm1',
+          usage: {
+            inputTokens: 12800,
+            outputTokens: 150,
+            totalTokens: 12950,
+            cacheReadTokens: 12000,
+            cacheWriteTokens: 200,
+          },
+        },
+      }),
+    ).toEqual({
+      messageId: 'm1',
+      usage: {
+        totalTokens: 12950,
+        inputTokens: 12800,
+        outputTokens: 150,
+        cachedReadTokens: 12000,
+        cachedWriteTokens: 200,
+      },
+    })
+    expect(
+      gooseCallUsage({
+        update: {
+          sessionUpdate: 'message_usage',
+          usage: { inputTokens: 10, outputTokens: 5 },
+        },
+      }),
+    ).toEqual({
+      messageId: null,
+      usage: {
+        totalTokens: 15,
+        inputTokens: 10,
+        outputTokens: 5,
+        cachedReadTokens: null,
+        cachedWriteTokens: null,
+      },
+    })
+    expect(gooseCallUsage({ update: { sessionUpdate: 'usage_update', used: 100 } })).toBeNull()
+    expect(gooseCallUsage(null)).toBeNull()
+  })
+
+  it('maps token totals and prompt content', () => {
+    expect(mapTokenTotals(null)).toBeNull()
+    expect(
+      promptBlocks([
+        { type: 'text', text: 'hi' },
+        { type: 'ref', ref: { kind: 'image', mimeType: 'image/png', data: 'AA' } },
+        { type: 'ref', ref: { kind: 'link', uri: 'file:///a', name: 'a' } },
+      ]),
+    ).toEqual([
+      { type: 'text', text: 'hi' },
+      { type: 'image', mimeType: 'image/png', data: 'AA' },
+      { type: 'resource_link', uri: 'file:///a', name: 'a' },
+    ])
+  })
+})

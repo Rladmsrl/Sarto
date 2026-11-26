@@ -1,0 +1,234 @@
+// Runs git and gh as child processes: never through a shell, always with a timeout.
+
+import { execFile, type ChildProcess, type ExecFileException } from 'node:child_process'
+import { stat } from 'node:fs/promises'
+import type { Platform } from '@shared/platform'
+import { t, tEnglish } from '../i18n'
+import { descendantsOf, processControl, type ProcessControl } from '../process-tree'
+
+export type ExecFailure =
+  'not-found' | 'cwd-missing' | 'timeout' | 'max-buffer' | 'killed' | 'spawn'
+
+export interface ExecResult {
+  /** The exit code; null when the process did not exit on its own (see `failure`). */
+  code: number | null
+  stdout: string
+  stderr: string
+  /** Why there is no exit code, or null when the process ran to its end. */
+  failure: ExecFailure | null
+  message: string
+}
+
+export interface ExecOptions {
+  cwd?: string
+  timeoutMs: number
+  /** Merged over the base environment. */
+  env?: NodeJS.ProcessEnv
+  maxBuffer?: number
+}
+
+/** Never rejects: every outcome is in the result. */
+export type Exec = (
+  file: string,
+  args: readonly string[],
+  options: ExecOptions,
+) => Promise<ExecResult>
+
+export interface ExecRunner {
+  exec: Exec
+  /** Terminates every running child and makes later results report `killed`. */
+  killAll(): void
+}
+
+// No locale: the few human-readable outputs that are matched (shortstat, error
+// messages) must not be translated. The rest keeps git and gh from waiting for input.
+export const CHILD_ENV: NodeJS.ProcessEnv = {
+  GIT_OPTIONAL_LOCKS: '0',
+  GIT_TERMINAL_PROMPT: '0',
+  GCM_INTERACTIVE: 'never',
+  GH_PROMPT_DISABLED: '1',
+  GH_NO_UPDATE_NOTIFIER: '1',
+  LC_ALL: 'C',
+}
+
+const DEFAULT_MAX_BUFFER = 32 * 1024 * 1024
+
+export interface CreateExecOptions {
+  platform?: NodeJS.Platform
+  /** Lists and ends processes, for a command that runs out of time. */
+  control?: ProcessControl
+}
+
+/**
+ * Ends a command that ran out of time and what it started, such as the git push under
+ * `gh repo create --push`, which would otherwise run on: its descendants, listed while it still
+ * runs, since its children lose it as their parent once it is gone. They share the agent host's
+ * process group, so the group is not signalled.
+ */
+async function stopTree(control: ProcessControl, pid: number): Promise<void> {
+  const rows = await control.list().catch(() => [])
+  for (const target of [pid, ...descendantsOf(rows, pid).map((row) => row.pid)]) {
+    try {
+      control.kill(target, 'SIGKILL')
+    } catch {
+      // Already gone.
+    }
+  }
+}
+
+export function createExec(
+  getEnv: () => NodeJS.ProcessEnv,
+  {
+    platform = process.platform,
+    control = processControl(platform as Platform),
+  }: CreateExecOptions = {},
+): ExecRunner {
+  const children = new Set<ChildProcess>()
+  let stopped = false
+
+  const exec: Exec = async (file, args, options) => {
+    if (stopped) return failed('killed', 'The git service was disposed')
+    const env = { ...getEnv(), ...CHILD_ENV, ...options.env }
+    return new Promise<ExecResult>((resolve) => {
+      let child: ChildProcess
+      let timer: ReturnType<typeof setTimeout> | undefined
+      let timedOut = false
+      try {
+        child = execFile(
+          file,
+          [...args],
+          {
+            cwd: options.cwd,
+            env,
+            maxBuffer: options.maxBuffer ?? DEFAULT_MAX_BUFFER,
+            windowsHide: true,
+            encoding: 'utf8',
+          },
+          (error, stdout, stderr) => {
+            clearTimeout(timer)
+            children.delete(child)
+            if (!error) {
+              resolve({ code: 0, stdout, stderr, failure: null, message: '' })
+              return
+            }
+            if (timedOut) {
+              const message = `timed out after ${options.timeoutMs} ms`
+              resolve({ code: null, stdout, stderr, failure: 'timeout', message })
+              return
+            }
+            const code: unknown = error.code
+            if (typeof code === 'number') {
+              resolve({ code, stdout, stderr, failure: null, message: error.message })
+              return
+            }
+            void classify(error, options.cwd).then((failure) => {
+              resolve({ code: null, stdout, stderr, failure, message: error.message })
+            })
+          },
+        )
+      } catch (error) {
+        resolve(failed('spawn', error instanceof Error ? error.message : String(error)))
+        return
+      }
+      children.add(child)
+      const pid = child.pid
+      if (pid !== undefined) {
+        timer = setTimeout(() => {
+          timedOut = true
+          void stopTree(control, pid)
+        }, options.timeoutMs)
+      }
+      // Nothing here reads input; a closed stdin makes a stray prompt fail instead of hang.
+      child.stdin?.on('error', () => {})
+      child.stdin?.end()
+    })
+  }
+
+  return {
+    exec,
+    killAll() {
+      stopped = true
+      for (const child of children) child.kill()
+      children.clear()
+    },
+  }
+}
+
+function failed(failure: ExecFailure, message: string): ExecResult {
+  return { code: null, stdout: '', stderr: '', failure, message }
+}
+
+async function classify(error: ExecFileException, cwd: string | undefined): Promise<ExecFailure> {
+  if (error.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') return 'max-buffer'
+  if (error.killed) return 'killed'
+  if (error.code === 'ENOENT' || error.code === 'ENOTDIR') {
+    // Node reports a missing working directory as ENOENT for the command.
+    if (cwd !== undefined && !(await isDirectory(cwd))) return 'cwd-missing'
+    return 'not-found'
+  }
+  return 'spawn'
+}
+
+async function isDirectory(path: string): Promise<boolean> {
+  try {
+    return (await stat(path)).isDirectory()
+  } catch {
+    return false
+  }
+}
+
+function failureLine(result: ExecResult, say: typeof t): string {
+  const detail = result.stderr.trim() || result.message
+  switch (result.failure) {
+    case 'timeout':
+      return say('git.failure.timeout')
+    case 'not-found':
+      return say('git.failure.notFound')
+    case 'cwd-missing':
+      return say('git.failure.cwdMissing')
+    case null:
+      return detail || say('git.failure.exitCode', { code: String(result.code) })
+    default:
+      return detail || result.failure
+  }
+}
+
+/** The result as one line for logs, always in English. */
+export function describeFailure(result: ExecResult): string {
+  return failureLine(result, tEnglish)
+}
+
+/** The result as one line for the user, in their language; git's own words stay as it wrote them. */
+export function failureText(result: ExecResult): string {
+  return failureLine(result, t)
+}
+
+/** A failed command as one line for the user: the command, then why. */
+export function commandFailureText(command: string, result: ExecResult): string {
+  return t('git.failure.command', { command, detail: failureText(result) })
+}
+
+export const GIT_TIMEOUT_MS = 10_000
+export const FETCH_TIMEOUT_MS = 60_000
+export const GH_TIMEOUT_MS = 10_000
+
+/** A command that ran but did not succeed, or did not run at all. */
+export class CommandError extends Error {
+  /** The message in English, for logs; `message` is in the user's language. */
+  readonly log: string
+
+  constructor(
+    readonly label: string,
+    readonly result: ExecResult,
+  ) {
+    super(commandFailureText(label, result))
+    this.name = 'CommandError'
+    this.log = `${label}: ${describeFailure(result)}`
+  }
+}
+
+/** Returns the result when the command exited with code 0, else throws a CommandError. */
+export function expectOk(label: string, result: ExecResult): ExecResult {
+  if (result.failure !== null || result.code !== 0) throw new CommandError(label, result)
+  return result
+}

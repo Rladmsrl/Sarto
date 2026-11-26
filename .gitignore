@@ -1,0 +1,30 @@
+node_modules
+out
+dist
+.cache
+.eslintcache
+*.log*
+.DS_Store
+.env
+.env.*
+.worktrees
+*.tsbuildinfo
+
+# Cua Driver for computer use, fetched by tools/install/cua-driver.mjs
+resources/cua-driver/
+
+# Sarto native Apple build outputs and generated Xcode project artifacts
+apps/apple/.build
+apps/apple/Packages/*/.build
+apps/apple/Packages/*/.swiftpm
+apps/apple/DerivedData
+apps/apple/*.xcodeproj/xcuserdata
+apps/apple/*.xcodeproj/project.xcworkspace/xcuserdata
+
+# Internal design docs and brand kit prototypes (keep only the README logo SVG)
+docs/sarto-remote-design.md
+docs/sarto-update-design.md
+docs/sarto-brand-kit/*
+!docs/sarto-brand-kit/svg/
+docs/sarto-brand-kit/svg/*
+!docs/sarto-brand-kit/svg/sarto-symbol-color.svg

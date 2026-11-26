@@ -1,0 +1,16 @@
+{
+  "name": "@sarto/wire",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The wire protocols a Sarto server and its clients share: relay, push gateway, price snapshot and sync.",
+  "license": "Apache-2.0",
+  "exports": {
+    "./codec": "./src/codec.ts",
+    "./relay": "./src/relay.ts",
+    "./push": "./src/push.ts",
+    "./prices": "./src/prices.ts",
+    "./sync": "./src/sync.ts",
+    "./reports": "./src/reports.ts"
+  }
+}

@@ -1,0 +1,1721 @@
+{
+  "session": {
+    "status": {
+      "starting": "starting",
+      "ready": "ready",
+      "running": "running",
+      "awaiting_permission": "awaiting permission",
+      "auth_required": "auth required",
+      "failed": "failed",
+      "closed": "closed"
+    },
+    "busy": "The session is {{status}}",
+    "startedModeFailed": "{{agent}} would not take a mode within the permissions of the session that started it",
+    "openFirst": "Open the session first",
+    "removedWhileStarting": "The session was removed before it started",
+    "noTurn": "No turn is running",
+    "noBackgroundTasks": "{{agent}} does not report background tasks",
+    "noBackgroundTask": "This background task is not in the session",
+    "backgroundTaskEnded": "This background task has ended",
+    "side": {
+      "subagent": "Subagents have no side chat",
+      "archived": "Restore the session to ask beside it",
+      "busy": "The last side question is still being answered",
+      "pickAgent": "{{agent}} cannot answer side questions; pick an agent to answer them",
+      "cannotAnswer": "{{agent}} cannot answer side questions for another session",
+      "noAnswer": "{{agent}} gave no answer to this question"
+    },
+    "cannotLoad": "{{agent}} can neither load nor resume sessions",
+    "cannotSteer": "{{agent}} cannot take messages during a turn",
+    "cannotFork": "{{agent}} cannot fork sessions",
+    "cannotForkAt": "{{agent}} can fork only from its latest reply",
+    "noForkPoint": "This reply cannot be forked from",
+    "forkTitle": "{{title}} (fork)",
+    "forkTitleNumbered": "{{title}} (fork {{n}})",
+    "alreadyInSession": "This session is already part of a Sarto session",
+    "heldOutside": "This session is still open in a terminal. Exit it there with /exit and try again, or fork a copy to carry on in Sarto.",
+    "cannotList": "{{agent}} cannot list its sessions",
+    "notInAgent": "{{agent}} has no such session for this folder. It may have been deleted.",
+    "configBetweenTurns": "{{option}} changes between turns",
+    "ultracodeDescription": "Workflows for big tasks",
+    "fastDescription": "Faster output, uses more",
+    "promptTooLarge": "The message is over 10 MB with its attachments. Remove some to send.",
+    "attachmentGone": "{{name}} is no longer available. Remove it and add it again.",
+    "attachmentMissing": "An attachment is no longer available. Remove it and add it again.",
+    "attachmentUnreadable": "Sarto can't read {{name}}.",
+    "attachmentDenied": "Sarto isn't allowed to read {{name}}.",
+    "otherConfigFolder": "This session was started with the configuration folder {{path}}, which its agent no longer uses, so it cannot continue here.",
+    "topLevelOnly": "Only a top-level session can be pinned or archived",
+    "archived": "This session is archived",
+    "worktreeGone": "This session's worktree and its branch were removed, so it can't continue.",
+    "worktreeInterrupted": "The worktree's preparation was interrupted. Run it again or go on without it.",
+    "untitled": "Untitled session",
+    "subagent": {
+      "noPrompt": "A subagent session takes its instructions from its parent",
+      "noFork": "A subagent session cannot be forked",
+      "noCancel": "The agent does not allow cancelling this subagent",
+      "noConfig": "A subagent session cannot be configured",
+      "closesWithParent": "A subagent session closes with its parent",
+      "deletedWithParent": "A subagent session is deleted with its parent",
+      "failed": "The subagent failed"
+    },
+    "notFound": "This session no longer exists",
+    "subSessionProject": "A sub-session belongs to the project of its parent",
+    "worktreeNeedsRepo": "A worktree needs a project in a Git repository",
+    "noWorktree": "This session has no worktree",
+    "noWorktreeToRemove": "This session has no worktree to remove",
+    "noAttachments": "This host takes no attachments",
+    "noEntry": "This item is no longer in the session",
+    "noRequestRecord": "This session has no record of its requests to read",
+    "noAttachment": "This session keeps no such attachment",
+    "noQueued": "This message is no longer in the queue",
+    "publisherName": "A first publish needs a publisher name",
+    "noConfigOption": "No config option {{option}}",
+    "notAChoice": "{{value}} is not a choice of {{option}}",
+    "waiting": {
+      "report": {
+        "gone": "This problem report is no longer waiting for an answer",
+        "answered": "This problem report was already answered"
+      },
+      "memoryProposal": {
+        "gone": "This memory proposal is no longer waiting for an answer",
+        "answered": "This memory proposal was already answered",
+        "noForget": "This proposal names no memory to forget",
+        "noDraft": "This proposal holds nothing to remember"
+      },
+      "memoryUndo": {
+        "gone": "There is no memory write here to take back",
+        "busy": "This memory write is already being taken back",
+        "changed": "The memory changed after this write, so it stays as it is",
+        "undone": "This write can no longer be taken back"
+      },
+      "terminal": {
+        "gone": "This terminal request is no longer waiting for an answer",
+        "answered": "This terminal request was already answered"
+      },
+      "device": {
+        "gone": "This device request is no longer waiting for an answer",
+        "answered": "This device request was already answered"
+      },
+      "market": {
+        "gone": "This Marketplace card is no longer waiting for an answer",
+        "answered": "This Marketplace card was already answered"
+      },
+      "settings": {
+        "gone": "This settings card is no longer waiting for an answer",
+        "answered": "This settings card was already answered",
+        "noChange": "This settings change is no longer on record",
+        "noUndo": "This change cannot be undone"
+      },
+      "step": {
+        "gone": "This step is no longer waiting for an answer",
+        "answered": "This step was already answered"
+      },
+      "origin": {
+        "gone": "This new site request is no longer waiting for an answer",
+        "answered": "This new site request was already answered"
+      },
+      "app": {
+        "gone": "This app request is no longer waiting for an answer",
+        "answered": "This app request was already answered"
+      },
+      "setup": {
+        "gone": "This setup card is no longer waiting for an answer"
+      },
+      "mcp": {
+        "gone": "These MCP servers are no longer waiting for an answer",
+        "answered": "These MCP servers were already answered"
+      },
+      "hooks": {
+        "gone": "These hooks are no longer waiting for an answer",
+        "answered": "These hooks were already answered"
+      },
+      "permission": {
+        "gone": "This request is no longer waiting for an answer",
+        "answered": "This request was already answered"
+      }
+    }
+  },
+  "notice": {
+    "historyUnavailable": {
+      "title": "Earlier history is not available",
+      "description": "{{agent}} cannot replay sessions, so this one continues without its history."
+    },
+    "signInNeeded": "{{agent}} needs you to sign in",
+    "signedIn": {
+      "title": "Signed in to {{agent}}",
+      "description": "The session carries on."
+    },
+    "closedBeforeSent": {
+      "title": "The session closed before your message was sent",
+      "description": "It waits in the queue until you resume it."
+    },
+    "outOfCredit": {
+      "title": "{{model}} is out of credit",
+      "titleNoModel": "{{agent}}'s model provider is out of credit"
+    },
+    "turnFailed": "The turn failed",
+    "archivedByAgent": "{{agent}} archived this session",
+    "notArchivedByAgent": {
+      "title": "{{agent}} did not archive this session",
+      "description": "It asked to once its turn ended, but the turn left work running: {{work}}."
+    },
+    "scheduledJobs_one": "{{count}} scheduled job",
+    "scheduledJobs_other": "{{count}} scheduled jobs",
+    "backgroundWork": "background work",
+    "listSeparator": ", ",
+    "reportsPaused": {
+      "title": "Reports from started sessions are paused",
+      "description": "{{count}} reports woke this session since your last message. Send a message to let them through again."
+    },
+    "diskFull": {
+      "title": "Sarto can't save this session: the disk is full",
+      "description": "Free up space on this computer. Until then the conversation stays in memory, and Sarto saves it once there is room."
+    },
+    "stopped": {
+      "title": "{{agent}} exited before finishing this turn"
+    },
+    "cancelUnconfirmed": {
+      "title": "{{agent}} did not confirm the cancellation",
+      "description": "Sarto ended the turn after {{seconds}} seconds. The agent may still be finishing work in the background."
+    },
+    "lostValues": {
+      "fork": {
+        "title": "This fork could not keep all of its settings",
+        "missing": "This fork has no {{option}} option, so {{wanted}} is not available.",
+        "cannotTurnOn": "This fork has no {{option}} option, so it cannot be turned on."
+      },
+      "session": {
+        "title": "This session could not keep all of its settings",
+        "missing": "This session has no {{option}} option, so {{wanted}} is not available.",
+        "cannotTurnOn": "This session has no {{option}} option, so it cannot be turned on."
+      },
+      "start": {
+        "title": "This session could not start with all of your settings",
+        "missing": "This session has no {{option}} option, so {{wanted}} is not available.",
+        "cannotTurnOn": "This session has no {{option}} option, so it cannot be turned on."
+      },
+      "differs": "{{option}} is {{actual}} instead of {{wanted}}.",
+      "isOff": "{{option}} is off instead of on.",
+      "isOn": "{{option}} is on instead of off.",
+      "next": "You can change them in the composer.",
+      "held": "Your message was not sent. It waits in the queue until you resume it."
+    },
+    "computerStopped": {
+      "title": "Stopped using the computer",
+      "description": "Agents can use it again after your next message."
+    },
+    "fullAccessNotCarried": {
+      "title": "Full access was not carried over",
+      "description": "This session ran in full access outside Sarto. Sarto does not attach a session in it, so it is in {{mode}} here."
+    }
+  },
+  "attention": {
+    "browserOrigin": "Wants to open {{site}}",
+    "deviceAccess": "Wants to use {{device}}",
+    "terminalAccess": "Wants to use your terminal {{terminal}}",
+    "tabAccess": "Wants to use your tab {{tab}}",
+    "terminalRename": "Wants to rename your terminal {{terminal}} to {{name}}",
+    "computerApp": "Wants to use {{app}}",
+    "computerSetup": "Wants to use your computer",
+    "controlAsk": {
+      "sign_in": "Needs you to sign in to {{target}}",
+      "code": "Needs you to enter the code for {{target}}",
+      "check": "Needs you to pass the check on {{target}}",
+      "other": "Needs you to do a step on {{target}}",
+      "nowhere": "Needs you to do a step in the browser"
+    },
+    "permission": "Asks for permission",
+    "turnEnd": {
+      "end_turn": "Finished",
+      "cancelled": "Cancelled",
+      "max_tokens": "Stopped at the token limit",
+      "max_turn_requests": "Stopped at the request limit",
+      "refusal": "The agent refused"
+    },
+    "wantsToRun": "Wants to run {{command}}",
+    "wantsToEdit": "Wants to edit {{target}}",
+    "wantsToDelete": "Wants to delete {{target}}",
+    "wantsToMove": "Wants to move {{target}}",
+    "wantsToUse": "Wants to use {{tool}}",
+    "asks": "Asks: {{question}}",
+    "done": "{{title}} · done",
+    "withChanges_one": "{{text}} {{count}} file changed.",
+    "withChanges_other": "{{text}} {{count}} files changed.",
+    "marketPublish": "Wants to publish {{name}} to the Marketplace",
+    "marketUnlist": "Wants to unlist {{name}} from the Marketplace",
+    "settingsChange_one": "Wants to change {{count}} setting",
+    "settingsChange_other": "Wants to change {{count}} settings"
+  },
+  "routines": {
+    "busy": "This routine already has a run working",
+    "stopping": "Sarto is stopping",
+    "noRun": "No such run",
+    "notFound": "No such routine",
+    "unnamed": "Routine",
+    "ended": "Finished",
+    "failed": "{{name}} failed",
+    "timedOut": "The run reached its time limit",
+    "needsApproval": "{{name}} needs approval",
+    "noScopeMode": "{{agent}} offers no mode for this routine's permissions",
+    "modeFailed": "{{agent}} would not set the mode for this routine's permissions",
+    "pausedTitle": "Routines paused for {{agent}}",
+    "pausedUsed": "{{limit}} limit {{percent}}% used · resets {{time}}",
+    "pausedReached": "{{limit}} limit reached · resets {{time}}",
+    "pausedUsedNoReset": "{{limit}} limit {{percent}}% used",
+    "pausedReachedNoReset": "{{limit}} limit reached"
+  },
+  "planLimitNotice": {
+    "near": "{{limit}} limit {{percent}}% used",
+    "reached": "{{limit}} limit reached",
+    "reset": "{{limit}} limit reset",
+    "resets": "{{account}} · resets {{time}}",
+    "goOn": "{{account}} · you can carry on",
+    "sessionReached": "{{limit}} limit reached · resets {{time}}",
+    "sessionReachedNoReset": "{{limit}} limit reached",
+    "sessionReset": "{{limit}} limit reset, it can carry on"
+  },
+  "planWindow": {
+    "five_hour": "5-hour",
+    "seven_day": "Weekly",
+    "daily": "Daily",
+    "monthly": "Monthly",
+    "annual": "Annual",
+    "minutes": "{{count}}-minute",
+    "hours": "{{count}}-hour",
+    "days": "{{count}}-day",
+    "overage": "Extra usage",
+    "auto": "Auto",
+    "other_models": "Other models",
+    "on_demand": "On-demand",
+    "budget": "Monthly budget",
+    "tool_calls": "Tool calls",
+    "tokens": "Tokens",
+    "usage": "Usage",
+    "scoped": "{{window}} · {{scope}}"
+  },
+  "planWindowInText": {
+    "five_hour": "5-hour",
+    "seven_day": "weekly",
+    "daily": "daily",
+    "monthly": "monthly",
+    "annual": "annual",
+    "minutes": "{{count}}-minute",
+    "hours": "{{count}}-hour",
+    "days": "{{count}}-day",
+    "scoped": "{{scope}} {{window}}"
+  },
+  "agent": {
+    "stoppedBeforeAnswer": "The agent stopped before it answered",
+    "failedToStart": "{{agent}} failed to start",
+    "notAvailable": "{{agent}} is not available",
+    "cliGone": "{{path}} is gone, perhaps because {{agent}} is being updated. {{reason}}",
+    "cliRestart": "{{agent}} is now at {{path}}; restart Sarto to use it.",
+    "cannotInstall": "{{agent}} cannot be installed",
+    "notInstalled": "{{agent}} is not installed.",
+    "busyInstalling": "{{agent}} is already being installed or started",
+    "closeSessionsFirst": "Close the sessions that use {{agent}} first",
+    "stillRunning": "{{agent}} did not stop and is still running; try again once it has exited",
+    "noLogout": "{{agent}} does not support signing out",
+    "keyInSettings": "{{method}} is set on {{agent}}'s page in Settings › Agents",
+    "signInOnComputer": "{{agent}} signs in through a browser on the computer it runs on, so sign in there.",
+    "signInCancelled": "The sign-in to {{agent}} was cancelled.",
+    "geminiAccountMoved": "Gemini CLI no longer takes personal Google accounts: Google moved them to Google Antigravity. Use this account in Google Antigravity; Gemini CLI still works with Gemini Code Assist Standard or Enterprise and with paid Gemini API or Vertex AI keys.",
+    "noOptions": "{{agent}} gave no models within {{seconds}} s",
+    "noModelsKept": "Sarto has not seen {{agent}}’s models yet",
+    "pinsFull": "Up to {{count}} models can be pinned; unpin one first",
+    "keychainRefused": "Sarto was not allowed to read {{agent}}’s sign-in from the keychain, so its usage is not shown. It asks again in 10 minutes.",
+    "noLimits": "{{agent}} gave no plan limits within {{seconds}} s",
+    "noResets": "{{agent}} has no reset to use on this sign-in",
+    "resetSignInExpired": "{{agent}}’s sign-in has expired, so nothing was used. Run it once so it renews its sign-in, then try again.",
+    "unreadableLimits": "Sarto could not find plan limits in {{agent}}'s {{command}} reply",
+    "antigravitySignedOut": "{{agent}} is signed out. Sign in again in a terminal to read its plan limits.",
+    "antigravityLimitsFailed": "{{agent}} could not read its plan limits: {{error}}",
+    "antigravityNoPlan": "{{agent}} named no Google plan, so it has no plan limits to read. If you use it with a Google account, sign in again in a terminal.",
+    "initializeTimeout": "{{agent}} did not answer initialize within {{seconds}} s.",
+    "initializeFailed": "{{agent}} failed to initialize: {{reason}}",
+    "hostStopping": "{{agent}} was not started: the host is stopping.",
+    "noNpm": "npm was not found on PATH.",
+    "incompleteInstall": "{{name}} is incomplete on disk.",
+    "exit": {
+      "code": "{{agent}} exited with code {{code}}",
+      "signal": "{{agent}} was stopped by {{signal}}",
+      "error": "{{agent}} {{error}}",
+      "closed": "{{agent}} closed its connection"
+    },
+    "exited": "{{exit}}.",
+    "exitedBeforeReady": "{{exit}} before it was ready.",
+    "stoppedTooOften_one": "{{detail}} It stopped {{count}} time in five minutes, so Sarto does not start it again until you retry.",
+    "stoppedTooOften_other": "{{detail}} It stopped {{count}} times in five minutes, so Sarto does not start it again until you retry.",
+    "installFailed": "{{agent}} could not be installed. {{message}}",
+    "sdkInstallFailed": "Found your {{command}}, but could not install the SDK that runs {{agent}}. {{message}}",
+    "runningFallback": "Running {{fallback}}: {{version}} could not be installed. {{message}}",
+    "installStopped": "The install was stopped.",
+    "busyTask": "{{agent}} is already being installed or updated",
+    "alreadyInstalled": "{{agent}} is already installed",
+    "updateFailed": "{{agent}} could not be updated. {{message}}",
+    "update": {
+      "none": "{{agent}} has no update to install",
+      "noNpm": "Updates are checked with npm, and npm was not found on PATH.",
+      "checkFailed": "Could not check for updates. {{reason}}",
+      "offline": "The npm registry could not be reached.",
+      "timeout": "npm did not answer within {{seconds}} s.",
+      "noVersion": "npm named no version of {{package}}.",
+      "registryOffline": "The ACP Registry could not be reached.",
+      "registryTimeout": "The ACP Registry did not answer within {{seconds}} s.",
+      "registryUnreadable": "The ACP Registry's listing could not be read.",
+      "stopped": "The check was stopped."
+    },
+    "binaryInstall": {
+      "noMethod": "No way to install {{agent}} was found: Homebrew, curl and bash, and npm are all missing from PATH.",
+      "unavailable": "{{command}} needs a program that was not found on PATH.",
+      "notOnPath": "{{agent}} was installed in {{folder}}, but {{command}} is still not found on PATH. Add that folder to PATH and reload the environment, or choose the program in Settings › Harnesses.",
+      "notFound": "{{agent}} was installed, but {{command}} is still not found on PATH. Reload the environment, or choose the program in Settings › Harnesses.",
+      "incomplete": "{{agent}} was installed, but its program cannot be run.",
+      "programOutside": "The archive names a program outside its folder: {{command}}.",
+      "programMissing": "The archive does not hold {{command}}.",
+      "downloadStart": "Downloading {{name}}",
+      "downloading": "Downloaded {{size}}",
+      "downloadFailed": "The download of {{url}} answered HTTP {{status}}.",
+      "downloadError": "{{name}} could not be downloaded: {{reason}}",
+      "downloadTimedOut": "{{name}} did not finish downloading within {{seconds}} s.",
+      "hashMismatch": "The downloaded file does not match its SHA-256: expected {{expected}}, got {{actual}}.",
+      "extracting": "Extracting the archive…",
+      "methodMissing": "{{agent}} has no {{method}} install on this platform",
+      "noArchive": "{{agent}} has no archive to download"
+    },
+    "reportTimeout": "{{command}} did not finish in {{seconds}} s",
+    "unreadableReport": "{{agent}}'s {{command}} gave no report Sarto can read",
+    "removed": "This agent was deleted, so this session cannot continue.",
+    "providerBusy": "A provider account is being changed",
+    "noProviders": "This agent has no provider accounts",
+    "disabled": "{{agent}} is turned off. Turn it on in Settings › Agents to use it.",
+    "uninstall": {
+      "busy": "{{agent}} is being installed or updated. Wait for it to finish, then uninstall."
+    },
+    "unknown": "Unknown agent {{agent}}",
+    "notInstalledStopping": "{{agent}} was not installed: the host is stopping.",
+    "noAdapter": "{{agent}} has no adapter to install.",
+    "program": {
+      "timedOutMinutes": "{{name}} did not finish within {{minutes}} minutes.",
+      "timedOutSeconds": "{{name}} did not finish within {{seconds}} s.",
+      "notStarted": "{{name}} could not be started: {{error}}",
+      "stopped": "{{name}} was stopped by {{signal}}. {{detail}}",
+      "exited": "{{name}} exited with code {{code}}. {{detail}}",
+      "exitedBare": "{{name}} exited with code {{code}}",
+      "fileNotFound": "{{file}} was not found.",
+      "noVersion": "{{name}} --version printed no version."
+    },
+    "unknownUsageReply": "The vendor returned an unknown usage reply",
+    "unknownAccountReply": "{{agent}} returned an unknown account reply",
+    "providersFailed": "Could not read OpenCode providers. Check the installed OpenCode version and try again.",
+    "noSignInMethod": "{{agent}} has no sign-in method {{method}}",
+    "signInInTerminal": "{{method}} runs in a terminal; use its command instead",
+    "noApiKey": "{{agent}} takes no API key from Sarto",
+    "noSettings": "{{agent}} has no settings Sarto edits",
+    "noAutoCompact": "{{agent}} has no auto-compact setting Sarto edits",
+    "noSite": "{{agent}} has no site Sarto edits",
+    "noConfigFolder": "{{agent}} has no configuration folder",
+    "noSettingsFile": "{{agent}} has no settings file",
+    "noProgram": "{{name}} was installed without a program to run.",
+    "antigravity": {
+      "noAnswer": "agy /{{command}} gave no answer within {{seconds}} s",
+      "noJson": "agy /{{command}} exited with code {{code}} and no JSON reply"
+    },
+    "protocolVersion": "{{agent}} speaks an unsupported protocol version ({{version}}).",
+    "theAgent": "The agent",
+    "noSignInPage": "The agent gave no sign-in page",
+    "sdkLacks": "The Claude Agent SDK at {{entry}} lacks {{missing}}",
+    "signIn": {
+      "subscription": "Sign in with a subscription",
+      "deviceCode": "Sign in with a device code",
+      "terminal": "Sign in in a terminal"
+    },
+    "sessionFolderMissing": "The session's folder {{folder}} does not exist",
+    "noSessionFlag": "The agent has no session flag to start with"
+  },
+  "detect": {
+    "noVersion": "No version of {{agent}} fits this computer, so it cannot be installed.",
+    "nodeMissing": "{{agent}} runs on Node.js, and node was not found on PATH.",
+    "nodeUnreadable": "{{agent}} runs on Node.js, and `{{path}} --version` failed: {{reason}}",
+    "printedNothing": "it printed nothing.",
+    "nodeToInstall": "Sarto installs {{agent}} with npm, which needs Node.js, and node was not found on PATH.",
+    "nodeOutdated": "{{agent}} needs Node.js {{required}} or later; {{installed}} is installed.",
+    "uvOutdated": "{{agent}} needs uv {{required}} or later; {{installed}} is installed. Update it with `uv self update`, or with the tool you installed it with.",
+    "npmMissing": "Sarto installs {{agent}} with npm, and npm was not found on PATH. {{hint}}",
+    "programUnusable": "The program chosen for {{agent}} ({{path}}) cannot be run.",
+    "commandMissing": "{{command}} was not found on PATH. {{hint}}",
+    "scriptMissing": "{{script}} does not exist.",
+    "noRouter": "{{agent}} runs through Sarto's session router, which is missing from this build. Reinstall Sarto.",
+    "antigravityInstallNotice": "The official installer puts agy in ~/.local/bin and adds it to PATH in your shell configuration files.",
+    "opencodeInstallNotice": "Sarto runs OpenCode 2. OpenCode 1 uses the same command, so remove a Homebrew or npm copy of it before installing; the install script replaces it.",
+    "geminiAudience": "Gemini CLI is for Gemini Code Assist Standard and Enterprise, Code Assist for GitHub, and paid Gemini API or Vertex AI keys. Since June 18, 2026, Google serves personal Google accounts, free or Google AI Pro and Ultra, in Google Antigravity.",
+    "hermesInstallNotice": "The official installer adds ~/.local/bin to PATH in your shell configuration files. ACP is included; browser and computer-use components are skipped.",
+    "hint": {
+      "node": "Install Node.js from nodejs.org, then reload the environment in Settings.",
+      "uv": "Install uv from docs.astral.sh/uv, then reload the environment in Settings.",
+      "opencode": "Install OpenCode, or choose its binary in Settings › Harnesses.",
+      "pi": "Install pi with `npm install -g --ignore-scripts @earendil-works/pi-coding-agent` or the installer at pi.dev.",
+      "minimax": "Install MiniMax Code in Settings › Harnesses, or choose its program there.",
+      "cursor": "Install Cursor, or choose its binary in Settings › Harnesses.",
+      "kimi": "Install Kimi Code with Install.",
+      "amp": "Install Amp, or choose its binary in Settings › Harnesses.",
+      "goose": "Install goose, or choose its binary in Settings › Harnesses.",
+      "kilo": "Install Kilo Code, or choose its binary in Settings › Harnesses.",
+      "omp": "Install OMP with `bun install -g @oh-my-pi/pi-coding-agent` or its installer at omp.sh.",
+      "antigravity": "Install the Antigravity CLI in Settings › Harnesses on macOS or Linux. On Windows, run irm https://antigravity.google/cli/install.ps1 | iex in PowerShell.",
+      "hermes": "Install Hermes Agent in Settings › Harnesses on macOS or Linux. On Windows, follow the official guide for WSL2.",
+      "muse": "Install Muse Code from dev.meta.ai, or choose its binary in Settings › Harnesses.",
+      "codewhale": "Install CodeWhale with the installer at codewhale.net, or choose its binary in Settings › Harnesses.",
+      "deepseek": "Install Node.js 24.9 or later from nodejs.org, which brings npm, then reload the environment in Settings.",
+      "harn": "Install Harn, or choose its binary in Settings › Harnesses.",
+      "kimchi": "Install Kimchi, or choose its binary in Settings › Harnesses.",
+      "archive": "Install it in Settings › Harnesses.",
+      "fakeAgent": "The fake agent runs tools/fake-agent/main.ts from the repository.",
+      "claudeCode": "Install Claude Code in Settings › Harnesses, or choose its program there.",
+      "codex": "Install Codex in Settings › Harnesses, or choose its program there."
+    },
+    "cliMissing": "{{agent}} runs your own {{command}}, which was not found on PATH. Install it in Settings › Harnesses.",
+    "cliUnsupported": "{{agent}} found {{path}}, which cannot be run without a shell.",
+    "cliFailed": "{{agent}} could not read the version of its program: {{reason}}",
+    "cliOutdated": "{{agent}} needs {{command}} {{required}} or later; {{installed}} is installed. Update it in Settings › Harnesses.",
+    "uninstalled": "{{agent}} was uninstalled. Install it to use it again.",
+    "notInstalledBySarto": "{{agent}} is not installed by Sarto.",
+    "why": {
+      "chosenUnusable": "{{path}} is missing or not executable",
+      "needsShell": "{{path}} runs only through a shell",
+      "versionUnread": "{{command}} --version failed: {{reason}}",
+      "noRouter": "this build of Sarto lacks its session router"
+    }
+  },
+  "environment": {
+    "inherited": "Reload environment to pick up changes to PATH made after Sarto started.",
+    "registryFailed": "Could not read PATH from Windows ({{error}}). Agents use the environment Sarto started with.",
+    "fallback": "Could not read the environment of {{shell}} ({{error}}). Agents use the environment Sarto started with.",
+    "shellTimeout": "the login shell did not answer within {{seconds}} s",
+    "signal": "signal {{signal}}",
+    "exitCode": "exit code {{code}}",
+    "noEnvironment": "{{shell}} printed no environment ({{reason}})",
+    "noEnvironmentDetail": "{{shell}} printed no environment ({{reason}}): {{detail}}"
+  },
+  "git": {
+    "notReady": "Git is not available yet",
+    "ghMissing": "The GitHub CLI (gh) is not installed",
+    "ghSignedOut": "The GitHub CLI is not signed in; run \"gh auth login\" in a terminal",
+    "busy": "Another git operation is running in this project; try again when it ends",
+    "notRepository": "This folder is not a git repository",
+    "operationInProgress": "Finish the merge or rebase in progress first",
+    "conflicts": "Resolve the conflicts first",
+    "notAChange": "{{path}} has no uncommitted changes",
+    "nestedRepository": "{{path}} is a repository of its own; handle it from the terminal",
+    "alreadyPublished": "The branch already tracks {{upstream}}",
+    "remoteNotFound": "This repository has no remote named {{remote}}",
+    "noBranch": "Check out a branch first: HEAD is detached or has no commits",
+    "noUpstream": "The branch is not published yet",
+    "diverged": "The branch and {{upstream}} have diverged; rebase or merge first, then push",
+    "pullFirst": "{{upstream}} has commits this branch does not have; pull first",
+    "noRemote": "The repository has no remote to push to",
+    "remoteExists": "The repository already has a remote",
+    "pushTargetChanged": "Where this push goes has changed to {{target}}; look at the popover again",
+    "notOnGithub": "Push the branch to a GitHub remote first",
+    "sameBranch": "The branch and the base are the same branch",
+    "localUpstream": "The branch tracks a branch of this repository, so there is no remote to push to",
+    "otherName": "The branch tracks {{upstream}}, which has another name; push it from the terminal",
+    "unknownRemote": "This repository has several remotes and none is set for this branch",
+    "commitMessageNoAgent": "No agent is available to write the message; add one or turn one on in Settings",
+    "commitMessageFailed": "{{agent}} could not write the message: {{reason}}",
+    "draftNoAgent": "No agent is available to write the draft; add one or turn one on in Settings",
+    "draftFailed": "{{agent}} could not write the draft: {{reason}}",
+    "failure": {
+      "timeout": "timed out",
+      "notFound": "command not found",
+      "cwdMissing": "working directory does not exist",
+      "exitCode": "exited with code {{code}}",
+      "command": "{{command}}: {{detail}}",
+      "ghNotJson": "gh printed output that is not JSON"
+    },
+    "unusableRemote": "Unusable remote name: {{remote}}",
+    "unusableBranch": "Unusable branch name: {{branch}}",
+    "discardConflicted": "Not discarding a conflicted file: {{path}}",
+    "notRepositoryName": "Not a repository name: {{name}}",
+    "noPullRequestUrl": "gh did not print the new pull request's URL",
+    "notPullRequestUrl": "Not a GitHub pull request URL: {{url}}",
+    "notIssueUrl": "Not a GitHub issue URL",
+    "noIssue": "GitHub has no issue at this address, or it cannot be read",
+    "unexpected": {
+      "pullRequestObject": "Unexpected gh output: not a pull request object",
+      "pullRequestUrl": "Unexpected pull request URL: {{url}}",
+      "issue": "Unexpected gh output: not an issue",
+      "pullRequestList": "Unexpected gh output: not a pull request list",
+      "revList": "Unexpected rev-list count output: {{output}}",
+      "show": "Unexpected git show output for {{oid}}"
+    }
+  },
+  "files": {
+    "projectMissing": "The project folder does not exist",
+    "notFileOrFolder": "{{path}} is not a file or a folder",
+    "insideGit": "{{path}} is inside .git",
+    "textTooLarge": "The text is larger than {{bytes}} bytes",
+    "changedSinceRead": "{{path}} changed since it was read",
+    "moveIntoItself": "{{path}} cannot move into itself",
+    "copyIntoItself": "{{path}} cannot be copied into itself",
+    "alreadyExists": "{{path}} already exists",
+    "pathNul": "path contains a NUL character",
+    "pathNotRelative": "path must be relative to the project",
+    "pathDotDot": "path must not contain ..",
+    "pathNoName": "path must name a file",
+    "notFolder": "{{path}} is not a folder",
+    "notFile": "{{path}} is not a file",
+    "outsideProject": "{{path}} is outside the project",
+    "folderInTheWay": "A folder is at {{path}}, so a file cannot replace it",
+    "fileInTheWay": "{{path}} is not a folder, so a folder cannot go into it",
+    "tooManyCopies": "Too many copies of {{name}}",
+    "notExist": "{{path}} does not exist",
+    "previewRefused": "{{path}} is outside the folder or hidden, so it cannot be previewed",
+    "previewNotHtml": "{{path}} is not an HTML file"
+  },
+  "worktree": {
+    "branchDeleteFailed": "Could not delete {{branch}}: {{reason}}",
+    "unknownPlaceholder": "Unknown placeholder in branch template: {{placeholder}}",
+    "unusableBranch": "Unusable branch name {{name}}: {{reason}}",
+    "branchProblem": {
+      "empty": "it is empty",
+      "tooLong": "it is longer than {{max}} characters",
+      "dash": "it starts with \"-\"",
+      "reserved": "it is reserved",
+      "special": "it has a space, a control or a special character",
+      "dots": "it has \"..\"",
+      "atBrace": "it has \"@{\"",
+      "emptyComponent": "it has an empty path component",
+      "endsDot": "it ends with \".\"",
+      "componentDot": "a path component starts with \".\"",
+      "componentLock": "a path component ends with \".lock\""
+    },
+    "baseNotFound": "Base {{base}} not found",
+    "outsideRoot": "Worktree folder outside its root",
+    "namesTaken": "Every name from {{first}} to {{last}} is taken",
+    "changedSinceInspected": "The worktree changed since it was inspected",
+    "notOfProject": "The folder is not a worktree of this project",
+    "branchGone": "Branch {{branch}} no longer exists",
+    "setupStopped": "stopped",
+    "includeProblem": {
+      "nul": "contains a NUL character",
+      "glob": "globs are not supported",
+      "absolute": "absolute paths are not allowed",
+      "colon": "contains \":\"",
+      "dotdot": "\"..\" is not allowed",
+      "itself": "names the project itself",
+      "git": "names git metadata"
+    }
+  },
+  "permission": {
+    "allowOnce": "Allow once",
+    "allowAlways": "Always allow {{changes}}",
+    "addRules": "{{rules}} {{place}}",
+    "addDirectories": "access to {{directories}} {{place}}",
+    "setMode": "switch to {{mode}}",
+    "reject": "Deny, and say what to do instead",
+    "place": {
+      "user": "in every project",
+      "project": "in this project",
+      "shared": "in this project's shared settings",
+      "session": "for this session"
+    },
+    "listSeparator": ", ",
+    "changeSeparator": "; ",
+    "exitPlan": {
+      "keepPlanning": "Keep planning"
+    },
+    "allowEdit": "Allow this edit",
+    "acceptEdits": "Allow all edits in this session"
+  },
+  "content": {
+    "audioTooLarge": "Audio, {{size}}, too large to show",
+    "videoTooLarge": "Video, {{size}}, too large to show",
+    "image": "Image {{number}}",
+    "resource": "Embedded resource {{uri}}",
+    "text": "Text",
+    "unknown": "Unknown content",
+    "terminal": "Terminal {{id}}",
+    "unknownTool": "Unknown tool content",
+    "toolCall": "Tool call"
+  },
+  "antigravity": {
+    "plan": {
+      "title": "Plan"
+    },
+    "mode": {
+      "default": {
+        "name": "Default",
+        "description": "Ask before edits and commands"
+      },
+      "acceptEdits": {
+        "name": "Accept edits",
+        "description": "Approve file edits in the workspace without asking"
+      },
+      "auto": {
+        "name": "Auto",
+        "description": "Approve edits and safe commands; ask before irreversible actions"
+      },
+      "plan": {
+        "name": "Plan",
+        "description": "Plan carefully before executing a task"
+      },
+      "fullAccess": {
+        "name": "Full access",
+        "description": "Never asks. Applies between turns, once its commands end, restarting agy"
+      }
+    },
+    "fullAccess": {
+      "enterFailed": "Could not switch to Full access",
+      "leaveFailed": "Could not leave Full access"
+    }
+  },
+  "claude": {
+    "mode": {
+      "default": {
+        "name": "Ask before edits",
+        "description": "Asks before it changes a file or runs a command"
+      },
+      "acceptEdits": {
+        "name": "Accept edits",
+        "description": "Edits files freely; still asks before commands"
+      },
+      "plan": {
+        "name": "Plan only",
+        "description": "Reads and plans. Changes nothing"
+      },
+      "auto": {
+        "name": "Auto",
+        "description": "Claude handles permission decisions"
+      },
+      "bypassPermissions": {
+        "name": "Full access",
+        "description": "Never asks. Use it in a sandbox or a worktree"
+      }
+    },
+    "notStarted": "Claude Code has not started",
+    "noProgram": "No Claude Code program was found for the SDK",
+    "noTaskOutput": "This Claude Code cannot read task output",
+    "stoppedEarly": "Claude Code stopped before the turn ended",
+    "ultracodeUnknown": "Ultracode's inherited value is unknown, so it cannot be applied",
+    "auth": {
+      "login": "Log in with Claude",
+      "loginDescription": "Run `claude` and then /login",
+      "subscription": "Claude Subscription",
+      "subscriptionDescription": "Use Claude subscription",
+      "console": "Anthropic Console",
+      "consoleDescription": "Use Anthropic Console (API usage billing)"
+    },
+    "account": {
+      "none": "Not signed in",
+      "apiKey": "Anthropic API key",
+      "gateway": "Custom model gateway"
+    }
+  },
+  "codex": {
+    "signInNeeded": "Sign in to Codex with `codex login` in a terminal",
+    "turnFailed": "The turn failed",
+    "noForkPoint": "Codex can't find this reply in its history",
+    "heldElsewhere": "This session is still open in another Codex program, such as the Codex app, a terminal or an editor. Close it there and try again in a minute.",
+    "option": {
+      "mode": "Mode",
+      "modeDescription": "Approval and sandboxing preset for the session",
+      "collaboration": "Collaboration mode",
+      "collaborationDescription": "How Codex collaborates for the next turns",
+      "model": "Model",
+      "modelDescription": "Model Codex uses for the session",
+      "effort": "Reasoning effort",
+      "effortDescription": "How much reasoning effort the model uses",
+      "fast": "Fast mode",
+      "fastDescription": "1.5x speed, more usage"
+    },
+    "mode": {
+      "read-only": {
+        "name": "Read-only",
+        "description": "Ask before edits or network access"
+      },
+      "workspace-write": {
+        "name": "Workspace access",
+        "description": "Ask for outside edits or network access"
+      },
+      "agent": {
+        "name": "Auto review",
+        "description": "Only ask about potentially unsafe actions"
+      },
+      "agent-full-access": {
+        "name": "Full access",
+        "description": "Any file or network, without approval"
+      }
+    },
+    "collaboration": {
+      "default": "Default",
+      "plan": "Plan",
+      "planDescription": "Plan before making changes"
+    },
+    "plan": {
+      "title": "Plan",
+      "implement": "Yes, implement this plan",
+      "implementDescription": "Leaves Plan mode; Codex keeps its permission mode, {{mode}}",
+      "keepPlanning": "No, keep planning"
+    },
+    "auth": {
+      "chatGpt": {
+        "name": "ChatGPT",
+        "description": "Sign in with your ChatGPT account in the browser"
+      },
+      "deviceCode": {
+        "name": "ChatGPT (device code)",
+        "description": "Sign in to ChatGPT by opening a verification page and entering a one-time code"
+      },
+      "apiKey": {
+        "name": "API key",
+        "description": "Paste an OpenAI API key, then press Enter and Ctrl+D"
+      }
+    },
+    "account": {
+      "none": "Not signed in",
+      "apiKey": "OpenAI API key",
+      "gateway": "Custom model provider"
+    },
+    "approval": {
+      "allowOnce": "Allow once",
+      "allowSession": "Allow for this session",
+      "allowTurn": "Allow for this turn",
+      "allowPrefix": "Always allow `{{command}}`",
+      "allowHost": "Always allow {{host}}",
+      "denyHost": "Always block {{host}}",
+      "decline": "Deny, and keep going",
+      "cancel": "Deny, and say what to do instead",
+      "dismiss": "Dismiss without answering",
+      "accept": "Continue",
+      "network": "Network access",
+      "networkHost": "{{protocol}} access to {{host}}",
+      "networkTitle": "{{protocol}} network access to {{host}}",
+      "read": "Read {{path}}",
+      "write": "Write {{path}}",
+      "permissionsTitle": "More permissions",
+      "elicitationTitle": "{{server}} asks to continue",
+      "allowEdit": "Allow this edit"
+    },
+    "tool": {
+      "readFile": "Read file '{{path}}'",
+      "listFiles": "List files",
+      "listFilesIn": "List files in '{{path}}'",
+      "search": "Search for '{{query}}'",
+      "searchIn": "Search for '{{query}}' in {{path}}",
+      "searchPath": "Search in '{{path}}'",
+      "searchAll": "Search",
+      "runCommand": "Run command",
+      "editFiles": "Editing files",
+      "mcp": "{{server}}: {{tool}}",
+      "webSearch": "Web search: {{query}}",
+      "webSearchAll": "Web search",
+      "openPage": "Open {{url}}",
+      "findInPage": "Find in {{url}}",
+      "viewImage": "View image '{{path}}'",
+      "generateImage": "Generate image",
+      "agent": {
+        "spawnAgent": "Start subagent",
+        "sendInput": "Message subagent",
+        "resumeAgent": "Resume subagent",
+        "wait": "Wait for subagents",
+        "closeAgent": "Close subagent"
+      }
+    },
+    "notice": {
+      "rerouted": "Codex switched from {{from}} to {{to}}"
+    },
+    "command": {
+      "plan": {
+        "description": "Turn plan mode on."
+      },
+      "mcp": {
+        "description": "Show the status of the MCP servers, or reconnect them.",
+        "hint": "[reconnect]"
+      },
+      "skills": {
+        "description": "List available skills."
+      },
+      "status": {
+        "description": "Display session configuration and token usage."
+      },
+      "review": {
+        "description": "Review uncommitted changes, or review with custom instructions.",
+        "hint": "optional review instructions"
+      },
+      "review-branch": {
+        "description": "Review changes relative to a base branch.",
+        "hint": "branch name"
+      },
+      "review-commit": {
+        "description": "Review a specific commit.",
+        "hint": "commit sha"
+      },
+      "compact": {
+        "description": "Summarize conversation to avoid hitting the context limit."
+      },
+      "goal": {
+        "description": "Set a goal to keep pursuing.",
+        "hint": "[<objective>|clear|pause|resume]"
+      },
+      "rename": {
+        "description": "Rename the current session.",
+        "hint": "new name"
+      },
+      "usage": "Command \"/{{name}}\" requires {{hint}}.",
+      "noArguments": "no arguments",
+      "goalTooLong": "Command \"/goal\" requires goal text of at most {{max}} characters.",
+      "skillsTitle": "Available skills:",
+      "noSkills": "No skills configured."
+    },
+    "status": {
+      "model": "**Model:** {{value}}",
+      "directory": "**Directory:** {{value}}",
+      "approval": "**Approval:** {{value}}",
+      "sandbox": "**Sandbox:** {{value}}",
+      "account": "**Account:** {{value}}",
+      "session": "**Session:** `{{value}}`",
+      "tokens": "**Token usage:** {{value}}",
+      "context": "**Context window:** {{value}}",
+      "limit": "**{{label}} limit:** {{value}}",
+      "limits": "**Limits:** {{value}}",
+      "notAvailable": "data not available yet",
+      "notSignedIn": "not logged in",
+      "tokenCounts": "{{total}} total  ({{input}} input + {{cached}} cached input{{cacheWrite}}, {{output}} output)",
+      "cacheWrite": " + {{count}} cache write",
+      "contextUsed": "{{percent}}% used ({{used}} used / {{size}})",
+      "left": "{{percent}}% left{{reset}}",
+      "resetsToday": " (resets {{time}})",
+      "resetsOn": " (resets {{time}} on {{date}})"
+    },
+    "mcp": {
+      "none": "No MCP servers are configured.",
+      "summary": "**MCP servers:** {{count}} ({{counts}})",
+      "count": "{{count}} {{status}}",
+      "status": {
+        "connected": "Connected",
+        "starting": "Connecting",
+        "notStarted": "Not started",
+        "authenticationRequired": "Needs authentication",
+        "failed": "Failed",
+        "cancelled": "Cancelled",
+        "disabled": "Disabled",
+        "unknown": "Unknown"
+      },
+      "tools_one": "{{count}} tool",
+      "tools_other": "{{count}} tools",
+      "notSignedIn": "not signed in",
+      "disabled": "**Disabled:** {{names}}",
+      "reconnectHint": "Run `/mcp reconnect` to restart the servers that are not connected.",
+      "arguments": "Command \"/mcp\" accepts no arguments, or `reconnect`.",
+      "reconnect": "**Reconnect:**",
+      "reloaded": "Reloaded the MCP configuration of all open sessions. Codex restarted the servers that failed, stopped, or changed. A connected server with unchanged settings keeps its connection.",
+      "reloadFailed": "Could not reload the MCP configuration: {{error}}",
+      "signInUnsupported": "MCP server {{name}} needs authentication, but this client cannot open a sign-in page.",
+      "stillStarting": "Some MCP servers are still starting. Run `/mcp` again later to see their status.",
+      "unknownError": "unknown MCP startup error",
+      "unnamed": "(unnamed)"
+    },
+    "noValue": "Codex has no value {{value}} for {{option}}",
+    "cannotSignOut": "Codex cannot sign out here",
+    "unknownError": "Unknown error"
+  },
+  "dsh": {
+    "tool": {
+      "read": "Read file",
+      "write": "Write file '{{path}}'",
+      "editFile": "Edit file '{{path}}'",
+      "edit": "Edit file",
+      "fetch": "Open page",
+      "ask": "Ask a question",
+      "plan": "Plan"
+    },
+    "notice": {
+      "retry": "The model request failed; retrying ({{retry}} of {{max}})"
+    },
+    "permission": {
+      "reject": "Deny"
+    },
+    "plan": {
+      "approve": "Approve and leave plan mode"
+    },
+    "subagent": {
+      "failed": "The subagent ended: {{reason}}"
+    },
+    "auth": {
+      "account": "DeepSeek account",
+      "accountDescription": "Run `dsh web` and sign in to DeepSeek in its page"
+    },
+    "account": {
+      "account": "DeepSeek account",
+      "apiKey": "DeepSeek API key",
+      "gateway": "Custom model provider"
+    },
+    "balanceExpired": "The DeepSeek sign-in has expired. Sign in again in a terminal to see the balance.",
+    "mode": {
+      "name": "Mode",
+      "plan": "Plan",
+      "planDescription": "Plan before making changes",
+      "readOnly": "Read only",
+      "readOnlyDescription": "Reads files; asks before changing anything",
+      "workspaceWrite": "Workspace write",
+      "workspaceWriteDescription": "Changes files in the project; asks before going outside it",
+      "fullAccess": "Full access",
+      "fullAccessDescription": "Runs anything without asking"
+    },
+    "model": "Model",
+    "effort": {
+      "name": "Reasoning",
+      "default": "Default",
+      "off": "Off",
+      "minimal": "Minimal",
+      "low": "Low",
+      "medium": "Medium",
+      "high": "High",
+      "xhigh": "Extra high",
+      "max": "Max"
+    },
+    "noModel": "DeepSeek Harness has no model to run on",
+    "didNotStart": "DeepSeek Harness did not start",
+    "credentialsInvalid": "{{file}} is not valid YAML; fix it or remove the key there",
+    "credentialsNotMap": "{{file}} does not hold a credential map"
+  },
+  "opencode": {
+    "option": {
+      "model": "Model",
+      "effort": "Effort",
+      "mode": "Mode",
+      "defaultEffort": "Default"
+    },
+    "tool": {
+      "skill": "Load skill '{{name}}'",
+      "script": "Run script",
+      "call": "Tool call"
+    },
+    "notice": {
+      "retry": "The model request failed; retrying (attempt {{attempt}})"
+    },
+    "command": {
+      "compact": "Compact the session"
+    },
+    "account": {
+      "unknownProvider": "OpenCode does not know this provider.",
+      "unknownAction": "OpenCode does not know this action.",
+      "credentialRequired": "A credential is required.",
+      "removeFailed": "OpenCode could not remove the account.",
+      "activateFailed": "OpenCode could not activate the account.",
+      "saveKeyFailed": "OpenCode could not save the key.",
+      "keySavedNotActivated": "The key was saved, but OpenCode could not activate the account.",
+      "listFailed": "OpenCode could not list its providers.",
+      "readCredentialsFailed": "OpenCode could not read its credentials.",
+      "wrongProvider": "The credential does not belong to this provider.",
+      "keyRequired": "A key is required.",
+      "noKeySignIn": "This provider has no key sign-in."
+    },
+    "turnFailed": "OpenCode could not finish the turn",
+    "replyGone": "OpenCode no longer has that reply",
+    "noEvents": "OpenCode sends no events",
+    "answered": "OpenCode answered {{status}}",
+    "usageFailed": "Usage could not be read."
+  },
+  "pi": {
+    "tool": {
+      "toolSearch": "Search tools for '{{query}}'",
+      "toolSearchAll": "Search tools",
+      "script": "Run script"
+    },
+    "notice": {
+      "extensionError": "An extension of Pi failed"
+    },
+    "auth": {
+      "terminal": "Launch pi in the terminal",
+      "terminalDescription": "Start pi in a terminal and use /login to add an API key or sign in to a provider",
+      "required": "Configure an API key or log in with an OAuth provider."
+    },
+    "start": {
+      "failed": "Pi exited before it answered",
+      "failedWith": "Pi exited before it answered: {{reason}}"
+    },
+    "fork": {
+      "noReply": "Pi does not have that reply in the session",
+      "cancelled": "An extension of Pi cancelled the fork"
+    },
+    "session": {
+      "notFound": "Pi has no session {{id}}",
+      "id": "**Session:** `{{value}}`",
+      "file": "**Session file:** `{{value}}`",
+      "messages": "**Messages:** {{value}}",
+      "cost": "**Cost:** {{value}}",
+      "tokens": "**Tokens:** {{value}}",
+      "input": "{{value}} input",
+      "output": "{{value}} output",
+      "cacheRead": "{{value}} cache read",
+      "cacheWrite": "{{value}} cache write",
+      "total": "{{value}} total"
+    },
+    "command": {
+      "compact": {
+        "description": "Manually compact the session context",
+        "hint": "optional custom instructions"
+      },
+      "autocompact": {
+        "description": "Toggle automatic context compaction",
+        "hint": "on|off|toggle"
+      },
+      "export": {
+        "description": "Export session to an HTML file in the session's folder"
+      },
+      "session": {
+        "description": "Show session stats (messages, tokens, cost, session file)"
+      },
+      "name": {
+        "description": "Set session display name",
+        "hint": "<name>"
+      },
+      "steering": {
+        "description": "Get or set how pi delivers steering messages",
+        "hint": "all | one-at-a-time"
+      },
+      "follow-up": {
+        "description": "Get or set how pi delivers follow-up messages",
+        "hint": "all | one-at-a-time"
+      },
+      "changelog": {
+        "description": "Show pi's changelog"
+      }
+    },
+    "autocompact": {
+      "on": "Auto-compaction enabled.",
+      "off": "Auto-compaction disabled."
+    },
+    "export": {
+      "nothing": "Nothing to export yet. Send a prompt first.",
+      "noPath": "Pi named no file for the export",
+      "done": "Session exported:"
+    },
+    "name": {
+      "usage": "Usage: /name <name>",
+      "done": "Session name set: {{name}}"
+    },
+    "queue": {
+      "steering": "Steering mode",
+      "followUp": "Follow-up mode",
+      "mode": "{{label}}: {{mode}}",
+      "usage": "Usage: /{{name}} all | /{{name}} one-at-a-time",
+      "set": "{{label}} set to: {{mode}}"
+    },
+    "changelog": {
+      "missing": "Changelog not found: pi's package could not be located."
+    },
+    "noAnswer": "pi did not answer {{command}} within {{seconds}} s",
+    "refused": "pi refused it"
+  },
+  "cline": {
+    "mode": {
+      "name": "Mode",
+      "plan": "Plan",
+      "planDescription": "Explores and plans without changing files",
+      "act": "Act",
+      "actDescription": "Changes files and runs commands"
+    },
+    "model": "Model",
+    "provider": {
+      "name": "Provider",
+      "description": "The provider Cline reaches the model through"
+    },
+    "autoApprove": {
+      "name": "Auto-approve tools",
+      "description": "Runs every tool call without asking"
+    },
+    "thinking": {
+      "name": "Thinking",
+      "off": "Off",
+      "on": "On"
+    },
+    "permission": {
+      "allowAlways": "Always allow in this session"
+    },
+    "signInFirst": "Sign in to Cline before starting a session",
+    "compact": {
+      "command": "Compact the session’s context",
+      "nothing": "There’s nothing to compact yet.",
+      "off": "Context compaction is turned off in Cline’s own settings."
+    }
+  },
+  "question": {
+    "other": "Something else…"
+  },
+  "elicitation": {
+    "formTitle": "{{server}} needs some details",
+    "urlTitle": "{{server}} asks you to open a page",
+    "submit": "Submit",
+    "open": "Open",
+    "decline": "Decline",
+    "yes": "Yes",
+    "no": "No",
+    "invalid": {
+      "text": "{{name}} takes text",
+      "minLength": "{{name}} takes at least {{min}} characters",
+      "maxLength": "{{name}} takes at most {{max}} characters",
+      "format": "{{name}} is not a valid {{format}}",
+      "number": "{{name}} takes a number",
+      "integer": "{{name}} takes a whole number",
+      "minimum": "{{name}} takes at least {{min}}",
+      "maximum": "{{name}} takes at most {{max}}",
+      "boolean": "{{name}} takes yes or no",
+      "noChoice": "{{name}} has no such choice",
+      "list": "{{name}} takes a list of choices",
+      "twice": "{{name}} names a choice twice",
+      "minItems": "{{name}} takes at least {{min}} choices",
+      "maxItems": "{{name}} takes at most {{max}} choices",
+      "noField": "The form has no field {{key}}",
+      "required": "{{name}} is required"
+    }
+  },
+  "artifacts": {
+    "formatUpgraded": "Moved to version {{format}} of its type’s format",
+    "edit": {
+      "noElement": "No element starts at offset {{offset}}",
+      "textTooLong": "The text is too long",
+      "moreThanText": "The <{{tag}}> at offset {{offset}} holds more than text",
+      "styleRefused": "The style has a property or value an edit may not write"
+    },
+    "held": "An agent is writing this part in its current turn; it can be changed once the turn ends. Comments still work.",
+    "needDatabase": "Artifacts need the thread database",
+    "deleted": "{{id}} is in Recently deleted",
+    "noHtmlFile": "{{id}} has no HTML file {{path}}",
+    "notUtf8": "{{path}} is not UTF-8 text",
+    "fileTooLarge": "The file is too large",
+    "noArtifact": "No artifact {{id}}",
+    "noVersion": "{{id}} has no version {{version}}",
+    "notDeleted": "{{id}} is not in Recently deleted",
+    "noThread": "{{id}} has no thread {{thread}}",
+    "threadsFull": "{{id}} holds {{count}} threads",
+    "commentsFull": "{{thread}} holds {{count}} comments",
+    "changedSince": "{{id}} is at version {{head}}, and {{changed}} changed since version {{base}}",
+    "canvasInvalid": "{{file}} of {{id}} is not valid: {{reason}}",
+    "pptxNoBytes": "PowerPoint export gave no bytes",
+    "noQuestion": "No such question is open for this port"
+  },
+  "workflow": {
+    "unusable": "{{name}} cannot be used: {{problem}}",
+    "notApproved": "Approve {{name}} before starting a task with it",
+    "notFound": "No such workflow",
+    "changedSinceShown": "The workflow changed since you saw it. Look at it again before approving it.",
+    "invalid": "The workflow has problems to fix first",
+    "noSuchStep": "The workflow has no such step for an agent",
+    "notGithub": "Give the address of a file on GitHub",
+    "notFromGithub": "Only a workflow added from GitHub can be updated",
+    "tooLarge": "The workflow file is larger than 256 KB",
+    "libraryFull": "Your workflow library is full",
+    "downloadFailed": "Could not download the workflow: {{error}}",
+    "downloadStatus": "GitHub answered {{status}} for the workflow",
+    "listingProblem": "The workflow has a problem, so nothing was installed: {{problem}}",
+    "cardNotFound": "This card is no longer there",
+    "cardAnswered": "This card was already answered",
+    "cardBusy": "Start is already under way",
+    "connectFirst": "Connect {{name}} first",
+    "listingChanged": "The Marketplace's version is not the one the card showed. Ask the agent for the card again.",
+    "noWorkflowFile": "That version of the workflow has no workflow file",
+    "noProject": "The session has no project to start the task in",
+    "toolGone": "Sarto cannot find {{name}} in the Marketplace now"
+  },
+  "tasks": {
+    "notFound": "No such task",
+    "noStep": "No such step on this task",
+    "noDocument": "No such document on this task",
+    "cannotStep": "{{agent}} cannot do workflow steps",
+    "notReviewing": "This step waits for no review",
+    "notPerson": "This step waits for no answer",
+    "noOutcome": "{{step}} has no outcome “{{outcome}}”",
+    "ended": "The task has ended",
+    "nothingToRetry": "This step waits for nothing to retry",
+    "stillRunning": "Cancel the task before deleting it",
+    "noteEmpty": "A note needs text",
+    "sendBackEmpty": "Say what to change, or leave a comment on the document, before sending it back",
+    "cannotPin": "This step has started, so it cannot be pinned now",
+    "needsYou": "{{title}} needs you",
+    "needsYouBody": "{{step}} · {{workflow}}",
+    "done": "{{title}} is done",
+    "dropped": "{{title}} ended without being done",
+    "cancelled": "{{title}} was cancelled",
+    "endedBody": "{{workflow}} · {{steps}} steps",
+    "notWritten": "Only a task that ended done on a workflow its agent wrote for it can keep or publish that workflow",
+    "noOrigin": "The conversation this task started from is gone",
+    "noCommit": "The branch to work from has no commit"
+  },
+  "marketPublish": {
+    "handleInvalid": "A publisher name is 1 to 32 lowercase letters, digits and hyphens, starting and ending with a letter or digit.",
+    "handleTaken": "@{{handle}} is taken. Choose another publisher name.",
+    "publisherFailed": "Could not set the publisher name: {{reason}}",
+    "notReady": "Nothing was uploaded: fix what the check found first.",
+    "failure": {
+      "signed_out": "Sign in to a Sarto account with Sarto’s cloud services on to publish.",
+      "unauthorized": "Sign in to your Sarto account again to publish.",
+      "network": "Couldn’t reach the Marketplace. Check the connection and try again.",
+      "unreadable": "Couldn’t read what you published.",
+      "storage_full": "Your cloud storage is full, and something only you can see counts against it.",
+      "too_many_listings": "Your account has as many listings as it can have.",
+      "rate_limited": "Too many versions in the last hour. Try again later.",
+      "last_version": "It’s the only version left. Publish a new one before you withdraw this one, or delete the listing.",
+      "handle_taken": "That publisher name is taken. Choose another.",
+      "taken_down": "Sarto took it down, so it takes no new versions.",
+      "version_exists": "This version is published already. Raise the version and try again.",
+      "no_publisher": "Choose a publisher name first.",
+      "not_found": "It’s no longer in the Marketplace.",
+      "check_failed": "The Marketplace’s check didn’t pass.",
+      "conflict": "Something else changed it at the same time. Try again."
+    },
+    "check": {
+      "link": "It is a link. Replace it with the file itself, or remove it.",
+      "nameTooLong": "Its name is too long.",
+      "nameCharacters": "Its name holds a backslash or control character.",
+      "pathTooLong": "Its path is too long.",
+      "tooManyFiles": "The folder holds more than {{count}} files, the most a version may have.",
+      "folderTooLarge": "The folder is larger than {{mb}} MB, the most a version may be.",
+      "notJsonObject": "It is not a JSON object.",
+      "notJson": "It is not valid JSON.",
+      "missing": {
+        "name": "It has no name.",
+        "description": "It has no description.",
+        "version": "It has no version.",
+        "versionNumber": "It has no version such as 1.0.0.",
+        "nameFront": "It has no name in its front matter.",
+        "descriptionFront": "It has no description in its front matter."
+      },
+      "skillName": "The name \"{{name}}\" must be lowercase letters, digits and hyphens.",
+      "notUtf8": "It is not UTF-8 text.",
+      "workflowName": "The name \"{{name}}\" has no Latin letters or digits to name the listing by. Name it in English and give other languages under locales.",
+      "readmeTooLong": "It is longer than {{count}} characters, the most a listing's text may be.",
+      "badVersion": "\"{{version}}\" is not a version such as 1.0.0.",
+      "serverNotRunnable": "It names no package or https remote that Sarto can run.",
+      "notBundle": "It is not an MCP bundle Sarto can read.",
+      "bundleNoManifest": "It has no manifest.json.",
+      "secret": {
+        "found": "Line {{line}} looks like {{what}}. Remove it, and revoke it if it is real.",
+        "privateKey": "a private key",
+        "github": "a GitHub token",
+        "anthropic": "an Anthropic API key",
+        "openrouter": "an OpenRouter API key",
+        "deepseek": "a DeepSeek-style API key",
+        "openai": "an OpenAI API key",
+        "aws": "an AWS access key",
+        "slack": "a Slack token",
+        "stripe": "a Stripe key",
+        "google": "a Google API key",
+        "npm": "an npm token",
+        "gitlab": "a GitLab token",
+        "huggingFace": "a Hugging Face token"
+      },
+      "nothingAt": "Nothing is at {{path}}.",
+      "pathIsLink": "The path is a link. Give the folder it points to instead.",
+      "folderOrBundle": "Publish a folder, or an MCP bundle (.mcpb) file.",
+      "bundleTooLarge": "The bundle is larger than {{mb}} MB, the most a version may be.",
+      "bothPlugins": "The folder is both a Claude Code and a Codex plugin. Publish each from a folder of its own.",
+      "manyBundles": "The folder holds more than one MCP bundle. Keep one.",
+      "fileTooLarge": "It is larger than {{mb}} MB, the most a version may be.",
+      "unknownFolder": "Sarto cannot tell what this folder is. A skill has a SKILL.md, a workflow a workflow.yaml, a plugin a .claude-plugin/plugin.json or .codex-plugin/plugin.json, and an MCP server a server.json.",
+      "manifestTooLarge": "It is too large to be a manifest.",
+      "aboutTooLong": "The description is longer than {{count}} characters.",
+      "manifestName": "A file at the top may not be named manifest. Rename it.",
+      "otherKind": "{{listing}} is already one of the user’s listings, as another kind. Give this one another name.",
+      "takenDown": "{{listing}} was taken down by Sarto: {{reason}}",
+      "versionInManifest": "The version is {{version}}, as the manifest says; change it there instead of passing {{wanted}}.",
+      "versionTakenNumbered": "Version {{version}} of {{listing}} is published already. Pass a higher version.",
+      "versionTaken": "Version {{version}} of {{listing}} is published already. Raise the version in {{manifest}}."
+    }
+  },
+  "marketCommunity": {
+    "signedOut": "Sign in to a Sarto account to install from the Marketplace.",
+    "takenDown": "This was taken down from the Marketplace.",
+    "gone": "This is no longer in the Marketplace.",
+    "withdrawn": "Its publisher withdrew this version. Try again to get the current one.",
+    "failed": "Couldn’t reach the Marketplace: {{reason}}",
+    "mismatch": "{{path}} didn’t match the checksum the Marketplace gave for it, so nothing was installed.",
+    "badPath": "The Marketplace named a file Sarto won’t write, {{path}}, so nothing was installed.",
+    "tooLarge": "This version is larger than a version may be, so nothing was installed.",
+    "otherKind": "This listing is another kind of item.",
+    "otherHarness": "This plugin is for another agent.",
+    "noManifest": "The plugin has no {{file}} with a name, so it can’t be installed.",
+    "nameTaken": "Another plugin named {{name}} from the Marketplace is installed ({{other}}). Uninstall it first.",
+    "noWorkflow": "The listing has no workflow.yaml in UTF-8 text, so nothing was installed.",
+    "notListing": "Not a listing of the Marketplace"
+  },
+  "marketBundle": {
+    "invalid": "This MCP bundle can’t be installed: {{reason}}",
+    "notZip": "it isn’t a zip archive.",
+    "tooMany": "it holds more files than a bundle may.",
+    "tooLarge": "it’s larger than a bundle may be once unpacked.",
+    "unsafePath": "it names a path Sarto won’t write, {{path}}.",
+    "notFile": "{{path}} is a link or something else that isn’t a plain file.",
+    "noManifest": "it has no readable manifest.json.",
+    "field": "its manifest has no valid {{field}}.",
+    "noEntry": "{{path}} isn’t in it.",
+    "variable": "{{where}} uses {{variable}}, which Sarto doesn’t know.",
+    "platform": "It runs only on {{platforms}}.",
+    "node": "It needs Node.js {{range}}, and Sarto’s is {{version}}.",
+    "needsPython": "It needs Python 3, which isn’t on this computer. Install it from https://www.python.org, then try again.",
+    "needsUv": "It needs uv, which isn’t on this computer. Install it from https://docs.astral.sh/uv, then try again.",
+    "needsCommand": "It needs {{command}}, which isn’t on this computer.",
+    "secretArg": "It would put {{title}}, a secret, on the command line, where other users of this computer could read it.",
+    "mixed": "Its {{name}} variable mixes a value you fill in with other text, which Sarto can’t keep in the keychain.",
+    "missing": "Fill in {{title}}.",
+    "badValue": "{{title}} isn’t a valid value.",
+    "expired": "This install waited too long. Click Install again.",
+    "noBundle": "This listing has no MCP bundle.",
+    "downloadFailed": "Couldn’t download the bundle: {{reason}}",
+    "tooBig": "The bundle is larger than {{mb}} MB, so nothing was installed.",
+    "mismatch": "The bundle didn’t match its checksum, so nothing was installed.",
+    "outside": "Sarto won’t run a path outside the bundle’s folder, {{path}}.",
+    "changed": "The listing changed while the bundle was downloading. Click Install again.",
+    "notHttps": "not https"
+  },
+  "marketSkills": {
+    "nameTaken": "You’ve already added a skill named {{name}}, from {{from}}. Remove that one first: an agent keeps only one of two skills with the same name.",
+    "badName": "\"{{name}}\" is not a skill name: lowercase letters, digits and hyphens",
+    "noDescription": "The skill {{name}} has no description",
+    "sameName": "{{path}} has its name, {{name}}",
+    "notInCatalog": "{{id}} is not in the skills catalog",
+    "noSuchSkill": "The catalog has no skill {{name}}",
+    "needsGithub": "Give a github.com repository, or a folder in one",
+    "noSkillFile": "There is no {{file}} in {{url}}",
+    "manySkills": "{{url}} holds {{count}} skills; give the folder of one of them",
+    "notFolder": "{{folder}} is not a folder",
+    "folderNoSkillFile": "{{folder}} has no {{file}}",
+    "noFile": "The skill has no {{file}}",
+    "outside": "The skill names a file outside it: {{path}}",
+    "link": "The skill holds a link, which Sarto does not copy: {{path}}",
+    "tooManyFiles": "The skill holds more than {{count}} files",
+    "tooLarge": "The skill is larger than {{mb}} MB",
+    "github": {
+      "timeout": "GitHub did not answer within {{seconds}} s",
+      "unreachable": "Could not reach GitHub: {{reason}}",
+      "notFound": "GitHub has no such repository or ref, or it is private",
+      "status": "GitHub answered {{status}}",
+      "tooLarge": "The repository is larger than {{mb}} MB",
+      "unpackedTooLarge": "The repository is larger than {{mb}} MB unpacked",
+      "notTarball": "The download is not a tarball: {{reason}}",
+      "unsafePath": "The archive holds an unsafe path: {{path}}"
+    }
+  },
+  "marketPlugins": {
+    "notListedInstalled": "{{agent}} did not list {{id}} as installed",
+    "marketplaceNotListed": "{{agent}} did not list the marketplace it added",
+    "noSuchPlugin": "{{agent}} offers no plugin {{id}}",
+    "noPlugins": "Only Claude Code, Codex, and Google Antigravity have plugins",
+    "codexUserOnly": "Codex installs plugins for the user only",
+    "userOnly": "{{agent}} installs plugins for the user only",
+    "antigravityNoMarketplaces": "Google Antigravity manages plugins directly rather than through marketplaces",
+    "agyListNotJson": "Google Antigravity's plugin list was not JSON",
+    "agyListNotList": "Google Antigravity's plugin list was not a list",
+    "agyFailed": "agy failed",
+    "scopeNeedsProject": "A project or local scope needs the project, and only it",
+    "marketplaceListNotJson": "Claude Code's marketplace list was not JSON",
+    "marketplaceListNotList": "Claude Code's marketplace list was not a list",
+    "pluginListNotJson": "Claude Code's plugin list was not JSON",
+    "pluginListNotObject": "Claude Code's plugin list was not an object",
+    "claudeNoResult": "Claude Code gave no result",
+    "claudeOutcome": "Claude Code answered {{outcome}}",
+    "claudeFailed": "claude failed"
+  },
+  "report": {
+    "draftNoAgent": "No agent is available to draft the description",
+    "draftFailed": "{{agent}} could not draft the description: {{reason}}"
+  },
+  "hostError": {
+    "agentNoRequest": "The agent takes no such request",
+    "noFolder": "This session has no folder to run in",
+    "noArtifactFile": "This version of the artifact has no file {{path}}",
+    "showHere": "Show app works only on this computer.",
+    "tooManyRequests": "This device has too many requests waiting",
+    "agentStopping": "The agent is stopping"
+  },
+  "agentFile": {
+    "foreign": "{{file}} is not one of the session's agent's files",
+    "missing": "{{file}} does not exist"
+  },
+  "attachment": {
+    "notText": "{{name}} is not UTF-8 text",
+    "grantExpired": "Sarto can no longer read this file. Add it again."
+  },
+  "light": {
+    "noModel": "it no longer offers the model {{model}}",
+    "noRemoval": "the agent's hidden sessions cannot be removed without a trace",
+    "noAnswer": "no answer within {{seconds}} s",
+    "noCommitMessage": "its reply held no commit message",
+    "noPullRequestDraft": "its reply held no pull request title"
+  },
+  "threadDb": {
+    "notOpen": "The thread database is not open",
+    "searchNotOpen": "The search index is not open",
+    "damaged": "The thread database was damaged: {{reason}}"
+  },
+  "computer": {
+    "cannotShow": "The app could not come to the front."
+  },
+  "memory": {
+    "titleEmpty": "title must not be empty.",
+    "titleTooLong": "title must be at most {{max}} characters.",
+    "descriptionTooLong": "description must be at most {{max}} characters.",
+    "bodyTooLong": "body must be at most {{max}} characters. Keep one fact per entry.",
+    "sameTitle": "The entry {{id}} already has this title. Update that entry instead of adding another."
+  },
+  "workflowFile": {
+    "unknownField": "unknown field",
+    "required": "is required",
+    "mustBeText": "must be text",
+    "notEmpty": "must not be empty",
+    "tooLong": "is longer than {{max}} characters",
+    "oneLine": "must be one line",
+    "stepIdOrList": "must be a step id or a list of them",
+    "stepId": "must be a step id",
+    "namesTwice": "names \"{{id}}\" twice",
+    "wholeNumber": "must be a whole number from 1 to {{max}}",
+    "outcomeMapping": "must be a mapping with a name and where it goes",
+    "doneOrDropped": "must be done or dropped",
+    "needsToOrEnd": "needs to (the steps it starts) or end (done or dropped)",
+    "bothToEnd": "has both to and end; give one",
+    "toolsMapping": "must be a mapping with mcp and skills lists",
+    "nameList": "must be a list of names",
+    "tooManyNames": "lists more than {{max}} names",
+    "name": "must be a name",
+    "mapping": "must be a mapping",
+    "idFormat": "must be kebab-case, up to {{max}} characters",
+    "agentOrYou": "must be agent or you",
+    "handInKind": "must be document, outcome or note",
+    "trueOrFalse": "must be true or false",
+    "oneOutcome": "must list at least one outcome",
+    "tooManyOutcomes": "lists more than {{max}} outcomes",
+    "outcomeTwice": "another outcome is named \"{{name}}\"",
+    "personHandsOutcome": "a person's step hands in an outcome",
+    "personNotReviewed": "a person's step is not reviewed",
+    "personNoAgent": "a person's step has no agent to pick",
+    "personNoReview": "a person's step reviews nothing",
+    "personNoTools": "a person's step has no session to hand tools to",
+    "twoOutcomes": "a step that hands in an outcome needs at least two outcomes",
+    "outcomesMapping": "must map step ids to their outcomes",
+    "outcomeNames": "must map outcome names to names",
+    "localesMapping": "must be a mapping of language codes",
+    "tooManyLocales": "has more than {{max}} languages",
+    "languageCode": "must be a language code such as zh-CN",
+    "localeMapping": "must be a mapping with name, description, when, steps or outcomes",
+    "stepNames": "must map step ids to names",
+    "stepTwice": "another step is \"{{id}}\"",
+    "limitBack": "only an arrow back to this or an earlier step has a limit",
+    "backOne": "an arrow back goes to one step",
+    "reviewSelf": "a step cannot review itself",
+    "reviewPerson": "\"{{id}}\" is a person's step",
+    "unreachable": "\"{{id}}\" is never reached from the first step",
+    "noEnd": "no outcome ends the task; give one end: done or end: dropped",
+    "noPathToEnd": "no path from \"{{id}}\" ever ends the task",
+    "fileMapping": "the file must be a mapping",
+    "formatValue": "must be {{format}}",
+    "oneStep": "must list at least one step",
+    "tooManySteps": "lists more than {{max}} steps",
+    "noOutcome": "\"{{id}}\" has no outcome \"{{name}}\"",
+    "noStep": "no step \"{{id}}\"",
+    "fileTooLarge": "the file is larger than {{kb}} KB",
+    "notYaml": "not valid YAML: {{reason}}",
+    "noAliases": "YAML aliases are not allowed",
+    "notAWorkflow": "not a workflow",
+    "noMcp": "no MCP server \"{{name}}\" is installed in Sarto",
+    "noSkill": "no Skill \"{{name}}\" is installed in Sarto",
+    "unreadable": "could not be read: {{reason}}",
+    "fileGone": "the file is gone"
+  },
+  "apiKey": {
+    "oneWord": "The API key must be one word without spaces",
+    "keyOnly": "This harness takes only an API key",
+    "baseUrl": "The base URL must be an http or https address"
+  },
+  "agentConfig": {
+    "modelOneWord": "The model must be one word without spaces",
+    "invalidFile": "{{file}} is not valid {{format}}; fix it or set the key there yourself",
+    "notTable": "{{file}} does not hold a table of settings",
+    "parentNotTable": "{{key}} in {{file}} is not a table; fix it or set the key there yourself",
+    "noAutoCompact": "This harness has no auto-compact setting",
+    "oneValue": "This harness sets one value for every model",
+    "wholeNumber": "The value must be a whole number from {{min}} to {{max}}",
+    "pluginRows": "{{file}} is not a list of plugin rows; fix it or set the threshold there yourself",
+    "rowNotMap": "The {{row}} row's config in {{file}} is not a map; fix it first",
+    "cacheDuration": "The prompt cache duration must be 5m or 1h",
+    "windowRange": "The window must be from {{min}} to {{max}} tokens",
+    "modelSettingsNotObject": "modelSettings in {{file}} is not an object; fix it or set the window there yourself",
+    "siteChoice": "The site must be international, china or automatic",
+    "notJsonObject": "{{file}} does not hold a JSON object"
+  },
+  "agentRun": {
+    "noSession": "No session {{id}}",
+    "notOpen": "Session {{id}} is not open",
+    "ended": "Session {{id}} has ended",
+    "turnRunning": "A turn is already running",
+    "notRunning": "{{agent}} is not running",
+    "noForkPoint": "Fork point message {{message}} was not found in session {{id}}",
+    "noOptionTakes": "No option {{option}} takes {{value}}",
+    "questionCancelled": "The question was cancelled",
+    "betweenTurns": "Change it between turns",
+    "takesChoice": "{{option}} takes a choice",
+    "noChoice": "No {{option}} {{value}}",
+    "noModel": "No model {{value}}",
+    "noEffort": "No effort {{value}}",
+    "noMode": "No mode {{value}}",
+    "noOption": "No option {{option}}"
+  },
+  "rewind": {
+    "notEligible": "This message cannot be edited from",
+    "archived": "Restore the session to edit a message in it",
+    "unsupported": "{{agent}} cannot go back to an earlier message",
+    "olderThread": "This Codex session is too old to go back in",
+    "starting": "Wait until the session has started",
+    "noPoint": "The agent's history no longer has this message",
+    "nothing": "There is nothing to put back",
+    "failed": "Could not go back to the edited message: {{reason}}"
+  },
+  "usageRead": {
+    "notSignedIn": "{{vendor}} is not signed in",
+    "signInExpired": "{{vendor}}'s sign-in has expired",
+    "noPlanUsage": "{{vendor}} sent no plan usage",
+    "noBalanceOrPlan": "{{vendor}} sent no balance or plan",
+    "noAccount": "{{vendor}} sent no account",
+    "noResets": "{{vendor}} sent no reset credits",
+    "unknownAnswer": "{{vendor}} sent an unknown answer",
+    "refusedAccount": "{{vendor}} refused the account read",
+    "noApiKeyUsage": "{{vendor}}'s usage is not read for an API key sign-in yet",
+    "otherServer": "{{vendor}} signs in to a server Sarto does not read",
+    "noFactoryKey": "{{vendor}} has no FACTORY_API_KEY to read the plan with",
+    "storedUnreadable": "The stored sign-in could not be read",
+    "endpointNotListed": "{{vendor}}'s usage endpoint is not listed",
+    "unreachable": "{{vendor}} could not be reached",
+    "notAccepted": "{{vendor}} did not accept the stored sign-in",
+    "answered": "{{vendor}} answered {{status}}",
+    "replyUnreadable": "{{vendor}}'s usage reply could not be read",
+    "kilo": {
+      "noPort": "Could not reserve a local port",
+      "exited": "Kilo server exited before the profile read",
+      "refused": "Kilo profile read returned {{status}}",
+      "timedOut": "Kilo profile read timed out"
+    },
+    "auggieFailed": "Auggie account status failed",
+    "rpc": {
+      "badFrame": "Invalid JSON-RPC frame",
+      "failed": "Vendor RPC failed",
+      "exited": "Vendor RPC exited with code {{code}}",
+      "timedOut": "Vendor RPC timed out"
+    }
+  },
+  "modelRequest": {
+    "noRecord": "This agent keeps no record Sarto reads",
+    "noSessionFile": "This session has no session file to read",
+    "noRollout": "This session has no rollout to read",
+    "noClineMessages": "Cline keeps no messages for this session",
+    "messagesGone": "These messages are no longer kept",
+    "openCodeGone": "OpenCode no longer has these messages; open the request again",
+    "fileChanged": "The session file changed; open the request again",
+    "tooLarge": "These records are too large to show"
+  },
+  "usage": {
+    "workerStopped": "The usage worker stopped",
+    "workerStoppedWith": "The usage worker stopped: {{error}}"
+  },
+  "marketCatalog": {
+    "tooLarge": "The MCP Registry sent more than {{bytes}} bytes",
+    "notJson": "The MCP Registry sent something other than JSON",
+    "timeout": "The MCP Registry did not answer in {{seconds}} s",
+    "unreachable": "Could not reach the MCP Registry: {{reason}}",
+    "status": "The MCP Registry answered {{status}}",
+    "unreadable": "Could not read the MCP Registry: {{reason}}"
+  },
+  "marketConnect": {
+    "serverStatus": "The server answered {{status}}",
+    "hostStatus": "{{host}} answered {{status}}",
+    "refused": "The service refused the sign-in: {{reason}}",
+    "noAuthServer": "The server names no authorization server Sarto can read",
+    "noPkce": "The authorization server does not offer PKCE with S256",
+    "timedOut": "The sign-in did not finish within five minutes",
+    "noApp": "Sarto has no app registered with this service",
+    "noDevice": "The service offers no device sign-in",
+    "deviceNotStarted": "The service did not start a device sign-in: {{reason}}",
+    "deviceNoCode": "The service did not start a device sign-in: no code",
+    "codeExpired": "The code expired before it was entered",
+    "denied": "The sign-in was denied at the service",
+    "noToken": "The service gave no token",
+    "noMetadata": "The authorization server metadata could not be read",
+    "renewExpired": "The token expired and cannot be renewed",
+    "renewRefused": "The service refused to renew the token: {{reason}}",
+    "noServer": "Sarto keeps no server of that id that signs in",
+    "landing": {
+      "done": "Signed in. You can close this tab and return to Sarto.",
+      "failed": "The sign-in did not finish. You can close this tab and try again in Sarto."
+    }
+  },
+  "project": {
+    "notAbsolute": "projectPath must be an absolute path",
+    "notExist": "{{path}} does not exist",
+    "notFolder": "{{path}} is not a folder",
+    "noProject": "No project at {{path}}",
+    "moveBeforeItself": "A project cannot move before itself"
+  },
+  "process": {
+    "toolTimedOut": "{{name}} did not finish within {{ms}} ms"
+  },
+  "validate": {
+    "empty": "{{key}} must not be empty",
+    "tooLong": "{{key}} is longer than {{max}} characters",
+    "routineName": "name must be at most {{max}} characters",
+    "routinePrompt": "prompt must be 1 to {{max}} characters",
+    "commentBody": "body must be 1 to {{max}} characters, not blank",
+    "promptItems": "content has more than {{max}} items",
+    "promptAttachments": "A prompt carries at most {{max}} attachments",
+    "promptTooLarge": "The prompt is larger than 10 MB",
+    "promptEmpty": "The prompt is empty",
+    "textTooLarge": "text is larger than 1 MiB",
+    "artifactTitle": "title must be 1 to {{max}} characters, not blank",
+    "branchTemplate": "branchTemplate must be a string of at most {{max}} characters",
+    "copyCount": "copy must be a list of at most {{max}} paths",
+    "copyPaths": "copy must list paths",
+    "copyEntry": "copy: {{entry}} {{reason}}",
+    "setupCommand": "setup must be null or a command of at most {{max}} characters"
+  },
+  "remoteClaude": {
+    "off": "Remote Claude Code is turned off on this computer. Turn it on in Settings > Remote & Cloud.",
+    "claudeOnly": "Only Claude Code can run on another computer.",
+    "runExists": "A remote Claude Code run with that id is already open.",
+    "sessionBusy": "This session's Claude Code is still busy on this computer.",
+    "limit": "This computer already runs as many remote Claude Code sessions as it allows ({{active}}/{{max}}).",
+    "notInstalled": "Claude Code is not installed or is turned off on this computer.",
+    "unavailable": "Claude Code is unavailable on this computer.",
+    "unavailableHere": "Running Claude Code on another computer is unavailable here.",
+    "turnedOff": "Remote Claude Code was turned off on the computer running it.",
+    "disconnectedByOwner": "The owner of the computer running it disconnected it.",
+    "shuttingDown": "The computer running it is shutting down.",
+    "superseded": "A newer connection of the same session replaced it.",
+    "idle": "Released after a while unused; the next message resumes it.",
+    "ended": "Claude Code on {{host}} ended ({{reason}}).",
+    "modeLocal": "The permission mode is set on the computer the session belongs to.",
+    "notOpen": "The remote Claude Code session is not open.",
+    "noCall": "No such tool call is waiting.",
+    "noPermission": "No such permission request is waiting.",
+    "notResumable": "This computer holds no such Claude Code session for this device.",
+    "signIn": "Claude Code on the remote computer needs to sign in again.",
+    "signInThere": "Sign in to Claude Code on {{host}} itself before using it from here.",
+    "failed": "The remote Claude Code request failed.",
+    "noFork": "A session whose Claude Code runs on another computer cannot be forked.",
+    "notHere": "This session's Claude Code runs on {{host}}, which cannot do this for it yet.",
+    "noHosts": "Your other computers are not available from this one.",
+    "peerTimeout": "The other computer did not answer in time.",
+    "peerClosed": "The other computer is disconnected.",
+    "timedOut": "The other computer did not answer {{method}} in time.",
+    "card": {
+      "title": "{{action}} (from {{host}})",
+      "requested": "Requested by Claude Code on {{host}}",
+      "deny": "Deny",
+      "read": "Read {{name}}",
+      "write": "Write {{name}}",
+      "edit": "Edit {{name}}",
+      "glob": "Find files {{pattern}}",
+      "grep": "Search {{pattern}}",
+      "bash": "Run {{description}}"
+    }
+  }
+}

@@ -1,0 +1,455 @@
+name: Release macOS
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+      - 'app-v*.*.*'
+      - 'daemon-v*.*.*'
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Release target (all, app, or daemon)'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - app
+          - daemon
+      channel:
+        description: 'Release channel (stable or beta)'
+        required: false
+        default: 'stable'
+        type: choice
+        options:
+          - stable
+          - beta
+      version:
+        description: 'App version (X.Y.Z or X.Y.Z-beta.<build>; for beta use next upcoming X.Y.Z > latest stable; defaults to project.yml)'
+        required: false
+        default: ''
+        type: string
+      daemon_version:
+        description: 'Daemon version (X.Y.Z or X.Y.Z-beta.<build>; for beta use next upcoming X.Y.Z > latest stable; defaults to package.json)'
+        required: false
+        default: ''
+        type: string
+      draft:
+        description: 'Publish as a draft GitHub Release'
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release:
+    name: Build, Attest & Publish macOS Release
+    runs-on: macos-15
+    env:
+      SARTO_SIGN_IDENTITY: ${{ secrets.SARTO_SIGN_IDENTITY }}
+      SARTO_NOTARY_KEY_ID: ${{ secrets.SARTO_NOTARY_KEY_ID }}
+      SARTO_NOTARY_ISSUER: ${{ secrets.SARTO_NOTARY_ISSUER }}
+      SARTO_UPDATE_SIGNING_KEY: ${{ secrets.SARTO_UPDATE_SIGNING_KEY }}
+      SARTO_HARNESSES_SIGNING_KEY: ${{ secrets.SARTO_HARNESSES_SIGNING_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+
+      - name: Resolve release versions, channel & delta targets
+        id: meta
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TARGET: ${{ inputs.target }}
+          INPUT_CHANNEL: ${{ inputs.channel }}
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_DAEMON_VERSION: ${{ inputs.daemon_version }}
+        run: |
+          node --input-type=module -e "
+            import { execFileSync } from 'node:child_process';
+            import { appendFileSync } from 'node:fs';
+            import {
+              checkReleaseVersionOrder,
+              compareVersions,
+              formatChannelVersion,
+              generateBuildNumber,
+              isBetaVersion,
+              isReleaseVersion,
+              readAppBaseVersion,
+              readDaemonBaseVersion,
+            } from './tools/sarto/build-version.mjs';
+
+            const root = process.cwd();
+            const eventName = process.env.EVENT_NAME;
+            const refName = process.env.GITHUB_REF_NAME || '';
+
+            let target = (process.env.INPUT_TARGET || 'all').trim();
+            let channel = (process.env.INPUT_CHANNEL || 'stable').trim();
+            let rawApp = (process.env.INPUT_VERSION || '').trim();
+            let rawDaemon = (process.env.INPUT_DAEMON_VERSION || '').trim();
+
+            if (eventName !== 'workflow_dispatch') {
+              if (refName.startsWith('daemon-v')) {
+                target = 'daemon';
+                rawDaemon = refName.slice('daemon-v'.length);
+                channel = isBetaVersion(rawDaemon) ? 'beta' : 'stable';
+              } else if (refName.startsWith('app-v')) {
+                target = 'app';
+                rawApp = refName.slice('app-v'.length);
+                channel = isBetaVersion(rawApp) ? 'beta' : 'stable';
+              } else if (refName.startsWith('v')) {
+                target = 'all';
+                rawApp = refName.slice(1);
+                channel = isBetaVersion(rawApp) ? 'beta' : 'stable';
+                rawDaemon = rawApp;
+              } else {
+                throw new Error('Unsupported tag: ' + refName);
+              }
+            }
+
+            // A beta tag names its build; the bundle's CFBundleVersion and the manifests carry it too.
+            const build = /-beta\.(\d+)$/.exec(rawApp || rawDaemon)?.[1] || generateBuildNumber();
+            const appVersion = formatChannelVersion(rawApp || readAppBaseVersion(root), channel, build);
+            const daemonRaw =
+              rawDaemon || (target === 'all' && channel === 'stable' && rawApp && !process.env.INPUT_DAEMON_VERSION ? rawApp : readDaemonBaseVersion(root));
+            // As in release.mjs: an app-only release bundles the published daemon version as it is.
+            const daemonChannel = target === 'app' && !isBetaVersion(daemonRaw) ? 'stable' : channel;
+            const daemonVersion = formatChannelVersion(daemonRaw, daemonChannel, build);
+
+            const wantsApp = target === 'all' || target === 'app';
+            const wantsDaemon = target === 'all' || target === 'daemon';
+            const ignoreTag = process.env.GITHUB_REF_TYPE === 'tag' ? refName : undefined;
+            if (wantsApp) {
+              const err = checkReleaseVersionOrder({
+                kind: 'app',
+                channel,
+                version: appVersion,
+                root,
+                ignoreTag,
+              });
+              if (err) throw new Error(err);
+            }
+            if (wantsDaemon) {
+              const err = checkReleaseVersionOrder({
+                kind: 'daemon',
+                channel,
+                version: daemonVersion,
+                root,
+                ignoreTag,
+              });
+              if (err) throw new Error(err);
+            }
+            const shareFolder = wantsApp && wantsDaemon && channel === 'stable' && appVersion === daemonVersion;
+            const appTag = shareFolder ? 'v' + appVersion : 'app-v' + appVersion;
+            const daemonTag = shareFolder ? appTag : 'daemon-v' + daemonVersion;
+
+            const allowedDelta = (v) =>
+              channel === 'beta' ? isReleaseVersion(v) || isBetaVersion(v) : isReleaseVersion(v);
+            const deltaFrom = wantsApp
+              ? [...new Set(
+                  execFileSync('git', ['tag', '-l', 'v*.*.*', 'app-v*.*.*'], { encoding: 'utf8' })
+                    .split(/\r?\n/)
+                    .map((t) => t.trim().replace(/^(?:app-)?v/, ''))
+                    .filter((v) => allowedDelta(v) && compareVersions(v, appVersion) < 0),
+                )]
+                  .sort((a, b) => compareVersions(b, a))
+                  .slice(0, 2)
+                  .join(',')
+              : '';
+
+            const out = process.env.GITHUB_OUTPUT;
+            const lines = [
+              'target=' + target,
+              'channel=' + channel,
+              'build=' + build,
+              'app_version=' + appVersion,
+              'daemon_version=' + daemonVersion,
+              'daemon_channel=' + daemonChannel,
+              'app_tag=' + appTag,
+              'daemon_tag=' + daemonTag,
+              'share_folder=' + (shareFolder ? 'true' : 'false'),
+              'delta_from=' + deltaFrom,
+            ];
+            appendFileSync(out, lines.join('\n') + '\n');
+            console.log(lines.join(' '));
+          "
+
+      - name: Install dependencies & verify checks
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm format:check
+          pnpm lint
+          pnpm typecheck
+          pnpm test
+
+      - name: Test Swift packages
+        run: |
+          (cd apps/apple/Packages/SartoProtocol && swift test)
+          (cd apps/apple/Packages/PrismDesign && swift test)
+          (cd apps/apple/Packages/SartoUpdate && swift test)
+
+      - name: Import Apple Developer ID signing certificate (if configured)
+        env:
+          MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          if [ -z "${MACOS_CERT_P12_BASE64:-}" ] || [ -z "${SARTO_SIGN_IDENTITY:-}" ]; then
+            echo "No Developer ID signing certificate configured; skipping import."
+            exit 0
+          fi
+          KEYCHAIN_PATH="${RUNNER_TEMP}/sarto-signing.keychain-db"
+          KEYCHAIN_PASS="$(openssl rand -base64 32)"
+          CERT_PATH="${RUNNER_TEMP}/developer-id.p12"
+
+          printf '%s' "$MACOS_CERT_P12_BASE64" | base64 --decode > "$CERT_PATH"
+          chmod 600 "$CERT_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -P "$MACOS_CERT_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH" login.keychain-db
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
+          rm -f "$CERT_PATH"
+
+      - name: Write App Store Connect notary key (if configured)
+        env:
+          SARTO_NOTARY_KEY_BASE64: ${{ secrets.SARTO_NOTARY_KEY_BASE64 }}
+        run: |
+          if [ -z "${SARTO_NOTARY_KEY_BASE64:-}" ]; then
+            echo "No notary key configured; skipping."
+            exit 0
+          fi
+          NOTARY_KEY_PATH="${RUNNER_TEMP}/notary-key.p8"
+          printf '%s' "$SARTO_NOTARY_KEY_BASE64" | base64 --decode > "$NOTARY_KEY_PATH"
+          chmod 600 "$NOTARY_KEY_PATH"
+          echo "SARTO_NOTARY_KEY=$NOTARY_KEY_PATH" >> "$GITHUB_ENV"
+
+      - name: Build release artifacts & delta patches
+        run: |
+          TARGET="${{ steps.meta.outputs.target }}"
+          CHANNEL="${{ steps.meta.outputs.channel }}"
+          BUILD="${{ steps.meta.outputs.build }}"
+          APP_VERSION="${{ steps.meta.outputs.app_version }}"
+          DAEMON_VERSION="${{ steps.meta.outputs.daemon_version }}"
+          DAEMON_CHANNEL="${{ steps.meta.outputs.daemon_channel }}"
+          APP_TAG="${{ steps.meta.outputs.app_tag }}"
+          DAEMON_TAG="${{ steps.meta.outputs.daemon_tag }}"
+          DELTA_FROM="${{ steps.meta.outputs.delta_from }}"
+
+          if [ -n "${SARTO_UPDATE_SIGNING_KEY:-}" ]; then
+            NOTES_FILE="${RUNNER_TEMP}/release-notes.md"
+            cat > "$NOTES_FILE" <<EOF
+          ## What changed
+
+          - Sarto ${APP_VERSION} (${CHANNEL}, build ${BUILD}) built from commit ${GITHUB_SHA}.
+          EOF
+            ARGS=(
+              --target "$TARGET"
+              --channel "$CHANNEL"
+              --app-version "$APP_VERSION"
+              --daemon-version "$DAEMON_VERSION"
+              --build "$BUILD"
+              --out dist/release
+            )
+            if [ "$TARGET" != "daemon" ]; then
+              ARGS+=(--notes "$NOTES_FILE")
+            fi
+            if [ -n "$DELTA_FROM" ]; then
+              ARGS+=(--delta-from "$DELTA_FROM")
+            fi
+            if [ -z "${SARTO_SIGN_IDENTITY:-}" ] || [ -z "${SARTO_NOTARY_KEY:-}" ]; then
+              ARGS+=(--skip-notarize)
+            fi
+            node tools/sarto/release.mjs "${ARGS[@]}"
+          else
+            # Fallback when offline Ed25519 update signing key is not configured:
+            # still packages signed/ad-hoc app, DMG, ZIP, and standalone daemon archive.
+            STAGE="${RUNNER_TEMP}/sarto-stage"
+            mkdir -p "$STAGE"
+            if [ "$TARGET" != "daemon" ]; then
+              OUT_APP="dist/release/${APP_TAG}"
+              mkdir -p "$OUT_APP"
+              node apps/apple/scripts/package-mac.mjs \
+                --version "$APP_VERSION" \
+                --daemon-version "$DAEMON_VERSION" \
+                --daemon-channel "$DAEMON_CHANNEL" \
+                --channel "$CHANNEL" \
+                --build "$BUILD" \
+                --clean \
+                --out "$STAGE"
+              ditto -c -k --sequesterRsrc --keepParent "$STAGE/Sarto.app" "$OUT_APP/Sarto-${APP_VERSION}-arm64.zip"
+
+              DMG_STAGE="${RUNNER_TEMP}/sarto-dmg"
+              mkdir -p "$DMG_STAGE"
+              ditto "$STAGE/Sarto.app" "$DMG_STAGE/Sarto.app"
+              ln -s /Applications "$DMG_STAGE/Applications"
+              hdiutil create -volname "Sarto ${APP_VERSION}" -srcfolder "$DMG_STAGE" -fs APFS -format UDZO -ov "$OUT_APP/Sarto-${APP_VERSION}-arm64.dmg"
+              if [ -n "${SARTO_SIGN_IDENTITY:-}" ]; then
+                codesign --force --sign "$SARTO_SIGN_IDENTITY" --timestamp "$OUT_APP/Sarto-${APP_VERSION}-arm64.dmg"
+              fi
+            fi
+
+            if [ "$TARGET" != "app" ]; then
+              OUT_DAEMON="dist/release/${DAEMON_TAG}"
+              mkdir -p "$OUT_DAEMON"
+              if [ "$TARGET" = "daemon" ]; then
+                SARTO_BUILD_PLACEHOLDER=1 pnpm build:daemon
+                node tools/install/device-helpers.mjs
+              fi
+              node --input-type=module -e "
+                import { packageDaemon } from './tools/daemon/package.mjs';
+                import { stampBuildInfo } from './tools/sarto/runtime-fingerprint.mjs';
+                import { execFile as execFileCb } from 'node:child_process';
+                import { mkdir } from 'node:fs/promises';
+                import path from 'node:path';
+                import { promisify } from 'node:util';
+                const execFile = promisify(execFileCb);
+                const stage = process.env.RUNNER_TEMP;
+                const outDir = path.resolve('${OUT_DAEMON}');
+                const daemon = await packageDaemon({ out: path.join(stage, 'daemon-pkg') });
+                const name = path.basename(daemon.archive);
+                const pkgDir = path.basename(daemon.archive, '.tar.gz');
+                const unpacked = path.join(stage, 'daemon-unpacked');
+                await mkdir(unpacked, { recursive: true });
+                await execFile('tar', ['-xzf', daemon.archive, '-C', unpacked]);
+                await stampBuildInfo(path.join(unpacked, pkgDir), {
+                  version: '${DAEMON_VERSION}',
+                  build: '${BUILD}',
+                  channel: '${CHANNEL}',
+                  commit: '${GITHUB_SHA}'.slice(0, 7),
+                  builtAt: new Date().toISOString(),
+                });
+                await execFile('tar', ['-czf', path.join(outDir, name), '-C', unpacked, pkgDir], {
+                  env: { ...process.env, COPYFILE_DISABLE: '1' },
+                });
+              "
+            fi
+          fi
+
+          for dir in dist/release/*/; do
+            (
+              cd "$dir"
+              shopt -s nullglob
+              TARGETS=(Sarto-*.dmg Sarto-*.zip Sarto-*.delta sarto-daemon-*.tar.gz)
+              if [ "${#TARGETS[@]}" -gt 0 ]; then
+                shasum -a 256 "${TARGETS[@]}" > SHA256SUMS.txt
+              fi
+            )
+          done
+
+      - name: Attest build provenance (SLSA)
+        if: ${{ !github.event.repository.private }}
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            dist/release/*/Sarto-*
+            dist/release/*/sarto-daemon-*.tar.gz
+            dist/release/*/SHA256SUMS.txt
+
+      - name: Publish GitHub Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          CHANNEL="${{ steps.meta.outputs.channel }}"
+          BUILD="${{ steps.meta.outputs.build }}"
+
+          DRAFT_FLAG=""
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.draft }}" = "true" ]; then
+            DRAFT_FLAG="--draft"
+          fi
+          PRE_FLAG=""
+          if [ "$CHANNEL" = "beta" ]; then
+            PRE_FLAG="--prerelease"
+          fi
+
+          for dir in dist/release/*/; do
+            TAG="$(basename "$dir")"
+            LATEST_FLAG=""
+            if [ "$CHANNEL" != "beta" ] && [[ "$TAG" == daemon-v* ]]; then
+              # Decoupled standalone daemon releases must not hijack GitHub's /releases/latest
+              # pointer that desktop clients query for latest-mac.json.
+              LATEST_FLAG="--latest=false"
+            fi
+            BODY_FILE="${RUNNER_TEMP}/gh-release-${TAG}.md"
+            cat > "$BODY_FILE" <<EOF
+          ## Sarto ${TAG}
+
+          Channel: \`${CHANNEL}\` · Build: \`${BUILD}\` · Commit: \`${GITHUB_SHA}\`
+
+          Built directly in GitHub Actions with signed SLSA Build Provenance Attestations.
+
+          \`\`\`sh
+          shasum -a 256 -c SHA256SUMS.txt --ignore-missing
+          \`\`\`
+          EOF
+            if gh release view "$TAG" >/dev/null 2>&1; then
+              gh release upload "$TAG" "$dir"* --clobber
+            else
+              gh release create "$TAG" "$dir"* \
+                --target "$GITHUB_SHA" \
+                --title "Sarto ${TAG}" \
+                --notes-file "$BODY_FILE" \
+                $DRAFT_FLAG $PRE_FLAG $LATEST_FLAG
+            fi
+          done
+
+      - name: Mirror releases & channel manifests to sarto.1o.ink (if configured)
+        env:
+          SARTO_PUBLISH_SSH_KEY: ${{ secrets.SARTO_PUBLISH_SSH_KEY }}
+          SARTO_PUBLISH_TARGET: ${{ secrets.SARTO_PUBLISH_TARGET }}
+          SARTO_PUBLISH_KNOWN_HOSTS: ${{ secrets.SARTO_PUBLISH_KNOWN_HOSTS }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.draft }}" = "true" ]; then
+            echo "Draft release; the channel manifests on sarto.1o.ink stay as they are."
+            exit 0
+          fi
+          if [ -z "${SARTO_PUBLISH_SSH_KEY:-}" ] || [ -z "${SARTO_PUBLISH_TARGET:-}" ] || [ -z "${SARTO_UPDATE_SIGNING_KEY:-}" ]; then
+            echo "Fallback mirror secrets not configured; skipping mirror."
+            exit 0
+          fi
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          KEY_FILE="$HOME/.ssh/sarto_publish_key"
+          printf '%s\n' "$SARTO_PUBLISH_SSH_KEY" > "$KEY_FILE"
+          chmod 600 "$KEY_FILE"
+
+          if [ -n "${SARTO_PUBLISH_KNOWN_HOSTS:-}" ]; then
+            printf '%s\n' "$SARTO_PUBLISH_KNOWN_HOSTS" >> "$HOME/.ssh/known_hosts"
+          else
+            HOST_PART="${SARTO_PUBLISH_TARGET%%:*}"
+            HOST_ONLY="${HOST_PART#*@}"
+            ssh-keyscan -H "$HOST_ONLY" >> "$HOME/.ssh/known_hosts" 2>/dev/null || true
+          fi
+          chmod 644 "$HOME/.ssh/known_hosts"
+
+          export GIT_SSH_COMMAND="ssh -i $KEY_FILE -o IdentitiesOnly=yes"
+          cat > "$HOME/.ssh/config" <<EOF
+          Host *
+            IdentityFile $KEY_FILE
+            IdentitiesOnly yes
+            StrictHostKeyChecking accept-new
+          EOF
+          chmod 600 "$HOME/.ssh/config"
+
+          for dir in dist/release/*/; do
+            node tools/sarto/publish-release.mjs "${dir%/}" "$SARTO_PUBLISH_TARGET"
+          done
+
+      - name: Clean up ephemeral credentials
+        if: always()
+        run: |
+          security delete-keychain "${RUNNER_TEMP}/sarto-signing.keychain-db" 2>/dev/null || true
+          rm -f "${RUNNER_TEMP}/developer-id.p12" "${RUNNER_TEMP}/notary-key.p8" "$HOME/.ssh/sarto_publish_key"

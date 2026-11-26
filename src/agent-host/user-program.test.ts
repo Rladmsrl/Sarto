@@ -1,0 +1,80 @@
+import { describe, expect, it } from 'vitest'
+import type { InstalledCli } from '@shared/agent-host'
+import { userProgramFound, type AgentDefinition, type Detection, type LaunchSpec } from './catalog'
+
+const SARTO = '/home/me/.sarto/harnesses'
+const binary = { launch: { kind: 'binary' } } as AgentDefinition
+const adapter = { launch: { kind: 'package' } } as AgentDefinition
+
+const spec = (command: string): LaunchSpec => ({
+  command,
+  args: [],
+  env: {},
+  shell: false,
+  display: { command, args: [], env: {} },
+})
+
+const cli = (problem: InstalledCli['problem'] = null): InstalledCli => ({
+  path: '/usr/local/bin/claude',
+  version: '2.0.0',
+  variable: null,
+  problem,
+})
+
+describe('the user program a first start counts', () => {
+  it('counts the user CLI, even one too old to run', () => {
+    const tooOld: Detection = {
+      state: 'not-installed',
+      detail: 'too old',
+      reason: { kind: 'too-old', minimum: '2.1.0', installed: '2.0.0' },
+      cli: cli({ kind: 'too-old', minimum: '2.1.0' }),
+    }
+    expect(userProgramFound(adapter, tooOld, SARTO)).toBe(true)
+  })
+
+  it('counts a binary outside the folder Sarto installs into', () => {
+    const found: Detection = {
+      state: 'available',
+      spec: spec('/usr/local/bin/opencode'),
+      adapter: null,
+    }
+    expect(userProgramFound(binary, found, SARTO)).toBe(true)
+  })
+
+  it('counts a package harness program found at a version Sarto does not run', () => {
+    const passedOver: Detection = {
+      state: 'available',
+      spec: spec('/usr/bin/node'),
+      adapter: null,
+      unused: {
+        installed: { ...cli(), path: '/usr/local/bin/dsh', version: '0.3.0' },
+        why: { kind: 'range', range: '~0.2.2-rc.2' },
+      },
+    }
+    expect(userProgramFound(adapter, passedOver, SARTO)).toBe(true)
+  })
+
+  it('does not count a binary Sarto installed itself', () => {
+    const installed: Detection = {
+      state: 'available',
+      spec: spec(`${SARTO}/cursor/1.0.0/agent`),
+      adapter: null,
+    }
+    expect(userProgramFound(binary, installed, SARTO)).toBe(false)
+  })
+
+  it('does not count a harness whose program was not found, or a package alone', () => {
+    const missing: Detection = {
+      state: 'not-installed',
+      detail: '',
+      reason: { kind: 'not-installed' },
+    }
+    expect(userProgramFound(binary, missing, SARTO)).toBe(false)
+    const package_: Detection = {
+      state: 'available',
+      spec: spec('/usr/bin/node'),
+      adapter: null,
+    }
+    expect(userProgramFound(adapter, package_, SARTO)).toBe(false)
+  })
+})

@@ -1,0 +1,29 @@
+{
+  "numStartups": 412,
+  "theme": "dark",
+  "projects": { "/Users/test/app": { "allowedTools": [] } },
+  "oauthAccount": {
+    "accountUuid": "4f1c6b9e-0000-4000-8000-000000000001",
+    "emailAddress": "someone@example.com",
+    "organizationUuid": "9a2d0000-0000-4000-8000-000000000002",
+    "organizationType": "claude_team",
+    "seatTier": "team_tier_1",
+    "userRateLimitTier": "default_claude_max_5x"
+  },
+  "cachedUsageUtilization": {
+    "fetchedAtMs": 1795200000000,
+    "utilization": {
+      "limits": [
+        { "kind": "session", "percent": 42.5, "resets_at": "2026-11-21T15:00:00Z" },
+        { "kind": "weekly", "percent": 18, "resets_at": "2026-11-25T08:00:00Z" },
+        {
+          "kind": "weekly",
+          "scope": { "model": { "display_name": "Fable" } },
+          "percent": 61,
+          "resets_at": "2026-11-25T08:00:00Z"
+        },
+        { "kind": "monthly_spend", "percent": 3 }
+      ]
+    }
+  }
+}

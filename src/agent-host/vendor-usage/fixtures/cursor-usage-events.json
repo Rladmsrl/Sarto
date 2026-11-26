@@ -1,0 +1,66 @@
+{
+  "totalUsageEventsCount": 266,
+  "usageEventsDisplay": [
+    {
+      "timestamp": "1795669314578",
+      "model": "claude-opus-5-5-medium",
+      "kind": "USAGE_EVENT_KIND_INCLUDED_IN_ULTRA",
+      "requestsCosts": 3.8,
+      "usageBasedCosts": "-",
+      "isTokenBasedCall": true,
+      "tokenUsage": {
+        "inputTokens": 4,
+        "outputTokens": 4,
+        "cacheWriteTokens": 30499,
+        "totalCents": 15.2591
+      },
+      "owningUser": "100000001",
+      "cursorTokenFee": 0,
+      "isChargeable": true,
+      "serviceAccountId": "null",
+      "isHeadless": false,
+      "chargedCents": 15.2591,
+      "conversationId": "00000000-0000-4000-8000-000000000001",
+      "subscriptionProductId": "ultra",
+      "usageEventId": "00000000-0000-4000-8000-0000000000e1",
+      "usageType": "included"
+    },
+    {
+      "timestamp": "1795669243971",
+      "model": "claude-opus-5-5-medium",
+      "kind": "USAGE_EVENT_KIND_INCLUDED_IN_ULTRA",
+      "requestsCosts": 10.8,
+      "usageBasedCosts": "-",
+      "isTokenBasedCall": true,
+      "tokenUsage": {
+        "inputTokens": 28,
+        "outputTokens": 5391,
+        "cacheWriteTokens": 14585,
+        "cacheReadTokens": 1247636,
+        "totalCents": 43.03842
+      },
+      "owningUser": "100000001",
+      "cursorTokenFee": 0,
+      "isChargeable": true,
+      "serviceAccountId": "null",
+      "isHeadless": false,
+      "chargedCents": 43.03842,
+      "conversationId": "00000000-0000-4000-8000-000000000002",
+      "subscriptionProductId": "ultra",
+      "usageEventId": "00000000-0000-4000-8000-0000000000e2",
+      "usageType": "included"
+    },
+    {
+      "timestamp": "1795668911638",
+      "model": "default",
+      "kind": "USAGE_EVENT_KIND_INCLUDED_IN_ULTRA",
+      "requestsCosts": 1,
+      "usageBasedCosts": "-",
+      "isTokenBasedCall": false,
+      "owningUser": "100000001",
+      "isChargeable": true,
+      "usageEventId": "00000000-0000-4000-8000-0000000000e3",
+      "usageType": "included"
+    }
+  ]
+}

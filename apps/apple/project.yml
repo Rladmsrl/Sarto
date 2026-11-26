@@ -1,0 +1,119 @@
+name: Sarto
+options:
+  bundleIdPrefix: dev.sarto
+  deploymentTarget:
+    macOS: "15.0"
+  xcodeVersion: "16.0"
+
+packages:
+  SartoProtocol:
+    path: Packages/SartoProtocol
+  PrismDesign:
+    path: Packages/PrismDesign
+  UsageIslandKit:
+    path: Packages/UsageIslandKit
+  SartoUpdate:
+    path: Packages/SartoUpdate
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    GENERATE_INFOPLIST_FILE: YES
+    MARKETING_VERSION: "0.3.2"
+    CURRENT_PROJECT_VERSION: "4"
+    SARTO_VERSION: ""
+    SARTO_BUILD_CHANNEL: ""
+    SARTO_GIT_COMMIT: ""
+
+targets:
+  SartoMac:
+    type: application
+    platform: macOS
+    sources:
+      - path: Shared
+      - path: macOS
+        excludes:
+          - Info.plist
+    info:
+      path: macOS/Info.plist
+      properties:
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        SartoVersion: "$(SARTO_VERSION)"
+        SartoBuildChannel: "$(SARTO_BUILD_CHANNEL)"
+        SartoGitCommit: "$(SARTO_GIT_COMMIT)"
+        # install, link, or empty for a build from Xcode, whose updates are off; package-mac.mjs sets it.
+        SartoUpdateMode: "$(SARTO_UPDATE_MODE)"
+        CFBundleURLTypes:
+          - CFBundleTypeRole: Viewer
+            CFBundleURLName: dev.sarto.url
+            CFBundleURLSchemes:
+              - sarto
+    dependencies:
+      - package: SartoProtocol
+      - package: PrismDesign
+      - package: UsageIslandKit
+        product: UsageCore
+      - package: UsageIslandKit
+        product: MenuBarKit
+      - package: SartoUpdate
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: dev.sarto.mac
+        PRODUCT_NAME: Sarto
+        INFOPLIST_KEY_CFBundleDisplayName: Sarto
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools
+        INFOPLIST_KEY_LSMultipleInstancesProhibited: YES
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: "-"
+        ENABLE_APP_SANDBOX: NO
+        # The dev stamp below reads git in the checkout and writes the built Info.plist.
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+    postBuildScripts:
+      - name: Stamp Dev Build Metadata
+        basedOnDependencyAnalysis: false
+        # Orders the stamp after Xcode writes the Info.plist, which it does again on an incremental
+        # build once the stamp has changed it.
+        inputFiles:
+          - $(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)
+        script: |
+          set -eu
+          if [ "${SARTO_PACKAGING:-0}" = "1" ]; then
+            exit 0
+          fi
+          plist="${TARGET_BUILD_DIR}/${INFOPLIST_PATH}"
+          if [ ! -f "$plist" ]; then
+            exit 0
+          fi
+          build_no="$(date -u +%y%m%d%H%M%S)"
+          base_ver="${MARKETING_VERSION:-0.0.0}"
+          full_ver="${base_ver}-dev.${build_no}"
+          commit=""
+          if command -v git >/dev/null 2>&1; then
+            sha="$(git -C "${SRCROOT}/../.." rev-parse --short=7 HEAD 2>/dev/null || true)"
+            if [ -n "$sha" ]; then
+              if [ -n "$(git -C "${SRCROOT}/../.." status --porcelain --untracked-files=no 2>/dev/null || true)" ]; then
+                commit="${sha}-dirty"
+              else
+                commit="${sha}"
+              fi
+            fi
+          fi
+          set_plist() {
+            /usr/bin/plutil -replace "$1" -string "$2" "$plist"
+          }
+          set_plist CFBundleVersion "$build_no"
+          set_plist SartoVersion "$full_ver"
+          set_plist SartoBuildChannel "dev"
+          set_plist SartoGitCommit "$commit"
+          # Xcode signs the app after this phase only when its own inputs changed, so an app it signed
+          # before is signed again here, or the new Info.plist would break its signature.
+          app="${TARGET_BUILD_DIR}/${WRAPPER_NAME}"
+          if /usr/bin/codesign -d "$app" >/dev/null 2>&1; then
+            /usr/bin/codesign --force --timestamp=none \
+              --sign "${EXPANDED_CODE_SIGN_IDENTITY:-${CODE_SIGN_IDENTITY:--}}" \
+              --preserve-metadata=identifier,entitlements,requirements,flags,runtime "$app"
+          fi

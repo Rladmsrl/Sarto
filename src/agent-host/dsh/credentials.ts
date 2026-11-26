@@ -1,0 +1,146 @@
+// DeepSeek Harness's own credential file, `.credentials.yaml` in its home: which route the agent
+// signs in on, and the API key Sarto hands it to keep. Sarto keeps no copy; it writes only
+// `refs.DEEPSEEK_API_KEY` and leaves what else the file holds as it was.
+
+import { chmod, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
+import { isMap, parseDocument } from 'yaml'
+import type { AgentAccount } from '@shared/agent-host'
+import type { Env } from '../find-command'
+import { t } from '../i18n'
+
+export const API_KEY = 'DEEPSEEK_API_KEY'
+const FILE = '.credentials.yaml'
+/** The record dsh's DeepSeek account sign-in stores its grant under. */
+const ACCOUNT_RECORD = 'deepseek-account-platform/default'
+/** DeepSeek's platform, which issues the account sign-in and answers its balance. */
+export const ACCOUNT_ORIGIN = 'https://platform.deepseek.com'
+
+export type Provider = 'deepseek-account' | 'deepseek-official'
+
+/** The agent's dsh home: its `DSH_HOME`, else `~/.dsh`. */
+export function dshHome(env: Env): string {
+  const moved = env.DSH_HOME?.trim()
+  return moved ? path.resolve(os.homedir(), moved) : path.join(os.homedir(), '.dsh')
+}
+
+async function readText(file: string): Promise<string | null> {
+  try {
+    return await readFile(file, 'utf8')
+  } catch {
+    return null
+  }
+}
+
+/** The file's `refs` and `records`, as far as it reads; nothing for a file it cannot parse. */
+function sections(text: string | null): {
+  refs: Record<string, unknown>
+  records: Record<string, unknown>
+} {
+  if (!text) return { refs: {}, records: {} }
+  const value = parseDocument(text).toJS() as unknown
+  if (typeof value !== 'object' || value === null) return { refs: {}, records: {} }
+  const { refs, records } = value as { refs?: unknown; records?: unknown }
+  const object = (part: unknown): Record<string, unknown> =>
+    typeof part === 'object' && part !== null && !Array.isArray(part)
+      ? (part as Record<string, unknown>)
+      : {}
+  return { refs: object(refs), records: object(records) }
+}
+
+/** Whether a dotenv file names the key, without reading its value. */
+function namesKey(text: string | null): boolean {
+  return !!text && new RegExp(`^\\s*(?:export\\s+)?${API_KEY}\\s*=\\s*\\S`, 'm').test(text)
+}
+
+/**
+ * The route the agent signs in on: its DeepSeek account when dsh stored one, its API key when one
+ * is set anywhere dsh looks, or null when neither is.
+ */
+export async function readProvider(env: Env, cwd?: string): Promise<Provider | null> {
+  const home = dshHome(env)
+  const { refs, records } = sections(await readText(path.join(home, FILE)))
+  if (ACCOUNT_RECORD in records) return 'deepseek-account'
+  if (typeof refs[API_KEY] === 'string' && refs[API_KEY] !== '') return 'deepseek-official'
+  if (env[API_KEY]?.trim()) return 'deepseek-official'
+  if (namesKey(await readText(path.join(home, '.env')))) return 'deepseek-official'
+  if (cwd && namesKey(await readText(path.join(cwd, '.env')))) return 'deepseek-official'
+  return null
+}
+
+/** When the credential file last changed, as when a route's key is set in dsh; 0 without one. */
+export async function credentialsStamp(env: Env): Promise<number> {
+  return stat(path.join(dshHome(env), FILE)).then(
+    (stats) => stats.mtimeMs,
+    () => 0,
+  )
+}
+
+/**
+ * The account sign-in's token, read for the one request that shows its balance and never kept.
+ * Only a grant DeepSeek's own platform issued is read, since that platform is the only place the
+ * token is sent; dsh itself drops a grant whose issuer is not its platform.
+ */
+export async function readAccountToken(env: Env): Promise<string | null> {
+  const { records } = sections(await readText(path.join(dshHome(env), FILE)))
+  const record = records[ACCOUNT_RECORD]
+  const payload =
+    typeof record === 'object' && record !== null
+      ? (record as { payload?: unknown }).payload
+      : undefined
+  if (typeof payload !== 'object' || payload === null) return null
+  const { token, issuer } = payload as { token?: unknown; issuer?: unknown }
+  if (issuer !== ACCOUNT_ORIGIN || typeof token !== 'string' || token === '') return null
+  return token
+}
+
+/** What Settings shows for the route the agent signs in on. */
+export function routeAccount(provider: Provider): AgentAccount {
+  return provider === 'deepseek-account'
+    ? { kind: 'account', label: t('dsh.account.account'), email: null }
+    : { kind: 'api_key', label: t('dsh.account.apiKey'), email: null }
+}
+
+/** The key the file holds, read for the one request that shows its balance and never kept. */
+export async function readApiKey(env: Env): Promise<string | null> {
+  const { refs } = sections(await readText(path.join(dshHome(env), FILE)))
+  const stored = refs[API_KEY]
+  if (typeof stored === 'string' && stored !== '') return stored
+  return env[API_KEY]?.trim() || null
+}
+
+/** Sets or removes the key in the file, keeping the rest; the file stays readable by its owner alone. */
+async function changeKey(home: string, key: string | null): Promise<void> {
+  const file = path.join(home, FILE)
+  const text = await readText(file)
+  const doc = parseDocument(text ?? 'version: 1\n')
+  if (text !== null && doc.errors.length > 0) {
+    throw new Error(t('dsh.credentialsInvalid', { file }))
+  }
+  if (!isMap(doc.contents)) {
+    if (key === null) return
+    throw new Error(t('dsh.credentialsNotMap', { file }))
+  }
+  if (key === null) {
+    if (!doc.hasIn(['refs', API_KEY])) return
+    doc.deleteIn(['refs', API_KEY])
+  } else {
+    if (!doc.has('version')) doc.set('version', 1)
+    doc.setIn(['refs', API_KEY], key)
+  }
+  await mkdir(home, { recursive: true, mode: 0o700 })
+  // Written beside it and moved over, so dsh never reads half a file.
+  const temporary = `${file}.${process.pid}.tmp`
+  await writeFile(temporary, doc.toString(), { mode: 0o600 })
+  await chmod(temporary, 0o600)
+  await rename(temporary, file)
+}
+
+export function writeApiKey(home: string, key: string): Promise<void> {
+  return changeKey(home, key)
+}
+
+export function clearApiKey(home: string): Promise<void> {
+  return changeKey(home, null)
+}

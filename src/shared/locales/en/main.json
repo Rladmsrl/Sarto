@@ -1,0 +1,297 @@
+{
+  "menu": {
+    "about": "About {{name}}",
+    "checkForUpdates": "Check for Updates…",
+    "settings": "Settings…",
+    "services": "Services",
+    "hide": "Hide {{name}}",
+    "hideOthers": "Hide Others",
+    "showAll": "Show All",
+    "quit": "Quit {{name}}",
+    "file": "File",
+    "openProject": "Open Project…",
+    "newSession": "New Session",
+    "close": "Close",
+    "edit": "Edit",
+    "undo": "Undo",
+    "redo": "Redo",
+    "cut": "Cut",
+    "copy": "Copy",
+    "paste": "Paste",
+    "pasteAndMatchStyle": "Paste and Match Style",
+    "delete": "Delete",
+    "selectAll": "Select All",
+    "speech": "Speech",
+    "startSpeaking": "Start Speaking",
+    "stopSpeaking": "Stop Speaking",
+    "view": "View",
+    "toggleSidebar": "Toggle Sidebar",
+    "resetZoom": "Reset Zoom",
+    "zoomIn": "Zoom In",
+    "zoomOut": "Zoom Out",
+    "reload": "Reload",
+    "forceReload": "Force Reload",
+    "toggleDevTools": "Toggle Developer Tools",
+    "toggleFullScreen": "Enter Full Screen",
+    "history": "History",
+    "back": "Back",
+    "forward": "Forward",
+    "showAllHistory": "Show All History",
+    "window": "Window",
+    "minimize": "Minimize",
+    "zoom": "Zoom",
+    "bringAllToFront": "Bring All to Front",
+    "help": "Help",
+    "reportProblem": "Report a Problem…"
+  },
+  "dialogs": {
+    "openProject": "Open Project",
+    "chooseAgentProgram": "Choose Agent Program",
+    "chooseShell": "Choose Shell",
+    "saveReport": "Save Problem Report",
+    "saveReportWarning": "Keep the report to yourself: anyone can download a file attached to a public GitHub issue.",
+    "programs": "Programs",
+    "addFiles": "Add Files or Photos",
+    "addFolder": "Add Folder",
+    "installTheme": "Install Theme",
+    "exportTheme": "Export Theme",
+    "chooseAgentFolder": "Choose Agent Folder",
+    "chooseEditor": "Choose Editor",
+    "chooseSshKey": "Choose SSH Key File"
+  },
+  "quit": {
+    "titleQuit": "Quit {{name}}?",
+    "titleRestart": "Restart {{name}}?",
+    "titleUpdate": "Restart to update?",
+    "quit": "Quit",
+    "restart": "Restart",
+    "cancel": "Cancel",
+    "sessionsWorking_one": "{{count}} session is working: {{names}}.",
+    "sessionsWorking_other": "{{count}} sessions are working: {{names}}.",
+    "terminalsRunning_one": "{{count}} terminal is running: {{names}}.",
+    "terminalsRunning_other": "{{count}} terminals are running: {{names}}.",
+    "stopsForUpdate": "They stop for the restart. Your sessions and drafts come back after it.",
+    "stops": "Quitting stops them.",
+    "untitledSession": "Untitled session",
+    "listSeparator": ", ",
+    "titleClose": "Close the window?",
+    "quitWithoutSaving": "Quit without saving",
+    "restartWithoutSaving": "Restart without saving",
+    "closeWithoutSaving": "Close without saving",
+    "filesUnsaved_one": "{{count}} file has unsaved changes: {{names}}.",
+    "filesUnsaved_other": "{{count}} files have unsaved changes: {{names}}.",
+    "losesOnQuit": "Quitting loses them.",
+    "losesOnRestart": "Restarting loses them.",
+    "losesOnClose": "Closing the window loses them.",
+    "stopAndQuit": "Stop them and quit",
+    "keepRunning": "Keep running",
+    "keepsRunning": "Sarto can keep them running in the background. You’ll see them when you open Sarto again."
+  },
+  "notifications": {
+    "testTitle": "Sarto",
+    "testBody": "Notifications are on. This is how an agent that needs you will reach you.",
+    "onHost": "{{host}} · {{title}}",
+    "allowOnce": "Allow once",
+    "open": "Open",
+    "discoveryTitle": "A device asks to be added",
+    "discoveryBody": "{{name}}, signed in to your Sarto account, asks to be added as a device of this computer."
+  },
+  "attachments": {
+    "hostDown": "The agent host isn't running. Try again once it has restarted."
+  },
+  "tray": {
+    "noneRunning": "No sessions running",
+    "running_one": "{{count}} session running",
+    "running_other": "{{count}} sessions running",
+    "waiting_one": "{{count}} needs approval",
+    "waiting_other": "{{count}} need approval",
+    "remoteStarting": "Remote access is starting",
+    "remoteFailed": "Remote access could not start",
+    "remoteOn_one": "Remote access on · {{count}} device online",
+    "remoteOn_other": "Remote access on · {{count}} devices online",
+    "relayConnected": "Reachable from anywhere through the Sarto relay",
+    "relayConnecting": "Connecting to the Sarto relay",
+    "relayFailed": "Cannot reach the Sarto relay",
+    "relayConflict": "Another copy of Sarto uses this computer’s identity",
+    "relaySignedOut": "Sign in to reach this computer from anywhere",
+    "open": "Open {{name}}",
+    "newSession": "New session",
+    "quit": "Quit {{name}}",
+    "remoteAccess": "Remote access",
+    "checkForUpdates": "Check for updates…",
+    "debugMode": "Debug mode is on"
+  },
+  "agents": {
+    "folderTaken": "This folder already belongs to {{agent}}. Choose another one, or let Sarto make a new one."
+  },
+  "account": {
+    "browserFailed": "Sarto couldn’t finish signing in. Go back to Sarto to see why and try again."
+  },
+  "canvasOverview": {
+    "zoomIn": "Zoom in",
+    "zoomOut": "Zoom out",
+    "fit": "Fit",
+    "empty": "This canvas has no pages yet."
+  },
+  "market": {
+    "unexpected": "The Marketplace answered {{what}} in a form not understood",
+    "answered": {
+      "publisher": "the publisher",
+      "listing": "a listing",
+      "version": "a version",
+      "versionFiles": "the version’s files",
+      "mine": "your listings",
+      "directory": "the directory",
+      "request": "the request"
+    },
+    "answeredStatus": "Sarto answered {{status}}",
+    "unreachable": "Could not reach the Marketplace: {{reason}}",
+    "signedOut": "Not signed in to a Sarto account, or Sarto’s services are off.",
+    "failure": {
+      "notFound": "It is not in the Marketplace.",
+      "takenDown": "Sarto took this listing down.",
+      "takenDownNoVersions": "Sarto took this listing down, so it takes no new versions.",
+      "checkFailed": "The version did not pass the Marketplace’s checks.",
+      "checkFailedWith": "The version did not pass the Marketplace’s checks:\n{{problems}}",
+      "moreProblems": "… and {{count}} more",
+      "tooLarge": "The version is too large: a version has a limit on its size and on its number of files.",
+      "storageFull": "The account has no cloud storage left for this.",
+      "storageFullUsed": "The account has no cloud storage left for this: {{used}} of {{limit}} is used.",
+      "versionExists": "Version {{version}} was already published.",
+      "versionExistsAny": "This version was already published.",
+      "withdrawn": "This version was withdrawn.",
+      "handleTaken": "Another publisher has this handle.",
+      "noPublisher": "Set a publisher handle before publishing.",
+      "tooManyListings": "An account has a limit on its listings, and this one has reached it.",
+      "conflict": "This listing was published at the same time. Try again."
+    }
+  },
+  "agentHost": {
+    "down": "The agent host is down",
+    "silent": "The agent host did not answer in time",
+    "exited": "The agent host exited"
+  },
+  "terminalHost": {
+    "stopped": "The terminal host stopped",
+    "silent": "The terminal did not answer in time",
+    "notRunning": "The terminal host is not running"
+  },
+  "deviceHost": {
+    "stopped": "The device host stopped",
+    "silent": "The device did not answer in time",
+    "notRunning": "The device host is not running"
+  },
+  "hostSessions": {
+    "offline": "The host is not connected",
+    "ended": "The connection to the host ended"
+  },
+  "hostAdmin": {
+    "starting": "Sarto is starting",
+    "deviceNeedsName": "A device needs a name",
+    "notProgram": "“{{path}}” is not a program that can be run",
+    "remoteAlwaysOn": "This host always serves remote access",
+    "notFolder": "“{{path}}” is not a folder on this host",
+    "noPublish": "This host does not publish",
+    "noUpdates": "This host is not updated from Settings",
+    "noPreviews": "This host does not capture previews",
+    "noRender": "This host does not render pages",
+    "noPrint": "This host does not print",
+    "noReports": "This host makes no reports",
+    "noSubmit": "This host submits no reports"
+  },
+  "remoteHost": {
+    "notOn": "Remote access is not on",
+    "resetFailed": "The remote host did not reset",
+    "noAdmin": "This host takes no such calls"
+  },
+  "island": {
+    "notWaiting": "Not a request that waits",
+    "answerPending": "An answer to it is already on its way",
+    "notConnected": "Not connected",
+    "hostNotConnected": "The agent host is not connected",
+    "hostStopped": "The agent host stopped",
+    "hostSilent": "The agent host did not answer in time"
+  },
+  "browserRemote": {
+    "otherHost": "Another host’s session has this page.",
+    "forwardFailed": "Port {{port}} on the host could not be forwarded to the browser."
+  },
+  "artifacts": {
+    "hostSilent": "The agent host did not answer",
+    "notFound": "Not found",
+    "notRendered": "The page could not be rendered",
+    "exportFailed": "The export failed: {{reason}}",
+    "hostExportFailed": "Export failed",
+    "hostSentNoFiles": "The host sent no files",
+    "printNotReady": "Printing is not ready",
+    "printClosed": "The print window closed"
+  },
+  "media": {
+    "goneHere": "The file is no longer available here",
+    "moved": "The file has moved",
+    "tooLargeToCopy": "The file is too large to copy from its host",
+    "goneOnHost": "The file is no longer available on its host",
+    "changedOnHost": "The file changed on its host",
+    "carriedTooLarge": "This item is over 20 MB, too large to copy or save here",
+    "onlyPicture": "Only a picture can be copied",
+    "formatNotCopied": "This picture’s format can’t be copied",
+    "onHost": "The file is on another host; save a copy to open it here"
+  },
+  "report": {
+    "gone": "This report is no longer prepared",
+    "noFile": "The bundle has no such file"
+  },
+  "editors": {
+    "notApp": "“{{path}}” is not an app that can be started",
+    "notFileOrFolder": "“{{path}}” is not a file or folder",
+    "openFailed": "Could not open it in {{editor}}: {{reason}}"
+  },
+  "updates": {
+    "notYaml": "{{name}} is not YAML: {{reason}}",
+    "noVersion": "{{name}} names no release version",
+    "notSigned": "{{name}} is not signed with Sarto’s release key",
+    "versionMismatch": "{{name}} of {{version}} names {{named}}",
+    "noFiles": "{{name}} lists no files with their checksums",
+    "tooLarge": "{{url}} is too large",
+    "noAnswer": "No answer from {{url}} within {{seconds}} s",
+    "noSource": "No source to check",
+    "checkFirst": "Check for updates before downloading one"
+  },
+  "updater": {
+    "offDevelopment": "Updates are off in development builds",
+    "offPackageManager": "Updates for this installation come from the package manager",
+    "linkOnly": "This build cannot install updates; open the release page to download it",
+    "nothingToDownload": "There is no update to download",
+    "nothingReady": "No update is ready to install",
+    "readOnlyVolume": "The app is in an Applications folder on a read-only volume",
+    "stalled": "The download made no progress for {{seconds}} s"
+  },
+  "marketKeys": {
+    "valueEmpty": "The value of “{{name}}” is empty; clear it instead",
+    "valueTooLarge": "The value of “{{name}}” is over {{bytes}} bytes",
+    "valueNul": "The value of “{{name}}” holds a NUL character",
+    "valueLineBreak": "The value of “{{name}}” holds a line break, which a header cannot",
+    "unreadable": "Sarto could not read its keys file",
+    "newer": "The keys were saved by a newer version of Sarto",
+    "undecryptable": "This system cannot decrypt the keys now",
+    "cannotEncrypt": "This system cannot encrypt keys, so none are kept",
+    "noServer": "This server is no longer installed"
+  },
+  "settings": {
+    "tooManyServers": "Sarto keeps at most {{max}} servers",
+    "tooManySkills": "Sarto keeps at most {{max}} skills",
+    "repeatedServer": "“{{name}}” repeats another server’s name",
+    "repeatedSkill": "“{{name}}” repeats another skill’s name",
+    "agentName": "An agent’s name must be 1 to {{max}} characters"
+  },
+  "signIns": {
+    "tookTooLong": "Reading the browsers took too long",
+    "workerStopped": "The sign-ins worker stopped with code {{code}}",
+    "noProfile": "That browser profile is not on this computer"
+  },
+  "daemon": {
+    "noTrash": "This computer has no trash that Sarto can use.",
+    "noAccount": "The daemon cannot use an account.",
+    "notSignedIn": "The daemon is not signed in to a Sarto account."
+  }
+}

@@ -1,0 +1,11 @@
+out
+dist
+.cache
+pnpm-lock.yaml
+.worktrees
+src/renderer/src/lib/cn-tables.ts
+native/ios-device/target
+apps/apple
+docs/sarto-remote-design.md
+docs/sarto-update-design.md
+docs/sarto-brand-kit

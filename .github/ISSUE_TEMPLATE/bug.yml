@@ -1,0 +1,62 @@
+name: Bug Report
+description: Report a bug or unexpected behavior in Sarto (macOS / Daemon)
+title: '[Bug]: '
+labels: ['bug']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Tip: Use **Help → Report a Problem…** in Sarto to upload a private, automatically redacted diagnostic bundle and paste only the `SR-XXXXXX` report ID below. Never attach raw logs containing API keys to a public issue.
+
+  - type: input
+    id: report-id
+    attributes:
+      label: Sarto Problem Report ID (Optional)
+      description: If you uploaded diagnostics from Sarto, paste the SR-XXXXXX ID here.
+      placeholder: SR-7F3K2Q
+    validations:
+      required: false
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe what you expected and what happened instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open ...
+        2. Run ...
+        3. See error ...
+    validations:
+      required: false
+
+  - type: input
+    id: version
+    attributes:
+      label: Sarto version
+      placeholder: 0.3.0
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: macOS version & chip
+      placeholder: macOS 15.4 (Apple M3 Pro, arm64)
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant error text or additional context
+      description: Please mask any tokens or private paths before pasting.
+      render: text
+    validations:
+      required: false

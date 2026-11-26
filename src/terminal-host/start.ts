@@ -1,0 +1,184 @@
+// The terminal host's process: main's messages in over the control channel, the host's out, and
+// each client's port as it connects. node-main.ts runs it under Node.js.
+
+import type { MainToTerminalHost, TerminalHostToMain } from '@shared/host-control'
+import { setLocale, t } from '@shared/hosts-text'
+import { isLocale } from '@shared/locale'
+import { writeLog } from '@shared/log/process-log'
+import type { ControlChannel, PortChannel } from '@shared/port-channel'
+import type { FromPort } from '@shared/port-rpc'
+import type { PortDevice } from '@shared/remote/device'
+import type { TerminalEvent } from '@shared/terminal-host'
+import { readCommandLine } from './command-title'
+import { readTtyModes } from './password'
+import { ProjectRegistry } from './projects'
+import { PortServer } from './server'
+import { type PtySpawn, TerminalManager } from './terminals'
+
+export interface StartedTerminalHost {
+  /**
+   * A client's port, from the window `windowId` names or for the paired device `device` names;
+   * closed if the host has not started.
+   */
+  connect(
+    port: PortChannel<FromPort<TerminalEvent>>,
+    windowId: number,
+    device?: PortDevice | null,
+  ): void
+}
+
+export interface TerminalHostOptions {
+  /** Loads node-pty; tests run the host with a fake pty instead. */
+  loadPty?: () => Promise<PtySpawn>
+}
+
+function warn(message: string): void {
+  writeLog('warn', 'host', message)
+}
+
+async function loadPty(): Promise<PtySpawn> {
+  const pty = await import('node-pty')
+  return (file, args, options) => pty.spawn(file, args, options)
+}
+
+export function startTerminalHost(
+  control: ControlChannel<MainToTerminalHost, TerminalHostToMain>,
+  options: TerminalHostOptions = {},
+): StartedTerminalHost {
+  const send = (message: TerminalHostToMain): void => control.send(message)
+  let manager: TerminalManager | null = null
+  let server: PortServer | null = null
+  let projects: ProjectRegistry | null = null
+  let allowDevices = false
+  let stopping = false
+
+  function init(message: Extract<MainToTerminalHost, { type: 'terminal-host:init' }>): void {
+    if (isLocale(message.locale)) setLocale(message.locale)
+    projects = new ProjectRegistry(message.platform)
+    projects.set(message.projects)
+    const terminals = new TerminalManager({
+      platform: message.platform,
+      appVersion: message.appVersion,
+      env: process.env,
+      projects,
+      loadPty: options.loadPty ?? loadPty,
+      warn,
+      isDevicePort: (port) => server?.isDevice(port) ?? false,
+      handedBack: (sessionId, durationMs) =>
+        send({ type: 'terminal-host:handed-back', sessionId, durationMs: Math.round(durationMs) }),
+      commandLine: (pty) => readCommandLine(message.platform, pty.pid),
+      ttyModes: (pty) =>
+        pty.ptsName ? readTtyModes(message.platform, pty.ptsName) : Promise.resolve(null),
+      sink: {
+        data: (id, data, ports) => {
+          for (const port of ports) server?.send(port, { type: 'terminal.data', id, data })
+        },
+        replay: (id, port, replay) => server?.send(port, { type: 'terminal.replay', id, replay }),
+        info: (info) => server?.broadcast({ type: 'terminal.info', info }),
+        removed: (id) => server?.broadcast({ type: 'terminal.removed', id }),
+      },
+    })
+    terminals.setShellPath(message.settings.shellPath)
+    terminals.setAuthCommands(message.authCommands)
+    manager = terminals
+    server = new PortServer(
+      {
+        'terminals.create': (port, params) => terminals.create(port, params),
+        'terminals.list': (_, params) => terminals.list(params.projectPath),
+        'terminals.assign': (_, params) => terminals.assign(params.projectPath, params.sessionId),
+        'terminals.attach': (port, params) => terminals.attach(port, params.id),
+        'terminals.input': (_, params) => terminals.input(params.id, params.data),
+        'terminals.resize': (_, params) => terminals.resize(params.id, params.cols, params.rows),
+        'terminals.ack': (port, params) => terminals.ack(port, params.id, params.chars),
+        'terminals.kill': (_, params) => terminals.kill(params.id),
+        'terminals.restart': (_, params) => terminals.restart(params.id),
+        'terminals.rename': (_, params) => terminals.rename(params.id, params.name),
+        'terminals.takeOver': (_, params) => terminals.takeOver(params.id),
+        'terminals.handBack': (_, params) => terminals.handBack(params.id),
+      },
+      (port) => terminals.detach(port),
+      warn,
+    )
+    allowDevices = message.settings.allowDevices === true
+    server.setAllowDevices(allowDevices)
+    send({ type: 'terminal-host:ready' })
+    // The host starts with the first terminal anyway, so loading node-pty now costs nothing and
+    // reports a broken native module before anyone types.
+    void terminals.warmUp().then((error) => {
+      if (error) console.error(error)
+      else console.log('node-pty loaded')
+    })
+  }
+
+  control.onMessage((message) => {
+    switch (message?.type) {
+      case 'terminal-host:init':
+        if (!manager) init(message)
+        break
+      case 'terminal-host:locale':
+        if (isLocale(message.locale)) setLocale(message.locale)
+        break
+      case 'terminal-host:settings':
+        manager?.setShellPath(message.settings.shellPath)
+        allowDevices = message.settings.allowDevices === true
+        server?.setAllowDevices(allowDevices)
+        break
+      case 'terminal-host:projects':
+        projects?.set(message.paths)
+        break
+      case 'terminal-host:sessions-ended':
+        manager?.endSessions(message.sessionIds)
+        break
+      case 'terminal-host:auth-commands':
+        manager?.setAuthCommands(message.commands)
+        break
+      case 'terminal-host:busy-request':
+        void (manager?.busy() ?? Promise.resolve([])).then((terminals) =>
+          send({ type: 'terminal-host:busy', requestId: message.requestId, terminals }),
+        )
+        break
+      case 'terminal-host:call': {
+        const { callId, call } = message
+        if (call.kind === 'reply' && call.fromDevice && !allowDevices) {
+          send({
+            type: 'terminal-host:answer',
+            callId,
+            answer: {
+              error: {
+                code: 'not_allowed',
+                message: t('terminal.notAllowed'),
+              },
+            },
+          })
+          break
+        }
+        void (
+          manager?.agentCall(call) ??
+          Promise.resolve({
+            error: { code: 'unavailable' as const, message: t('terminal.starting') },
+          })
+        ).then((answer) => send({ type: 'terminal-host:answer', callId, answer }))
+        break
+      }
+      case 'terminal-host:turn-ended':
+        manager?.turnEnded(message.sessionId)
+        break
+      case 'terminal-host:shutdown':
+        if (stopping) break
+        stopping = true
+        manager?.dispose()
+        server?.closeAll()
+        send({ type: 'terminal-host:stopped' })
+        // Lets terminal-host:stopped leave before the process ends.
+        setImmediate(() => process.exit(0))
+        break
+    }
+  })
+
+  return {
+    connect: (port, windowId, device = null) => {
+      if (server) server.attach(port, windowId, device)
+      else port.close()
+    },
+  }
+}

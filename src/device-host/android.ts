@@ -1,0 +1,435 @@
+// An Android emulator or phone through scrcpy's server, pushed over adb and reached through a
+// forward tunnel: one socket for H.264, one for control.
+
+import { execFile, spawn, type ChildProcess } from 'node:child_process'
+import { randomInt } from 'node:crypto'
+import { connect, type Socket } from 'node:net'
+import type { Env } from '../agent-host/find-command'
+import type { DeviceInput, DeviceScreen } from '@shared/device-host'
+import { t } from '@shared/hosts-text'
+import { AnnexBToAvcc } from './annexb'
+import { parseAdbDevices, run } from './discovery'
+import { DriverError, type DeviceDriver, type DriverEvents } from './driver'
+import { freePort, helperPath } from './runtime'
+import {
+  ANDROID_KEYCODE,
+  backMessage,
+  clipboardMessage,
+  keycodeMessage,
+  resetVideoMessage,
+  rotateMessage,
+  SCRCPY_CODEC_H264,
+  SCRCPY_VERSION,
+  ScrcpyVideoReader,
+  scrollMessage,
+  textChunks,
+  textMessage,
+  touchMessage,
+  type ScreenPoint,
+} from './scrcpy'
+
+const DEVICE_PATH = '/data/local/tmp/sarto-scrcpy-server.jar'
+const CONNECT_TIMEOUT_MS = 15_000
+
+const KEYCODE_BY_CODE: Record<string, number> = {
+  Enter: ANDROID_KEYCODE.enter,
+  NumpadEnter: ANDROID_KEYCODE.enter,
+  Backspace: ANDROID_KEYCODE.del,
+  Delete: ANDROID_KEYCODE.forwardDel,
+  Tab: ANDROID_KEYCODE.tab,
+  Escape: ANDROID_KEYCODE.back,
+  ArrowUp: ANDROID_KEYCODE.dpadUp,
+  ArrowDown: ANDROID_KEYCODE.dpadDown,
+  ArrowLeft: ANDROID_KEYCODE.dpadLeft,
+  ArrowRight: ANDROID_KEYCODE.dpadRight,
+  Home: ANDROID_KEYCODE.moveHome,
+  End: ANDROID_KEYCODE.moveEnd,
+  PageUp: ANDROID_KEYCODE.pageUp,
+  PageDown: ANDROID_KEYCODE.pageDown,
+  Space: ANDROID_KEYCODE.space,
+}
+
+const BUTTON_KEYCODE: Partial<Record<string, number>> = {
+  home: ANDROID_KEYCODE.home,
+  recents: ANDROID_KEYCODE.appSwitch,
+  lock: ANDROID_KEYCODE.power,
+  volumeUp: ANDROID_KEYCODE.volumeUp,
+  volumeDown: ANDROID_KEYCODE.volumeDown,
+}
+
+function connectOnce(port: number): Promise<Socket> {
+  return new Promise((resolve, reject) => {
+    const socket = connect(port, '127.0.0.1')
+    socket.once('connect', () => resolve(socket))
+    socket.once('error', reject)
+  })
+}
+
+export class AndroidDriver implements DeviceDriver {
+  private server: ChildProcess | null = null
+  private video: Socket | null = null
+  private control: Socket | null = null
+  private port = 0
+  private events: DriverEvents | null = null
+  private size: { width: number; height: number } | null = null
+  private codec: string | null = null
+  private stopped = false
+  private clipboardSequence = 1
+
+  constructor(
+    private readonly serial: string,
+    private readonly adb: string,
+    private readonly resourcesPath: string | null,
+    private readonly env: Env,
+    private readonly log: (message: string) => void,
+  ) {}
+
+  async start(events: DriverEvents): Promise<void> {
+    this.events = events
+    const jar = await helperPath('scrcpy-server', this.resourcesPath)
+    if (!jar) {
+      throw new DriverError('helper_missing', t('devices.notInstalled', { name: 'scrcpy-server' }))
+    }
+    await run(this.adb, ['-s', this.serial, 'push', jar, DEVICE_PATH], this.env, 60_000)
+    const scid = randomInt(1, 0x7fffffff).toString(16).padStart(8, '0')
+    this.port = await freePort()
+    await run(
+      this.adb,
+      ['-s', this.serial, 'forward', `tcp:${this.port}`, `localabstract:scrcpy_${scid}`],
+      this.env,
+    )
+    let starting = true
+    let startFailure: Error | null = null
+    try {
+      const server = spawn(
+        this.adb,
+        [
+          '-s',
+          this.serial,
+          'shell',
+          `CLASSPATH=${DEVICE_PATH}`,
+          'app_process',
+          '/',
+          'com.genymobile.scrcpy.Server',
+          SCRCPY_VERSION,
+          `scid=${scid}`,
+          'log_level=info',
+          'tunnel_forward=true',
+          'audio=false',
+          'control=true',
+          'video_codec=h264',
+          'max_size=1920',
+          'video_bit_rate=8000000',
+          'max_fps=60',
+          'cleanup=true',
+          'clipboard_autosync=false',
+        ],
+        {
+          env: this.env as NodeJS.ProcessEnv,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          windowsHide: true,
+        },
+      )
+      this.server = server
+      server.stdout?.on('data', (chunk: Buffer) => this.log(chunk.toString().trimEnd()))
+      server.stderr?.on('data', (chunk: Buffer) => this.log(chunk.toString().trimEnd()))
+      server.once('error', (error) => {
+        this.server = null
+        if (starting) startFailure = new DriverError('start_failed', error.message)
+        else if (!this.stopped) this.end(error.message)
+      })
+      server.once('exit', (code) => {
+        this.server = null
+        const stopped = t('devices.androidStopped', { code: code ?? 'signal' })
+        if (starting) startFailure = new DriverError('start_failed', stopped)
+        else if (!this.stopped) this.end(stopped)
+      })
+      this.video = await this.connectVideo(() => startFailure)
+      this.control = await connectOnce(this.port)
+      this.control.on('error', (error) => this.log(`Control socket: ${error.message}`))
+      // Device messages (clipboard, acknowledgements) are not used.
+      this.control.on('data', () => undefined)
+      starting = false
+      events.input(true)
+    } catch (error) {
+      starting = false
+      await this.stop()
+      throw error
+    }
+  }
+
+  async stop(): Promise<void> {
+    this.stopped = true
+    this.video?.destroy()
+    this.control?.destroy()
+    this.server?.kill('SIGTERM')
+    const port = this.port
+    this.port = 0
+    if (port) {
+      await run(
+        this.adb,
+        ['-s', this.serial, 'forward', '--remove', `tcp:${port}`],
+        this.env,
+      ).catch(() => undefined)
+    }
+  }
+
+  requestKeyframe(): void {
+    // The server's capture starts with a keyframe; a reset before it exists kills its control thread.
+    if (this.codec) this.write(resetVideoMessage())
+  }
+
+  send(input: DeviceInput): void {
+    const size = this.size
+    switch (input.type) {
+      case 'touch': {
+        if (!size) return
+        const action = input.phase === 'begin' ? 'down' : input.phase === 'move' ? 'move' : 'up'
+        this.write(touchMessage(action, input.finger ?? 0, this.point(input.x, input.y, size)))
+        break
+      }
+      case 'scroll': {
+        if (!size) return
+        const notches = (delta: number): number => Math.max(-16, Math.min(16, -delta / 40))
+        this.write(
+          scrollMessage(this.point(input.x, input.y, size), notches(input.dx), notches(input.dy)),
+        )
+        break
+      }
+      case 'key': {
+        const keycode = KEYCODE_BY_CODE[input.code]
+        if (keycode !== undefined) this.write(keycodeMessage(input.phase, keycode))
+        break
+      }
+      case 'text':
+        // Injected text goes through the keyboard's character map, which has no CJK; those paste.
+        if (/^[\x20-\x7e\n]*$/.test(input.text)) {
+          for (const chunk of textChunks(input.text)) this.write(textMessage(chunk))
+        } else {
+          this.write(clipboardMessage(this.clipboardSequence++, input.text, true))
+        }
+        break
+      case 'button':
+        if (input.button === 'rotate') this.write(rotateMessage())
+        else if (input.button === 'back') {
+          this.write(backMessage('down'))
+          this.write(backMessage('up'))
+        } else {
+          const keycode = BUTTON_KEYCODE[input.button]
+          if (keycode === undefined) break
+          this.write(keycodeMessage('down', keycode))
+          this.write(keycodeMessage('up', keycode))
+        }
+        break
+    }
+  }
+
+  screenshot(): Promise<Uint8Array> {
+    return new Promise((resolve, reject) => {
+      execFile(
+        this.adb,
+        ['-s', this.serial, 'exec-out', 'screencap', '-p'],
+        { env: this.env, encoding: 'buffer', maxBuffer: 64 * 1024 * 1024, timeout: 15_000 },
+        (error, stdout) => (error ? reject(error) : resolve(new Uint8Array(stdout))),
+      )
+    })
+  }
+
+  private point(x: number, y: number, size: { width: number; height: number }): ScreenPoint {
+    return { x: x * size.width, y: y * size.height, width: size.width, height: size.height }
+  }
+
+  private write(message: Uint8Array): void {
+    if (this.control && !this.control.destroyed) this.control.write(message)
+  }
+
+  /** The forward tunnel accepts before the server listens; its dummy byte says it does. */
+  private async connectVideo(failure: () => Error | null): Promise<Socket> {
+    const deadline = Date.now() + CONNECT_TIMEOUT_MS
+    for (;;) {
+      if (this.stopped) throw new DriverError('stopped', 'Stopped')
+      const failed = failure()
+      if (failed) throw failed
+      try {
+        const socket = await connectOnce(this.port)
+        const reader = new ScrcpyVideoReader()
+        const converter = new AnnexBToAvcc()
+        const ready = await new Promise<boolean>((resolve) => {
+          let first = true
+          socket.on('data', (chunk: Buffer) => {
+            if (first) {
+              first = false
+              resolve(true)
+            }
+            try {
+              this.onVideo(reader.push(new Uint8Array(chunk)), converter)
+            } catch (error) {
+              const message = error instanceof Error ? error.message : String(error)
+              this.end(message)
+              void this.stop()
+            }
+          })
+          socket.once('close', () => {
+            if (first) resolve(false)
+            else if (!this.stopped) this.end(t('devices.androidVideoStopped'))
+          })
+          socket.once('error', () => undefined)
+        })
+        if (ready) return socket
+        socket.destroy()
+      } catch {
+        // Not listening yet.
+      }
+      const failedAfter = failure()
+      if (failedAfter) throw failedAfter
+      if (Date.now() > deadline) throw new DriverError('connect', t('devices.androidStreamSlow'))
+      await new Promise((resolve) => setTimeout(resolve, 250))
+    }
+  }
+
+  private onVideo(events: ReturnType<ScrcpyVideoReader['push']>, converter: AnnexBToAvcc): void {
+    for (const event of events) {
+      if (event.type === 'codec' && event.codec !== SCRCPY_CODEC_H264) {
+        this.end(t('devices.noH264'))
+      } else if (event.type === 'disabled') {
+        this.end(event.error ? t('devices.encoderFailed') : t('devices.videoDisabled'))
+      } else if (event.type === 'session') {
+        this.size = { width: event.width, height: event.height }
+        converter.reset()
+        this.emitScreen()
+      } else if (event.type === 'packet') {
+        const unit = converter.push(event.data)
+        if (unit.description) {
+          this.codec = unit.description.codec
+          this.events?.frame('description', unit.description.config)
+          this.emitScreen()
+        }
+        if (!event.config && unit.data.length > 0) {
+          this.events?.frame(unit.key || event.key ? 'key' : 'delta', unit.data)
+        }
+      }
+    }
+  }
+
+  private emitScreen(): void {
+    if (!this.size || !this.codec) return
+    const screen: DeviceScreen = {
+      ...this.size,
+      orientation: this.size.width > this.size.height ? 'landscape_left' : 'portrait',
+      codec: this.codec,
+    }
+    this.events?.screen(screen)
+  }
+
+  private end(error: string | null): void {
+    if (this.stopped) return
+    this.stopped = true
+    this.video?.destroy()
+    this.control?.destroy()
+    this.server?.kill('SIGTERM')
+    this.events?.ended(error)
+  }
+}
+
+const BOOT_TIMEOUT_MS = 240_000
+const BOOT_POLL_MS = 2_000
+/** How long an emulator that did not come up gets to exit after each way of stopping it. */
+const STOP_GRACE_MS = 5_000
+
+/**
+ * Starts an AVD without a window of its own, and resolves with its serial once it has booted. One
+ * that does not come up within `timeoutMs` is stopped again before this rejects.
+ */
+export async function bootEmulator(
+  emulator: string,
+  adb: string,
+  avd: string,
+  env: Env,
+  timeoutMs = BOOT_TIMEOUT_MS,
+): Promise<string> {
+  const before = new Set(parseAdbDevices(await run(adb, ['devices'], env)).map((row) => row.serial))
+  const child = spawn(
+    emulator,
+    ['-avd', avd, '-no-window', '-no-audio', '-no-boot-anim', '-gpu', 'host'],
+    {
+      env: env as NodeJS.ProcessEnv,
+      stdio: 'ignore',
+      detached: true,
+      windowsHide: true,
+    },
+  )
+  child.unref()
+  const launch = { exited: false, error: null as Error | null }
+  child.once('error', (error) => {
+    launch.exited = true
+    launch.error = error
+  })
+  child.once('exit', () => {
+    launch.exited = true
+  })
+  // Emulators adb lists after this one started, which may also be the user's.
+  const appeared = new Set<string>()
+  try {
+    const deadline = Date.now() + timeoutMs
+    while (Date.now() < deadline) {
+      await new Promise((resolve) =>
+        setTimeout(resolve, Math.min(BOOT_POLL_MS, deadline - Date.now())),
+      )
+      if (launch.error) throw launch.error
+      const rows = parseAdbDevices(await run(adb, ['devices'], env).catch(() => ''))
+      for (const row of rows) {
+        if (before.has(row.serial) || !row.serial.startsWith('emulator-')) continue
+        appeared.add(row.serial)
+        if (row.state !== 'device') continue
+        const booted = await run(
+          adb,
+          ['-s', row.serial, 'shell', 'getprop sys.boot_completed'],
+          env,
+          5_000,
+        ).catch(() => '')
+        if (booted.trim() === '1') return row.serial
+      }
+    }
+    throw new Error(t('devices.emulatorBoot'))
+  } catch (error) {
+    if (!launch.exited) await stopLaunched(child, adb, avd, appeared, env)
+    throw error
+  }
+}
+
+/**
+ * Stops an emulator `bootEmulator` started, while its process still runs: through the console of
+ * the listed emulator running its AVD, which an AVD runs only once, then by signals.
+ */
+async function stopLaunched(
+  child: ChildProcess,
+  adb: string,
+  avd: string,
+  serials: Set<string>,
+  env: Env,
+): Promise<void> {
+  const exited = new Promise<void>((resolve) => child.once('exit', () => resolve()))
+  let killed = false
+  for (const serial of serials) {
+    // The console answers with the AVD's name, then OK.
+    const name = await run(adb, ['-s', serial, 'emu', 'avd', 'name'], env, 5_000).catch(() => '')
+    if (name.split(/\r?\n/)[0]?.trim() !== avd) continue
+    await run(adb, ['-s', serial, 'emu', 'kill'], env, 5_000).catch(() => undefined)
+    killed = true
+  }
+  if (killed && (await exitsWithin(exited, STOP_GRACE_MS))) return
+  child.kill('SIGTERM')
+  if (await exitsWithin(exited, STOP_GRACE_MS)) return
+  child.kill('SIGKILL')
+  await exitsWithin(exited, STOP_GRACE_MS)
+}
+
+function exitsWithin(exited: Promise<void>, ms: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(false), ms)
+    void exited.then(() => {
+      clearTimeout(timer)
+      resolve(true)
+    })
+  })
+}
