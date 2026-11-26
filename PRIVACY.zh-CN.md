@@ -24,12 +24,12 @@ Sarto 的客户端与 daemon 完全开源（`AGPL-3.0`），并可选连接 Sart
 
 Sarto 账号完全可选，不登录即可完整使用全部本机 ADE 功能。未登录状态下，客户端只向 `https://sarto.1o.ink` 发送匿名只读请求，另有下文「不经过 Sarto Cloud 的第三方直连」所列请求：
 
-| 用途               | 接口与频率                                                                     | 服务端可见信息                                             | 对应客户端源码                                                               |
-| ------------------ | ------------------------------------------------------------------------------ | ---------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| macOS 应用更新检查 | 每小时 `GET /releases/sources.json`、`latest/download/sarto-update.json(.sig)` | IP、`User-Agent`（App 版本、架构）                         | [`SartoUpdater.swift`](./apps/apple/macOS/Updates/SartoUpdater.swift)        |
-| Daemon CLI 更新    | 手动执行 `sarto update`：`GET /releases/latest`、`install.sh(.sig)`            | IP、`User-Agent`（`Sarto-daemon/<版本> (<系统>; <架构>)`） | [`src/daemon/update.ts`](./src/daemon/update.ts)                             |
-| Agent 兼容清单     | `GET /releases/latest/download/harnesses.json`                                 | IP、`User-Agent`                                           | [`src/agent-host/harness-manifest.ts`](./src/agent-host/harness-manifest.ts) |
-| 每日模型价格快照   | 每 24 小时 `GET /v1/prices`                                                    | IP、`If-None-Match` ETag（不携带账号 Token）               | [`src/daemon/prices.ts`](./src/daemon/prices.ts)                             |
+| 用途               | 接口与频率                                                                                                                                               | 服务端可见信息                                             | 对应客户端源码                                                               |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| macOS 应用更新检查 | 每小时 `GET /releases/sources.json`、`latest/download/latest-mac.json(.sig)`（Beta 通道为 `beta-mac.json(.sig)`）                                        | IP、`User-Agent`（App 版本、架构）                         | [`SartoUpdater.swift`](./apps/apple/macOS/Updates/SartoUpdater.swift)        |
+| Daemon CLI 更新    | 手动执行 `sarto update`：`GET /releases/latest/download/latest-daemon.json(.sig)`（或 `beta-daemon.json(.sig)`）、`/releases/latest`、`install.sh(.sig)` | IP、`User-Agent`（`Sarto-daemon/<版本> (<系统>; <架构>)`） | [`src/daemon/update.ts`](./src/daemon/update.ts)                             |
+| Agent 兼容清单     | `GET /releases/latest/download/harnesses.json`                                                                                                           | IP、`User-Agent`                                           | [`src/agent-host/harness-manifest.ts`](./src/agent-host/harness-manifest.ts) |
+| 每日模型价格快照   | 每 24 小时 `GET /v1/prices`                                                                                                                              | IP、`If-None-Match` ETag（不携带账号 Token）               | [`src/daemon/prices.ts`](./src/daemon/prices.ts)                             |
 
 > [!TIP]
 > 应用更新文件优先从 GitHub Releases（`github.com/Rladmsrl/Sarto/releases`）下载，失败时回退到 `sarto.1o.ink`，两处提供的是同一份签名文件。

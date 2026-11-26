@@ -628,7 +628,7 @@ final class PrismDynamicIslandCoordinator: IslandActionSink {
         }
         guard !telemetryTrailingScheduled else { return }
         telemetryTrailingScheduled = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + max(0.005, Self.syncThrottleInterval - elapsed)) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + max(0.005, Self.syncThrottleInterval - elapsed)) { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.telemetryTrailingScheduled = false

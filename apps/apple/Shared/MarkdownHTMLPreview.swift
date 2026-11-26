@@ -1948,7 +1948,7 @@ struct GitHubMarkdownHTMLRenderer {
     }
 
     private static func splitLinkDestination(_ raw: String) -> (url: String, title: String?) {
-        var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         if s.hasPrefix("<"), let close = s.firstIndex(of: ">") {
             let url = String(s[s.index(after: s.startIndex)..<close])
             let rest = String(s[s.index(after: close)...]).trimmingCharacters(in: .whitespaces)

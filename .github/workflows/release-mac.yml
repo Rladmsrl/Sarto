@@ -249,13 +249,30 @@ jobs:
           DAEMON_TAG="${{ steps.meta.outputs.daemon_tag }}"
           DELTA_FROM="${{ steps.meta.outputs.delta_from }}"
 
-          if [ -n "${SARTO_UPDATE_SIGNING_KEY:-}" ]; then
-            NOTES_FILE="${RUNNER_TEMP}/release-notes.md"
+          NOTES_FILE="${RUNNER_TEMP}/release-notes.md"
+          BASE_VERSION="${APP_VERSION%%-*}"
+          FOUND_NOTES=""
+          for candidate in \
+            "docs/release-notes/${APP_TAG}.md" \
+            "docs/release-notes/v${APP_VERSION}.md" \
+            "docs/release-notes/v${BASE_VERSION}.md"; do
+            if [ -f "$candidate" ]; then
+              FOUND_NOTES="$candidate"
+              break
+            fi
+          done
+          if [ -n "$FOUND_NOTES" ]; then
+            cp "$FOUND_NOTES" "$NOTES_FILE"
+            echo "Using release notes from $FOUND_NOTES"
+          else
             cat > "$NOTES_FILE" <<EOF
           ## What changed
 
           - Sarto ${APP_VERSION} (${CHANNEL}, build ${BUILD}) built from commit ${GITHUB_SHA}.
           EOF
+          fi
+
+          if [ -n "${SARTO_UPDATE_SIGNING_KEY:-}" ]; then
             ARGS=(
               --target "$TARGET"
               --channel "$CHANNEL"
@@ -384,17 +401,24 @@ jobs:
               LATEST_FLAG="--latest=false"
             fi
             BODY_FILE="${RUNNER_TEMP}/gh-release-${TAG}.md"
-            cat > "$BODY_FILE" <<EOF
-          ## Sarto ${TAG}
-
-          Channel: \`${CHANNEL}\` · Build: \`${BUILD}\` · Commit: \`${GITHUB_SHA}\`
-
-          Built directly in GitHub Actions with signed SLSA Build Provenance Attestations.
-
-          \`\`\`sh
-          shasum -a 256 -c SHA256SUMS.txt --ignore-missing
-          \`\`\`
-          EOF
+            NOTES_FILE="${RUNNER_TEMP}/release-notes.md"
+            {
+              echo "## Sarto ${TAG}"
+              echo ""
+              if [ -f "$NOTES_FILE" ]; then
+                cat "$NOTES_FILE"
+                echo ""
+              fi
+              echo "---"
+              echo ""
+              echo "Channel: \`${CHANNEL}\` · Build: \`${BUILD}\` · Commit: \`${GITHUB_SHA}\`"
+              echo ""
+              echo "Built directly in GitHub Actions with signed SLSA Build Provenance Attestations."
+              echo ""
+              echo '```sh'
+              echo 'shasum -a 256 -c SHA256SUMS.txt --ignore-missing'
+              echo '```'
+            } > "$BODY_FILE"
             if gh release view "$TAG" >/dev/null 2>&1; then
               gh release upload "$TAG" "$dir"* --clobber
             else

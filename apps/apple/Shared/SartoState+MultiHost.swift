@@ -808,7 +808,7 @@ public extension SartoState {
     /// Switches the foreground workbench to `targetHostID` without tearing down the outgoing host.
     /// Optionally selects a specific session or opens the New Session stage on a project on that host.
     @discardableResult
-    public func switchActiveHost(
+    func switchActiveHost(
         to targetHostID: String,
         selectingSession targetSessionID: String? = nil,
         openNewSessionOnProject newProject: (path: String?, scratch: Bool?, parentId: String?)? = nil,
@@ -1003,7 +1003,7 @@ public extension SartoState {
     }
 
     /// Convenience for sidebar / new-session clicks targeting a specific computer.
-    public func openNewSession(
+    func openNewSession(
         onHost hostId: String,
         projectPath: String? = nil,
         scratch: Bool? = nil,
@@ -1090,7 +1090,7 @@ public extension SartoState {
 
     /// Fetches a background host's session snapshot into its slot replica cache (used by
     /// Dynamic Island / Running Rail when a remote session waits for permission).
-    public func fetchSessionSnapshotIfNeeded(_ sessionId: String, onHost hostId: String?) async {
+    func fetchSessionSnapshotIfNeeded(_ sessionId: String, onHost hostId: String?) async {
         guard let hostId, hostId != activeHostID else {
             await fetchSessionSnapshotIfNeeded(sessionId)
             return
@@ -1127,7 +1127,7 @@ public extension SartoState {
     }
 
     /// Background-host-aware session outputs fetch for sidebar hover preview cards.
-    public func fetchSessionOutputs(sessionId: String, onHost hostId: String?) async -> SessionOutputsInfo? {
+    func fetchSessionOutputs(sessionId: String, onHost hostId: String?) async -> SessionOutputsInfo? {
         guard let hostId, hostId != activeHostID else {
             return await fetchSessionOutputs(sessionId: sessionId)
         }
@@ -1145,7 +1145,7 @@ public extension SartoState {
     }
 
     /// Runs full-text session search (`sessions.search`) concurrently across every online host.
-    public func searchAllHosts(query: String) async -> [(hostId: String, hostName: String, isLocal: Bool, hits: [ConversationHitInfo], indexing: SearchIndexingInfo?)] {
+    func searchAllHosts(query: String) async -> [(hostId: String, hostName: String, isLocal: Bool, hits: [ConversationHitInfo], indexing: SearchIndexingInfo?)] {
         let targets: [(hostId: String, hostName: String, isLocal: Bool, session: SartoHostSession)] = unifiedHosts.compactMap { snap in
             guard snap.isOnline, let session = resolveHostSession(for: snap.id) else { return nil }
             return (snap.id, snap.name, snap.isLocal, session)
