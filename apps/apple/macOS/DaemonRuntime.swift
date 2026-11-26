@@ -62,6 +62,7 @@ enum DaemonRuntime {
         let temporary = root.appendingPathComponent(".install-\(UUID().uuidString)", isDirectory: true)
         do {
             try fm.copyItem(at: runtime.source, to: temporary)
+            clearQuarantine(in: temporary)
             try Data(runtime.fingerprint.utf8).write(to: temporary.appendingPathComponent(marker))
             // A folder without the marker is a copy that never finished.
             if fm.fileExists(atPath: destination.path) { try fm.removeItem(at: destination) }
@@ -71,6 +72,18 @@ enum DaemonRuntime {
             throw error
         }
         return destination
+    }
+
+    /// The copy keeps the quarantine flag of the app it came from, and outside the bundle Gatekeeper
+    /// would ask again for Node.js and each native module. Gatekeeper already checked these files as
+    /// part of the signed bundle the user opened, so the copy drops the flag.
+    private static func clearQuarantine(in folder: URL) {
+        let attribute = "com.apple.quarantine"
+        removexattr(folder.path, attribute, XATTR_NOFOLLOW)
+        guard let files = FileManager.default.enumerator(atPath: folder.path) else { return }
+        while let relative = files.nextObject() as? String {
+            removexattr(folder.appendingPathComponent(relative).path, attribute, XATTR_NOFOLLOW)
+        }
     }
 
     /// Releases whose daemon did not change share a fingerprint, and so the installed copy, yet each
