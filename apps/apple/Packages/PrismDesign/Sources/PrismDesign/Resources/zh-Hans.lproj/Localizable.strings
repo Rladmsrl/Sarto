@@ -667,22 +667,16 @@
 "settings.nav.appearance.sub" = "光学调色板、强调色、字号、对话与终端字体、动效与布局";
 "settings.nav.islandAndMenuBar" = "灵动岛、菜单栏与用量";
 "settings.nav.islandAndMenuBar.sub" = "灵动岛多屏位置、菜单栏图标、用量来源排序与隐私显示";
-"settings.nav.usageAndSync" = "用量与多机同步";
-"settings.nav.usageAndSync.sub" = "本地数据来源排序、隐私模式与多 Mac 用量同步";
 "settings.nav.notifications" = "通知";
 "settings.nav.notifications.sub" = "权限审批、回合结束、低额度提醒、提示音与 Dock 徽标";
 "settings.nav.agents" = "Agents 与引擎";
 "settings.nav.agents.sub" = "已安装引擎、登录与 API Key、更新、空闲回收与运行环境";
 "settings.nav.memory" = "记忆管理";
 "settings.nav.memory.sub" = "查看、编辑、提升与导入全局和项目级记忆";
-"settings.nav.archived" = "归档会话";
-"settings.nav.archived.sub" = "检索、恢复或彻底删除已归档的对话";
 "settings.nav.gitAndTerminal" = "Git 与终端";
 "settings.nav.gitAndTerminal.sub" = "后台拉取、Worktree 模板与复制文件、默认主机 Shell";
 "settings.nav.remoteAndCloud" = "云同步与多设备互联";
 "settings.nav.remoteAndCloud.sub" = "Sarto 账号、端到端全量配置同步、我的设备与本机远程共享";
-"settings.nav.advancedAndAbout" = "高级与关于";
-"settings.nav.advancedAndAbout.sub" = "更新、HTTP 代理、详细日志、诊断包与 Daemon 健康状态";
 "settings.nav.advanced" = "高级与服务";
 "settings.nav.advanced.sub" = "本地后台服务控制与健康状态、网络代理、详细日志与数据管理";
 "settings.nav.updatesAndAbout" = "更新与关于";
@@ -736,8 +730,6 @@
 "settings.general.defaultAgentAsk" = "记住上次使用";
 "settings.general.restore" = "启动时恢复上次会话";
 "settings.general.restoreSub" = "连接后自动回到上次打开的对话";
-"settings.general.confirmQuit" = "运行中退出前确认";
-"settings.general.confirmQuitSub" = "存在运行中回合或待审批请求时弹出确认框";
 "settings.general.sessionTitles" = "自动生成会话标题";
 "settings.general.sessionTitlesSub" = "由主机在后台自动为新对话总结标题";
 "settings.general.lightModel" = "轻模型引擎";
@@ -829,6 +821,7 @@
 "settings.usage.openCloudSync" = "前往设置";
 "settings.usage.syncScope" = "统计范围";
 "settings.usage.thisMac" = "本机";
+"settings.usage.syncedDevices" = "已同步的 Mac（%d 台）";
 "usage.loading" = "正在读取用量…";
 "usage.loadingHint" = "来自这台 Mac 的 Sarto Daemon";
 "usage.daemonOffline" = "Sarto Daemon 未连接";
@@ -1059,6 +1052,7 @@
 "settings.advanced.clearAllBtn" = "清空全部";
 "settings.advanced.clearSessionsConfirmTitle" = "确定清空全部历史会话？";
 "settings.advanced.clearSessionsConfirmBody" = "此操作将永久删除本地 Sarto Daemon 中的所有会话记录且不可恢复。";
+"settings.advanced.clearSessionsConfirmRemoteBody" = "此操作将永久删除远程电脑 %@ 中的所有会话记录且不可恢复。";
 "settings.advanced.clearSessionsDone" = "已清空全部会话";
 "settings.advanced.about" = "关于与 Daemon 健康状态";
 "settings.advanced.aboutSub" = "客户端版本及本地 Sarto Daemon 子进程实时运行状态";

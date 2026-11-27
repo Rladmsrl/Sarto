@@ -123,7 +123,6 @@ public final class SartoState {
         static let defaultAgentID = "dev.sarto.pref.defaultAgentID"
         static let restoreLastSession = "dev.sarto.pref.restoreLastSession"
         static let lastSelectedSessionID = "dev.sarto.pref.lastSelectedSessionID"
-        static let confirmQuitWhileRunning = "dev.sarto.pref.confirmQuitWhileRunning"
         static let textSize = "dev.sarto.pref.textSize"
         static let uiFontFamily = "dev.sarto.pref.uiFontFamily"
         static let proseFontFamily = "dev.sarto.pref.proseFontFamily"
@@ -216,12 +215,6 @@ public final class SartoState {
         didSet {
             UserDefaults.standard.set(restoreLastSession, forKey: PrefKey.restoreLastSession)
             markUiPrefMutated("restoreLastSession")
-        }
-    }
-    public var confirmQuitWhileRunning: Bool = true {
-        didSet {
-            UserDefaults.standard.set(confirmQuitWhileRunning, forKey: PrefKey.confirmQuitWhileRunning)
-            markUiPrefMutated("confirmQuitWhileRunning")
         }
     }
     public var textSize: PrismTextSize = .standard {
@@ -731,9 +724,6 @@ public final class SartoState {
         if ud.object(forKey: PrefKey.restoreLastSession) != nil {
             self.restoreLastSession = ud.bool(forKey: PrefKey.restoreLastSession)
         }
-        if ud.object(forKey: PrefKey.confirmQuitWhileRunning) != nil {
-            self.confirmQuitWhileRunning = ud.bool(forKey: PrefKey.confirmQuitWhileRunning)
-        }
         if let raw = ud.string(forKey: PrefKey.textSize), let ts = PrismTextSize(rawValue: raw) {
             self.textSize = ts
         }
@@ -771,7 +761,7 @@ public final class SartoState {
                 let seedKeys = [
                     "language", "darkPalette", "lightPalette", "colorMode", "palette",
                     "accentMode", "motionTier", "sendKeyMode", "defaultAgentID",
-                    "restoreLastSession", "confirmQuitWhileRunning", "textSize", "threadWideWidth",
+                    "restoreLastSession", "textSize", "threadWideWidth",
                     "uiFontFamily", "proseFontFamily", "codeFontFamily", "terminalFontSize",
                     "terminalFontFamily", "notifications", "subtleReminders", "islandMotion",
                     "runningRailEnabled", "browserAllowedOrigins",
@@ -6840,7 +6830,6 @@ public final class SartoState {
             "sendKeyMode": .string(sendKeyMode.rawValue),
             "defaultAgentID": defaultAgentID.map(JSONValue.string) ?? .null,
             "restoreLastSession": .bool(restoreLastSession),
-            "confirmQuitWhileRunning": .bool(confirmQuitWhileRunning),
             "textSize": .string(textSize.rawValue),
             "threadWideWidth": .bool(wideWidth),
             "uiFontFamily": .string(uiFontFamily),
@@ -6990,11 +6979,6 @@ public final class SartoState {
                let b = e.value.boolValue {
                 if restoreLastSession != b { restoreLastSession = b }
                 recordAdopted("restoreLastSession", e)
-            }
-            if let e = status.uiPrefs["confirmQuitWhileRunning"], shouldAdopt("confirmQuitWhileRunning", e),
-               let b = e.value.boolValue {
-                if confirmQuitWhileRunning != b { confirmQuitWhileRunning = b }
-                recordAdopted("confirmQuitWhileRunning", e)
             }
             if let e = status.uiPrefs["textSize"], shouldAdopt("textSize", e),
                let s = e.value.stringValue, let ts = PrismTextSize(rawValue: s) {

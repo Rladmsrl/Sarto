@@ -120,8 +120,13 @@ struct AgentsSettingsSectionView: View {
                     && agent.signIn == "unknown"
             }
             guard !pending.isEmpty else { return }
-            for agent in pending {
-                try? await host.refreshAgentAccount(agentId: agent.id, force: false)
+            await withTaskGroup(of: Void.self) { group in
+                for agent in pending {
+                    let agentId = agent.id
+                    group.addTask {
+                        try? await host.refreshAgentAccount(agentId: agentId, force: false)
+                    }
+                }
             }
             await state.refreshAgentsFromHost()
         }
@@ -995,11 +1000,6 @@ struct MemorySettingsSectionView: View {
         .sheet(isPresented: $showImportSheet) {
             memoryImportSheet
         }
-        .task(id: state.connectionMode) {
-            if state.connectionMode.isLive {
-                await store.loadMemorySection(state: state)
-            }
-        }
     }
 
     private func scopeChip(title: String, active: Bool, action: @escaping () -> Void) -> some View {
@@ -1386,25 +1386,45 @@ struct GitTerminalSettingsSectionView: View {
             }
         }
         .onAppear {
-            if selectedProjectPath.isEmpty, let first = state.projects.first?.path {
-                selectedProjectPath = first
-            }
+            syncSelectedProject(from: state.projects.map(\.path), forceReload: false)
         }
         .onChange(of: state.projects) { _, nextProjects in
-            if selectedProjectPath.isEmpty, let first = nextProjects.first?.path {
-                selectedProjectPath = first
-            }
+            syncSelectedProject(from: nextProjects.map(\.path), forceReload: false)
+        }
+        .onChange(of: state.activeHostID) { _, _ in
+            syncSelectedProject(from: state.projects.map(\.path), forceReload: true)
         }
         .onChange(of: selectedProjectPath) { _, next in
-            guard !next.isEmpty else { return }
-            Task {
-                await store.loadProjectWorktreeSettings(projectPath: next, state: state)
-                if let wt = store.worktreeSettingsByProject[next] {
-                    wtBranchTemplate = wt.branchTemplate
-                    wtCopyPaths = wt.copy.joined(separator: ", ")
-                    wtSetupCmd = wt.setup ?? ""
-                    wtWaitForSetup = wt.waitForSetup
-                }
+            loadSelectedProjectWorktree(next)
+        }
+    }
+
+    private func syncSelectedProject(from paths: [String], forceReload: Bool) {
+        if paths.isEmpty {
+            selectedProjectPath = ""
+            wtBranchTemplate = "sarto/{slug}"
+            wtCopyPaths = ""
+            wtSetupCmd = ""
+            wtWaitForSetup = true
+            return
+        }
+        if selectedProjectPath.isEmpty || !paths.contains(selectedProjectPath) {
+            selectedProjectPath = paths[0]
+        } else if forceReload {
+            loadSelectedProjectWorktree(selectedProjectPath)
+        }
+    }
+
+    private func loadSelectedProjectWorktree(_ path: String) {
+        guard !path.isEmpty else { return }
+        Task {
+            await store.loadProjectWorktreeSettings(projectPath: path, state: state)
+            guard selectedProjectPath == path else { return }
+            if let wt = store.worktreeSettingsByProject[path] {
+                wtBranchTemplate = wt.branchTemplate
+                wtCopyPaths = wt.copy.joined(separator: ", ")
+                wtSetupCmd = wt.setup ?? ""
+                wtWaitForSetup = wt.waitForSetup
             }
         }
     }

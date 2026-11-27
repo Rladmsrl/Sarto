@@ -667,22 +667,16 @@
 "settings.nav.appearance.sub" = "Optical palettes, accent tone, text size, prose/code/terminal fonts and motion";
 "settings.nav.islandAndMenuBar" = "Island, Menu Bar & Usage";
 "settings.nav.islandAndMenuBar.sub" = "Dynamic Island, display map, menu bar indicator, usage sources and privacy";
-"settings.nav.usageAndSync" = "Usage & Sync";
-"settings.nav.usageAndSync.sub" = "Local usage sources, privacy and multi-Mac sync";
 "settings.nav.notifications" = "Notifications";
 "settings.nav.notifications.sub" = "Approval alerts, completion notifications, low-quota alerts, sound and Dock badge";
 "settings.nav.agents" = "Agents & Harnesses";
 "settings.nav.agents.sub" = "Installed runtimes, sign-in, API keys, updates, idle release and environment";
 "settings.nav.memory" = "Memory";
 "settings.nav.memory.sub" = "Inspect, edit, promote and import global and project memories";
-"settings.nav.archived" = "Archived Sessions";
-"settings.nav.archived.sub" = "Search, restore or permanently delete archived conversations";
 "settings.nav.gitAndTerminal" = "Git & Terminal";
 "settings.nav.gitAndTerminal.sub" = "Background fetch, worktree templates and default host shell";
 "settings.nav.remoteAndCloud" = "Cloud Sync & Multi-Device";
 "settings.nav.remoteAndCloud.sub" = "Sarto Cloud account, E2EE workspace sync, my devices and local sharing permissions";
-"settings.nav.advancedAndAbout" = "Advanced & About";
-"settings.nav.advancedAndAbout.sub" = "Updates, HTTP proxy, verbose logs, diagnostics and daemon health";
 "settings.nav.advanced" = "Advanced & Service";
 "settings.nav.advanced.sub" = "Local background service, HTTP proxy, verbose logs and data management";
 "settings.nav.updatesAndAbout" = "Updates & About";
@@ -736,8 +730,6 @@
 "settings.general.defaultAgentAsk" = "Remember Last Used";
 "settings.general.restore" = "Restore Last Session";
 "settings.general.restoreSub" = "Reopen your last active conversation when connecting";
-"settings.general.confirmQuit" = "Confirm Quit While Running";
-"settings.general.confirmQuitSub" = "Ask before quitting when turns or approvals are active";
 "settings.general.sessionTitles" = "Auto-Generate Session Titles";
 "settings.general.sessionTitlesSub" = "Let the host summarize and title new sessions automatically";
 "settings.general.lightModel" = "Light Model Agent";
@@ -829,6 +821,7 @@
 "settings.usage.openCloudSync" = "Set Up";
 "settings.usage.syncScope" = "Aggregation Scope";
 "settings.usage.thisMac" = "This Mac";
+"settings.usage.syncedDevices" = "Synced Macs (%d)";
 "usage.loading" = "Reading usage…";
 "usage.loadingHint" = "From the Sarto Daemon on this Mac";
 "usage.daemonOffline" = "Sarto Daemon not connected";
@@ -1059,6 +1052,7 @@
 "settings.advanced.clearAllBtn" = "Clear All";
 "settings.advanced.clearSessionsConfirmTitle" = "Clear All Stored Sessions?";
 "settings.advanced.clearSessionsConfirmBody" = "This permanently removes all conversation history from the local Sarto Daemon.";
+"settings.advanced.clearSessionsConfirmRemoteBody" = "This permanently removes all conversation history from remote computer %@. This cannot be undone.";
 "settings.advanced.clearSessionsDone" = "All sessions cleared";
 "settings.advanced.about" = "About & Daemon Health";
 "settings.advanced.aboutSub" = "Client version and live Sarto Daemon process metrics";

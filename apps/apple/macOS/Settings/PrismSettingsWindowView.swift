@@ -13,13 +13,21 @@ struct PrismSettingsWindowView: View {
     @State private var store = PrismSettingsStore()
     @Environment(ProblemReportCoordinator.self) private var problemReport
 
+    private struct PreloadKey: Equatable {
+        let section: PrismSettingsSection
+        let hostID: String
+        let isLive: Bool
+    }
+
+    private var preloadKey: PreloadKey {
+        PreloadKey(section: router.selectedSection, hostID: state.activeHostID, isLive: state.connectionMode.isLive)
+    }
+
     private var tokens: PrismTokens { state.tokens }
     private var l10n: PrismL10n { state.l10n }
 
     private var searchMatches: [PrismSettingsSearchItem] {
-        let q = router.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !q.isEmpty else { return [] }
-        return PrismSettingsSearchCatalog.all.filter { $0.matches(query: q, l10n: l10n) }
+        PrismSettingsSearchCatalog.matching(query: router.searchQuery, l10n: l10n)
     }
 
     var body: some View {
@@ -40,30 +48,18 @@ struct PrismSettingsWindowView: View {
         .onAppear {
             island.launchAtLogin.refresh()
             deliverPendingNotice()
-            Task {
-                await store.loadDaemonAndRemote(state: state, daemon: daemon)
-                if state.connectionMode.isLive {
-                    await store.loadAgentsSection(state: state, daemon: daemon)
-                }
-                await preload(section: router.selectedSection)
+            if store.daemonStatus == nil {
+                Task { await store.loadSidebarStatus(daemon: daemon) }
             }
         }
-        .onChange(of: router.selectedSection) { _, next in
+        .task(id: preloadKey) {
+            await preload(section: preloadKey.section)
+        }
+        .onChange(of: router.selectedSection) { _, _ in
             store.clearBanners()
-            Task { await preload(section: next) }
         }
         .onChange(of: router.pendingNotice) { _, _ in
             deliverPendingNotice()
-        }
-        .onChange(of: state.connectionMode) { _, mode in
-            if mode.isLive {
-                Task { await preload(section: router.selectedSection) }
-            }
-        }
-        .onChange(of: state.activeHostID) { _, _ in
-            if state.connectionMode.isLive {
-                Task { await preload(section: router.selectedSection) }
-            }
         }
         .onChange(of: state.memoryChangeRevision) { _, _ in
             if router.selectedSection == .memory, state.connectionMode.isLive {
@@ -125,7 +121,7 @@ struct PrismSettingsWindowView: View {
             if section == .general, let host = state.activeHostSession {
                 if let lights = try? await host.listLightAgents() {
                     store.lightAgents = lights
-                    for item in lights {
+                    for item in lights where !PrismSettingsStore.retiredAgentIDs.contains(item.agentId) {
                         state.ensureAgentOptionsLoaded(for: item.agentId)
                     }
                 }
@@ -136,8 +132,10 @@ struct PrismSettingsWindowView: View {
             await store.loadExtensionsSection(state: state, daemon: daemon)
         case .memory:
             await store.loadMemorySection(state: state)
-        case .remoteAndCloud, .advanced, .updatesAndAbout:
+        case .remoteAndCloud, .advanced:
             await store.loadDaemonAndRemote(state: state, daemon: daemon)
+        case .updatesAndAbout:
+            await store.loadUpdatesAccountStatus(state: state, daemon: daemon)
         case .appearance, .notifications:
             break
         }
@@ -359,17 +357,18 @@ struct PrismSettingsWindowView: View {
     }
 
     private var searchResultsView: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        let matches = searchMatches
+        return VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(l10n.tr("settings.search.resultsTitle"))
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(tokens.foreground)
-                Text(l10n.tr("settings.search.resultsCount", searchMatches.count))
+                Text(l10n.tr("settings.search.resultsCount", matches.count))
                     .font(.system(size: 12))
                     .foregroundStyle(tokens.mutedForeground)
             }
 
-            if searchMatches.isEmpty {
+            if matches.isEmpty {
                 VStack(spacing: 8) {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 24))
@@ -383,7 +382,7 @@ struct PrismSettingsWindowView: View {
                 .prismSurface(elevation: .flat, cornerRadius: tokens.rMD)
             } else {
                 SettingsCardGroup {
-                    ForEach(Array(searchMatches.enumerated()), id: \.element.id) { idx, item in
+                    ForEach(Array(matches.enumerated()), id: \.element.id) { idx, item in
                         if idx > 0 { SettingsRowDivider() }
                         Button {
                             router.jumpTo(section: item.section, rowID: item.rowID)
@@ -446,7 +445,6 @@ struct PrismSettingsWindowView: View {
             SettingsPillButton(l10n.tr("settings.remoteScope.switchLocal"), icon: "laptopcomputer") {
                 Task {
                     _ = await state.switchActiveHost(to: SartoState.localHostID)
-                    await preload(section: router.selectedSection)
                 }
             }
         }
@@ -483,7 +481,7 @@ struct PrismSettingsWindowView: View {
         case .advanced:
             AdvancedServiceSettingsSectionView(state: state, daemon: daemon, store: store, router: router)
         case .updatesAndAbout:
-            UpdatesAboutSettingsSectionView(state: state, daemon: daemon, store: store, router: router)
+            UpdatesAboutSettingsSectionView(state: state, daemon: daemon, router: router)
         }
     }
 }

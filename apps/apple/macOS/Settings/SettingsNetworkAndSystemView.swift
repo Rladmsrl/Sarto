@@ -104,19 +104,6 @@ struct RemoteCloudSettingsSectionView: View {
         }
         .onAppear {
             state.beginWatchingHostLoads()
-            Task {
-                if let acc = try? await daemon.fetchAccountStatus() {
-                    state.applyAccountStatus(acc)
-                    if acc.account.isSignedIn {
-                        _ = try? await daemon.listAccountDevices()
-                    }
-                }
-                await state.refreshRemoteClaudeActiveRuns()
-                await state.refreshRemoteClaudeHosts()
-                for host in state.allUnifiedHosts where !host.isLocal && host.isOnline {
-                    await state.refreshHostAppUpdateStatus(hostId: host.id)
-                }
-            }
         }
         .onDisappear {
             state.endWatchingHostLoads()
@@ -124,13 +111,27 @@ struct RemoteCloudSettingsSectionView: View {
         .onChange(of: state.cloudAccountStatus.account.state) { _, newState in
             if newState == "signed-in" {
                 Task {
-                    _ = try? await daemon.listAccountDevices()
-                    _ = try? await daemon.fetchSyncStatus()
+                    async let devicesTask = try? daemon.listAccountDevices()
+                    async let syncTask = try? daemon.fetchSyncStatus()
+                    _ = await (devicesTask, syncTask)
                 }
             }
         }
         .task {
-            await store.refreshLiveDevicePresence(daemon: daemon)
+            let state = self.state
+            let onlineRemoteHostIDs = state.allUnifiedHosts
+                .filter { !$0.isLocal && $0.isOnline }
+                .map(\.id)
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask { await state.refreshRemoteClaudeActiveRuns() }
+                group.addTask { await state.refreshRemoteClaudeHosts() }
+                for hostID in onlineRemoteHostIDs {
+                    group.addTask { await state.refreshHostAppUpdateStatus(hostId: hostID) }
+                }
+            }
+
+            // PrismSettingsWindowView's preload already fetched the initial paired-device snapshot;
+            // wait one interval before polling so entering this section avoids duplicate RPCs.
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(3))
                 guard !Task.isCancelled else { break }
@@ -767,23 +768,31 @@ struct RemoteCloudSettingsSectionView: View {
         return daemon.accountDevices.filter { isMobileCloudDevice($0) }
     }
 
-    private var myDevicesSectionBadge: String {
-        let computers = myComputerEntries.count
-        let mobile = myMobileDevices.count
-        if accountState.isSignedIn && mobile > 0 {
-            return l10n.tr("settings.myDevices.badgeComputersAndMobile", computers, mobile)
+    private func myDevicesSectionBadge(computerCount: Int, mobileCount: Int) -> String {
+        if accountState.isSignedIn && mobileCount > 0 {
+            return l10n.tr("settings.myDevices.badgeComputersAndMobile", computerCount, mobileCount)
         }
-        return l10n.tr("settings.myDevices.badgeComputersOnly", computers)
+        return l10n.tr("settings.myDevices.badgeComputersOnly", computerCount)
     }
 
     @ViewBuilder
     private var myDevicesSection: some View {
         let computers = myComputerEntries
         let mobiles = myMobileDevices
+        let mobilePairedCandidates = store.pairedDevices.filter { isMobilePairedDevice($0) }
+        let remoteClaudeSelectableByHostID: [String: Bool] = {
+            var map: [String: Bool] = [:]
+            for item in state.remoteClaudeHosts where item.status.enabled {
+                if map[item.hostId] == nil {
+                    map[item.hostId] = item.status.isSelectable
+                }
+            }
+            return map
+        }()
 
         SettingsGroupSection(
             l10n.tr("settings.myDevices.title"),
-            trailingBadge: myDevicesSectionBadge
+            trailingBadge: myDevicesSectionBadge(computerCount: computers.count, mobileCount: mobiles.count)
         ) {
             VStack(alignment: .leading, spacing: 12) {
                 Text(l10n.tr("settings.myDevices.sub"))
@@ -797,7 +806,8 @@ struct RemoteCloudSettingsSectionView: View {
 
                     VStack(spacing: 6) {
                         ForEach(computers) { entry in
-                            myComputerRow(entry)
+                            let remoteClaudeSelectable = entry.host.flatMap { remoteClaudeSelectableByHostID[$0.id] }
+                            myComputerRow(entry, remoteClaudeSelectable: remoteClaudeSelectable)
                         }
                     }
                 }
@@ -828,7 +838,11 @@ struct RemoteCloudSettingsSectionView: View {
                         } else {
                             VStack(spacing: 6) {
                                 ForEach(mobiles) { dev in
-                                    myMobileRow(dev)
+                                    myMobileRow(
+                                        dev,
+                                        pairedCandidates: mobilePairedCandidates,
+                                        mobileCount: mobiles.count
+                                    )
                                 }
                             }
                         }
@@ -872,15 +886,30 @@ struct RemoteCloudSettingsSectionView: View {
         }
     }
 
+    @MainActor
+    private static let abbreviatedRelativeFormatter: RelativeDateTimeFormatter = {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return formatter
+    }()
+
+    @MainActor
+    private static let fullRelativeFormatter: RelativeDateTimeFormatter = {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        return formatter
+    }()
+
     private func cloudDeviceSubtitle(_ dev: CloudDeviceInfo, overrideLastUsedMs: Double? = nil, hideTimestamp: Bool = false) -> String {
         let base = [dev.os, dev.arch].filter { !$0.isEmpty }.joined(separator: " · ")
         guard !hideTimestamp else { return base }
         let ts = max(dev.lastUsedAt, overrideLastUsedMs ?? 0)
         if ts > 0 {
             let date = Date(timeIntervalSince1970: ts / 1000.0)
-            let formatter = RelativeDateTimeFormatter()
-            formatter.locale = locale
-            formatter.unitsStyle = .abbreviated
+            let formatter = Self.abbreviatedRelativeFormatter
+            if formatter.locale != locale {
+                formatter.locale = locale
+            }
             let rel = formatter.localizedString(for: date, relativeTo: Date())
             return base.isEmpty ? rel : "\(base) · \(rel)"
         }
@@ -897,14 +926,18 @@ struct RemoteCloudSettingsSectionView: View {
         guard let ts = syncStatus.lastSyncedAt, ts > 0 else {
             return l10n.tr("settings.sync.notYet")
         }
-        let formatter = RelativeDateTimeFormatter()
-        formatter.locale = locale
-        formatter.unitsStyle = .full
         let date = Date(timeIntervalSince1970: ts / 1000.0)
         // Seconds-old syncs read as "just now" rather than a count of seconds.
-        let rel = Date().timeIntervalSince(date) < 60
-            ? l10n.tr("settings.sync.justNow")
-            : formatter.localizedString(for: date, relativeTo: Date())
+        let rel: String
+        if Date().timeIntervalSince(date) < 60 {
+            rel = l10n.tr("settings.sync.justNow")
+        } else {
+            let formatter = Self.fullRelativeFormatter
+            if formatter.locale != locale {
+                formatter.locale = locale
+            }
+            rel = formatter.localizedString(for: date, relativeTo: Date())
+        }
         return l10n.tr("settings.sync.lastSynced", rel)
     }
 
@@ -1194,7 +1227,7 @@ struct RemoteCloudSettingsSectionView: View {
     }
 
     @ViewBuilder
-    private func myComputerRow(_ entry: MyComputerEntry) -> some View {
+    private func myComputerRow(_ entry: MyComputerEntry, remoteClaudeSelectable: Bool?) -> some View {
         let host = entry.host
         let isVisible = host.map { state.isHostVisible($0.id) } ?? true
         let isOnline = host?.isOnline ?? false
@@ -1292,12 +1325,10 @@ struct RemoteCloudSettingsSectionView: View {
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 1)
                                 .background(Capsule().fill(tokens.primarySoft))
-                        } else if let host,
-                                  let remoteClaude = state.remoteClaudeHosts.first(where: { $0.hostId == host.id }),
-                                  remoteClaude.status.enabled {
+                        } else if let isSelectable = remoteClaudeSelectable {
                             HStack(spacing: 3) {
                                 Circle()
-                                    .fill(remoteClaude.status.isSelectable ? tokens.prismCobalt : tokens.warning)
+                                    .fill(isSelectable ? tokens.prismCobalt : tokens.warning)
                                     .frame(width: 5, height: 5)
                                 Text(l10n.tr("settings.remote.claudeDeviceBadge"))
                                     .font(.system(size: 9.5, weight: .semibold))
@@ -1387,8 +1418,11 @@ struct RemoteCloudSettingsSectionView: View {
             || platform.contains("ios") || platform.contains("ipad") || platform.contains("iphone")
     }
 
-    private func matchedPairedMobile(for dev: CloudDeviceInfo) -> PairedDeviceSummary? {
-        let candidates = store.pairedDevices.filter { isMobilePairedDevice($0) }
+    private func matchedPairedMobile(
+        for dev: CloudDeviceInfo,
+        candidates: [PairedDeviceSummary],
+        mobileCount: Int
+    ) -> PairedDeviceSummary? {
         if let exact = candidates.first(where: { $0.connected && $0.name.caseInsensitiveCompare(dev.name) == .orderedSame }) {
             return exact
         }
@@ -1400,7 +1434,7 @@ struct RemoteCloudSettingsSectionView: View {
         }) {
             return fuzzyConnected
         }
-        if candidates.count == 1 && myMobileDevices.count == 1 {
+        if candidates.count == 1 && mobileCount == 1 {
             return candidates.first
         }
         return candidates.first(where: {
@@ -1409,8 +1443,12 @@ struct RemoteCloudSettingsSectionView: View {
     }
 
     @ViewBuilder
-    private func myMobileRow(_ dev: CloudDeviceInfo) -> some View {
-        let paired = matchedPairedMobile(for: dev)
+    private func myMobileRow(
+        _ dev: CloudDeviceInfo,
+        pairedCandidates: [PairedDeviceSummary],
+        mobileCount: Int
+    ) -> some View {
+        let paired = matchedPairedMobile(for: dev, candidates: pairedCandidates, mobileCount: mobileCount)
         let isOnline = paired?.connected == true
         let dotColor: Color = isOnline ? tokens.success : tokens.placeholder.opacity(0.6)
         let meta = cloudDeviceSubtitle(dev, overrideLastUsedMs: paired?.lastConnectedAt, hideTimestamp: isOnline)
@@ -1757,9 +1795,13 @@ struct AdvancedServiceSettingsSectionView: View {
                                 Task {
                                     do {
                                         let until = try await daemon.setVerboseLogging(next)
-                                        store.hostSettings.verboseUntil = until
+                                        store.localHostSettings.verboseUntil = until
+                                        if !state.connectionMode.isRemote {
+                                            store.hostSettings.verboseUntil = until
+                                        }
                                         verboseEnabled = until != nil
                                     } catch {
+                                        verboseEnabled = !next
                                         store.showError(error.localizedDescription)
                                     }
                                 }
@@ -1803,6 +1845,7 @@ struct AdvancedServiceSettingsSectionView: View {
             syncFromStore()
         }
         .onChange(of: store.hostSettings) { _, _ in syncFromStore() }
+        .onChange(of: store.localHostSettings) { _, _ in syncFromStore() }
         .alert(l10n.tr("settings.advanced.clearSessionsConfirmTitle"), isPresented: $showClearConfirm) {
             Button(l10n.tr("thread.entry.cancel"), role: .cancel) {}
             Button(l10n.tr("settings.advanced.clearAllBtn"), role: .destructive) {
@@ -1816,7 +1859,11 @@ struct AdvancedServiceSettingsSectionView: View {
                 }
             }
         } message: {
-            Text(l10n.tr("settings.advanced.clearSessionsConfirmBody"))
+            Text(
+                state.connectionMode.isRemote
+                    ? l10n.tr("settings.advanced.clearSessionsConfirmRemoteBody", state.activeHostSnapshot.name)
+                    : l10n.tr("settings.advanced.clearSessionsConfirmBody")
+            )
         }
     }
 
@@ -1824,7 +1871,8 @@ struct AdvancedServiceSettingsSectionView: View {
         proxyMode = store.hostSettings.proxyMode
         proxyUrl = store.hostSettings.proxyUrl
         proxyNoProxy = store.hostSettings.proxyNoProxy
-        if let until = store.hostSettings.verboseUntil {
+        // Verbose logging controls this Mac's local daemon even when viewing a remote host.
+        if let until = store.localHostSettings.verboseUntil {
             verboseEnabled = until > Date().timeIntervalSince1970 * 1000
         } else {
             verboseEnabled = false
@@ -2004,7 +2052,6 @@ struct AdvancedServiceSettingsSectionView: View {
 struct UpdatesAboutSettingsSectionView: View {
     @Bindable var state: SartoState
     @Bindable var daemon: LocalDaemonManager
-    @Bindable var store: PrismSettingsStore
     @Bindable var router: PrismSettingsRouter
 
     @State private var cloudReports: CloudReportListInfo? = nil
@@ -2396,6 +2443,13 @@ struct UpdatesAboutSettingsSectionView: View {
         }
     }
 
+    @MainActor
+    private static let reportDateFormatter: DateFormatter = {
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyy-MM-dd"
+        return fmt
+    }()
+
     private func formatReportRelativeTime(_ timestampMs: Double) -> String? {
         guard timestampMs > 0 else { return nil }
         let seconds = max(0, Int(Date().timeIntervalSince1970 - timestampMs / 1000))
@@ -2407,9 +2461,7 @@ struct UpdatesAboutSettingsSectionView: View {
         let days = hours / 24
         if days < 14 { return l10n.tr("settings.reports.daysAgo", days) }
         let date = Date(timeIntervalSince1970: timestampMs / 1000)
-        let fmt = DateFormatter()
-        fmt.dateFormat = "yyyy-MM-dd"
-        return fmt.string(from: date)
+        return Self.reportDateFormatter.string(from: date)
     }
 
     private func refreshCloudReports() async {

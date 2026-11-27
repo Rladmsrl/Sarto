@@ -349,6 +349,7 @@ public struct CloudReportListInfo: Codable, Sendable, Equatable {
 // MARK: - Host Settings Snapshot (src/shared/remote/host-admin.ts, src/shared/settings.ts, src/shared/idle-release.ts)
 
 public struct HostSettingsSnapshot: Sendable, Equatable {
+    public var defaultAgent: String?
     public var sessionTitles: Bool
     public var promptSuggestions: Bool
     /// `"small"` | `"session"` | `"pinned"`
@@ -384,6 +385,7 @@ public struct HostSettingsSnapshot: Sendable, Equatable {
     public var marketplaceMcp: [MarketServerInfo]
 
     public init(
+        defaultAgent: String? = nil,
         sessionTitles: Bool = true,
         promptSuggestions: Bool = true,
         lightModelMode: String = "small",
@@ -414,6 +416,7 @@ public struct HostSettingsSnapshot: Sendable, Equatable {
         mcpSartoOff: [String] = [],
         marketplaceMcp: [MarketServerInfo] = []
     ) {
+        self.defaultAgent = defaultAgent
         self.sessionTitles = sessionTitles
         self.promptSuggestions = promptSuggestions
         self.lightModelMode = lightModelMode
@@ -450,6 +453,7 @@ public struct HostSettingsSnapshot: Sendable, Equatable {
         var s = HostSettingsSnapshot()
 
         if let gen = root["general"]?.objectValue {
+            s.defaultAgent = gen["defaultAgent"]?.stringValue
             if let v = gen["sessionTitles"]?.boolValue { s.sessionTitles = v }
             if let v = gen["promptSuggestions"]?.boolValue { s.promptSuggestions = v }
             if let lm = gen["lightModel"]?.objectValue {

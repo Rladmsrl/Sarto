@@ -2,7 +2,7 @@ import PrismDesign
 import SartoUpdate
 import SwiftUI
 
-/// Settings › Advanced & About › Updates: where the updater stands, what it found, and when it
+/// Settings › Updates & About › Updates: where the updater stands, what it found, and when it
 /// downloads and installs.
 struct UpdatesSettingsGroup: View {
     @Bindable var updater: SartoUpdater
@@ -107,9 +107,7 @@ struct UpdatesSettingsGroup: View {
         case .idle(let checkedAt):
             if updater.daemonOutdated { return l10n.tr("settings.updates.daemonOutdated") }
             guard let checkedAt else { return l10n.tr("settings.updates.notChecked") }
-            let formatter = RelativeDateTimeFormatter()
-            formatter.locale = l10n.language.resolvedLocale
-            return l10n.tr("settings.updates.checkedAt", formatter.localizedString(for: checkedAt, relativeTo: Date()))
+            return l10n.tr("settings.updates.checkedAt", Self.relativeTimeString(for: checkedAt, locale: l10n.language.resolvedLocale))
         case .checking:
             return nil
         case .available:
@@ -217,6 +215,15 @@ struct UpdatesSettingsGroup: View {
     }
 
     // MARK: Choices
+
+    private static let relativeDateFormatter = RelativeDateTimeFormatter()
+
+    private static func relativeTimeString(for date: Date, locale: Locale) -> String {
+        if relativeDateFormatter.locale != locale {
+            relativeDateFormatter.locale = locale
+        }
+        return relativeDateFormatter.localizedString(for: date, relativeTo: Date())
+    }
 
     private var choices: [UpdateChoice] {
         updater.effectiveMode == .install ? UpdateChoice.allCases : [.notify, .off]

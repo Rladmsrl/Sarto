@@ -994,10 +994,24 @@ struct ExtensionsSettingsSectionView: View {
     @ViewBuilder
     private var agentPluginsBody: some View {
         let pluginsData = store.marketPlugins
-        let installed = (pluginsData?.installed ?? []).filter { item in
+        let installedAll = pluginsData?.installed ?? []
+        let installed = installedAll.filter { item in
             selectedPluginAgentFilter == "all" || item.agentId == selectedPluginAgentFilter
         }
-        let catalog = filteredPluginCatalog(pluginsData?.catalog ?? [])
+        let installedKeys = Set(installedAll.map { "\($0.agentId)::\($0.pluginId)" })
+        let agentByHarness: [String: AgentStatusInfo] = {
+            var map: [String: AgentStatusInfo] = [:]
+            for agent in pluginCapableAgents {
+                if let harnessId = agent.harnessId, map[harnessId] == nil {
+                    map[harnessId] = agent
+                }
+                if map[agent.id] == nil {
+                    map[agent.id] = agent
+                }
+            }
+            return map
+        }()
+        let catalog = filteredPluginCatalog(store.sortedPluginCatalog)
         let marketplaces = pluginsData?.marketplaces ?? []
 
         if let errors = pluginsData?.errors, !errors.isEmpty {
@@ -1076,7 +1090,7 @@ struct ExtensionsSettingsSectionView: View {
                 } else {
                     ForEach(catalog.prefix(50)) { item in
                         SettingsRowDivider()
-                        catalogPluginRow(item, installed: pluginsData?.installed ?? [])
+                        catalogPluginRow(item, installedKeys: installedKeys, agentByHarness: agentByHarness)
                     }
                     if catalog.count > 50 {
                         SettingsRowDivider()
@@ -1213,14 +1227,17 @@ struct ExtensionsSettingsSectionView: View {
         .buttonStyle(.plain)
     }
 
-    private func filteredPluginCatalog(_ items: [CatalogPluginInfo]) -> [CatalogPluginInfo] {
+    private func filteredPluginCatalog(_ sortedItems: [CatalogPluginInfo]) -> [CatalogPluginInfo] {
         let q = pluginSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let selectedHarness: String? = {
             guard selectedPluginAgentFilter != "all" else { return nil }
             return pluginCapableAgents.first(where: { $0.id == selectedPluginAgentFilter })?.harnessId
                 ?? selectedPluginAgentFilter
         }()
-        let filtered = items.filter { item in
+        if selectedHarness == nil && q.isEmpty {
+            return sortedItems
+        }
+        return sortedItems.filter { item in
             if let selectedHarness, item.harness != selectedHarness {
                 return false
             }
@@ -1229,14 +1246,6 @@ struct ExtensionsSettingsSectionView: View {
                 || item.name.lowercased().contains(q)
                 || item.description.lowercased().contains(q)
                 || item.marketplace.lowercased().contains(q)
-        }
-        return filtered.sorted { lhs, rhs in
-            if lhs.featured != rhs.featured { return lhs.featured }
-            if lhs.official != rhs.official { return lhs.official }
-            let li = lhs.installs ?? -1
-            let ri = rhs.installs ?? -1
-            if li != ri { return li > ri }
-            return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
         }
     }
 
@@ -1399,10 +1408,14 @@ struct ExtensionsSettingsSectionView: View {
         }
     }
 
-    private func catalogPluginRow(_ item: CatalogPluginInfo, installed: [InstalledPluginInfo]) -> some View {
-        let targetAgent = pluginCapableAgents.first(where: { $0.harnessId == item.harness || $0.id == item.harness })
+    private func catalogPluginRow(
+        _ item: CatalogPluginInfo,
+        installedKeys: Set<String>,
+        agentByHarness: [String: AgentStatusInfo]
+    ) -> some View {
+        let targetAgent = agentByHarness[item.harness]
         let targetAgentId = targetAgent?.id ?? item.harness
-        let isInstalled = installed.contains(where: { $0.pluginId == item.id && $0.agentId == targetAgentId })
+        let isInstalled = installedKeys.contains("\(targetAgentId)::\(item.id)")
         let busyKey = "plugin:\(targetAgentId)::\(item.id)"
         let busy = store.busyExtensionIDs.contains(busyKey)
 

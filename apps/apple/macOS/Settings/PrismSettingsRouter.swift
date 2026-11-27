@@ -110,10 +110,9 @@ struct PrismSettingsSearchItem: Identifiable, Hashable {
     let subtitleKey: String?
     let keywords: String
 
-    func matches(query: String, l10n: PrismL10n) -> Bool {
-        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !needle.isEmpty else { return true }
-        let haystack = [
+    /// Builds a lowercased search haystack for one localization.
+    func searchHaystack(l10n: PrismL10n) -> String {
+        [
             section.title(l10n),
             l10n.tr(titleKey),
             subtitleKey.map { l10n.tr($0) } ?? "",
@@ -121,13 +120,41 @@ struct PrismSettingsSearchItem: Identifiable, Hashable {
         ]
         .joined(separator: " ")
         .lowercased()
-        return needle.split(whereSeparator: \.isWhitespace).allSatisfy { token in
-            haystack.contains(token)
-        }
     }
 }
 
 enum PrismSettingsSearchCatalog {
+    /// Cached lowercased search haystacks keyed by `PrismL10n.resolvedCode` so typing never
+    /// recomputes localization lookups and string allocations for every row on every keystroke.
+    @MainActor private static var haystacksByLocale: [String: [String: String]] = [:]
+
+    @MainActor
+    static func matching(query: String, l10n: PrismL10n) -> [PrismSettingsSearchItem] {
+        let tokens = query
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .split(whereSeparator: \.isWhitespace)
+        guard !tokens.isEmpty else { return [] }
+
+        let localeKey = l10n.resolvedCode
+        let haystacks: [String: String]
+        if let cached = haystacksByLocale[localeKey] {
+            haystacks = cached
+        } else {
+            var built: [String: String] = Dictionary(minimumCapacity: all.count)
+            for item in all {
+                built[item.id] = item.searchHaystack(l10n: l10n)
+            }
+            haystacksByLocale[localeKey] = built
+            haystacks = built
+        }
+
+        return all.filter { item in
+            guard let haystack = haystacks[item.id] else { return false }
+            return tokens.allSatisfy { haystack.contains($0) }
+        }
+    }
+
     static let all: [PrismSettingsSearchItem] = [
         // General
         .init(id: "gen.lang", section: .general, rowID: "general.language", titleKey: "settings.general.language", subtitleKey: "settings.general.languageSub", keywords: "language locale english chinese 语言 中文 英文"),
@@ -176,7 +203,7 @@ enum PrismSettingsSearchCatalog {
         // Agents & Harnesses
         .init(id: "agt.list", section: .agents, rowID: "agents.list", titleKey: "settings.agents.list", subtitleKey: "settings.agents.listSub", keywords: "claude codex opencode cline antigravity api key login logout binary auto compact prompt cache 登录 密钥 二进制 自动压缩 缓存"),
         .init(id: "agt.idle", section: .agents, rowID: "agents.idleRelease", titleKey: "settings.agents.idleRelease", subtitleKey: "settings.agents.idleReleaseSub", keywords: "idle release memory process timeout claude 空闲 释放 回收 内存"),
-        .init(id: "agt.env", section: .agents, rowID: "agents.environment", titleKey: "settings.agents.environment", subtitleKey: "settings.agents.environmentSub", keywords: "node npm shell path environment check updates reload 环境 检测 更新 重载"),
+        .init(id: "agt.env", section: .agents, rowID: "agents.environment", titleKey: "settings.agents.environment", subtitleKey: "settings.agents.environmentSub", keywords: "node npm shell path environment reload 环境 检测 重载"),
 
         // MCP & Agent Plugins
         .init(id: "ext.builtin", section: .extensions, rowID: "extensions.builtinMcp", titleKey: "settings.ext.builtinMcp", subtitleKey: "settings.ext.builtinMcpSub", keywords: "sarto mcp server builtin tools bridge 内置 桥接 工具"),
@@ -412,6 +439,9 @@ final class PrismSettingsStore {
     var marketKeyState: [String: [String]] = [:]
     var marketConnections: [String: MarketConnectionInfo] = [:]
     var marketPlugins: MarketPluginsInfo? = nil
+    /// Pre-sorted plugin catalog kept in sync with `marketPlugins` so filtering and unrelated UI updates
+    /// never re-sort the full catalog on `@MainActor`.
+    private(set) var sortedPluginCatalog: [CatalogPluginInfo] = []
     var pluginDetailsByKey: [String: PluginDetailsInfo] = [:]
     var activeOAuthServerID: String? = nil
     var activeOAuthStart: ConnectStartInfo? = nil
@@ -481,57 +511,74 @@ final class PrismSettingsStore {
 
     func loadHostSettings(state: SartoState, daemon: LocalDaemonManager) async {
         if state.connectionMode.isRemote, let host = state.activeHostSession {
-            do {
-                hostSettings = try await host.adminSettingsGet()
-                hostSettingsLiveRPC = true
-            } catch {
-                // Remote host may forbid admin settings if paired as non-owner.
+            async let remoteTask: HostSettingsSnapshot? = try? host.adminSettingsGet()
+            async let localTask = try? daemon.fetchHostSettings()
+            if let remote = await remoteTask {
+                if hostSettings != remote { hostSettings = remote }
+                if !hostSettingsLiveRPC { hostSettingsLiveRPC = true }
             }
-            if let fetched = try? await daemon.fetchHostSettings() {
+            if let fetched = await localTask, localHostSettings != fetched.snapshot {
                 localHostSettings = fetched.snapshot
             }
             return
         }
         do {
             let (snap, live) = try await daemon.fetchHostSettings()
-            hostSettings = snap
-            localHostSettings = snap
-            hostSettingsLiveRPC = live
+            if hostSettings != snap { hostSettings = snap }
+            if localHostSettings != snap { localHostSettings = snap }
+            if hostSettingsLiveRPC != live { hostSettingsLiveRPC = live }
         } catch {
             // Keep defaults quietly when daemon is stopped.
+        }
+    }
+
+    func loadSidebarStatus(daemon: LocalDaemonManager) async {
+        if let st = try? await daemon.fetchStatus(), daemonStatus != st {
+            daemonStatus = st
+        }
+    }
+
+    func loadUpdatesAccountStatus(state: SartoState, daemon: LocalDaemonManager) async {
+        if let accSt = try? await daemon.fetchAccountStatus() {
+            state.applyAccountStatus(accSt)
         }
     }
 
     func loadDaemonAndRemote(state: SartoState, daemon: LocalDaemonManager) async {
         isRefreshing = true
         defer { isRefreshing = false }
-        await loadHostSettings(state: state, daemon: daemon)
-        if let st = try? await daemon.fetchStatus() {
+        async let hostSettingsTask: Void = loadHostSettings(state: state, daemon: daemon)
+        async let statusTask = try? daemon.fetchStatus()
+        async let accountTask = try? daemon.fetchAccountStatus()
+        async let syncTask = try? daemon.fetchSyncStatus()
+        async let devsTask = try? daemon.listPairedDevices()
+        async let termTask = try? daemon.fetchRemoteTerminalAllowed()
+
+        _ = await hostSettingsTask
+        if let st = await statusTask, daemonStatus != st {
             daemonStatus = st
         }
-        if let accSt = try? await daemon.fetchAccountStatus() {
+        if let accSt = await accountTask {
             state.applyAccountStatus(accSt)
             if accSt.account.isSignedIn {
                 _ = try? await daemon.listAccountDevices()
             }
         }
-        if let syncSt = try? await daemon.fetchSyncStatus() {
+        if let syncSt = await syncTask {
             state.applySyncedStatus(syncSt)
         }
-        if let devs = try? await daemon.listPairedDevices() {
+        if let devs = await devsTask, pairedDevices != devs {
             pairedDevices = devs
         }
-        if let term = try? await daemon.fetchRemoteTerminalAllowed() {
+        if let term = await termTask, remoteTerminalAllowed != term {
             remoteTerminalAllowed = term
         }
     }
 
-    /// Lightweight local-socket poll while Settings is visible so paired device presence and counts stay live.
+    /// Lightweight local-socket poll while Cloud & Devices is visible so mobile device presence stays live
+    /// without invalidating unrelated views when nothing changed.
     func refreshLiveDevicePresence(daemon: LocalDaemonManager) async {
-        if let st = try? await daemon.fetchStatus() {
-            daemonStatus = st
-        }
-        if let devs = try? await daemon.listPairedDevices() {
+        if let devs = try? await daemon.listPairedDevices(), pairedDevices != devs {
             pairedDevices = devs
         }
     }
@@ -539,14 +586,20 @@ final class PrismSettingsStore {
     func loadAgentsSection(state: SartoState, daemon: LocalDaemonManager) async {
         isRefreshing = true
         defer { isRefreshing = false }
-        await loadHostSettings(state: state, daemon: daemon)
-        await state.refreshAgentsFromHost()
-        guard let host = state.activeHostSession else { return }
-        if let env = try? await host.agentEnvironment() {
-            environmentInfo = env
-        }
-        if let lights = try? await host.listLightAgents() {
-            lightAgents = lights
+        async let hostSettingsTask: Void = loadHostSettings(state: state, daemon: daemon)
+        async let agentsTask: Void = state.refreshAgentsFromHost()
+        if let host = state.activeHostSession {
+            async let envTask = try? host.agentEnvironment()
+            async let lightsTask = try? host.listLightAgents()
+            _ = await (hostSettingsTask, agentsTask)
+            if let env = await envTask {
+                environmentInfo = env
+            }
+            if let lights = await lightsTask {
+                lightAgents = lights
+            }
+        } else {
+            _ = await (hostSettingsTask, agentsTask)
         }
     }
 
@@ -649,7 +702,7 @@ final class PrismSettingsStore {
             marketCatalog = cat
         }
         if let plugs = await pluginsTask {
-            marketPlugins = plugs
+            applyMarketPlugins(plugs)
         }
 
         // Background-refresh stale cached catalog/plugins without blocking initial paint.
@@ -666,10 +719,23 @@ final class PrismSettingsStore {
                 Task { [weak self] in
                     guard let self, let liveHost = state.activeHostSession else { return }
                     if let fresh = try? await liveHost.marketPlugins(refresh: false, cached: false) {
-                        self.marketPlugins = fresh
+                        self.applyMarketPlugins(fresh)
                     }
                 }
             }
+        }
+    }
+
+    private func applyMarketPlugins(_ next: MarketPluginsInfo?) {
+        guard marketPlugins != next else { return }
+        marketPlugins = next
+        sortedPluginCatalog = (next?.catalog ?? []).sorted { lhs, rhs in
+            if lhs.featured != rhs.featured { return lhs.featured }
+            if lhs.official != rhs.official { return lhs.official }
+            let li = lhs.installs ?? -1
+            let ri = rhs.installs ?? -1
+            if li != ri { return li > ri }
+            return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
         }
     }
 
@@ -860,7 +926,7 @@ final class PrismSettingsStore {
                 scope: scope,
                 projectPath: projectPath
             )
-            marketPlugins = try await host.marketPlugins(refresh: true, cached: false)
+            applyMarketPlugins(try await host.marketPlugins(refresh: true, cached: false))
             if let notice { showNotice(notice) }
         } catch {
             showError(error.localizedDescription)
@@ -886,7 +952,7 @@ final class PrismSettingsStore {
                 scope: scope,
                 projectPath: projectPath
             )
-            marketPlugins = try await host.marketPlugins(refresh: true, cached: false)
+            applyMarketPlugins(try await host.marketPlugins(refresh: true, cached: false))
             if let notice { showNotice(notice) }
         } catch {
             showError(error.localizedDescription)
@@ -913,7 +979,7 @@ final class PrismSettingsStore {
                 scope: scope,
                 projectPath: projectPath
             )
-            marketPlugins = try await host.marketPlugins(refresh: false, cached: false)
+            applyMarketPlugins(try await host.marketPlugins(refresh: false, cached: false))
         } catch {
             showError(error.localizedDescription)
         }
@@ -932,7 +998,7 @@ final class PrismSettingsStore {
         defer { busyExtensionIDs.remove("mp:add") }
         do {
             _ = try await host.marketAddMarketplace(agentId: agentId, source: trimmed)
-            marketPlugins = try await host.marketPlugins(refresh: true, cached: false)
+            applyMarketPlugins(try await host.marketPlugins(refresh: true, cached: false))
             if let notice { showNotice(notice) }
         } catch {
             showError(error.localizedDescription)
@@ -951,7 +1017,7 @@ final class PrismSettingsStore {
         defer { busyExtensionIDs.remove(busyKey) }
         do {
             try await host.marketRemoveMarketplace(agentId: agentId, name: name)
-            marketPlugins = try await host.marketPlugins(refresh: true, cached: false)
+            applyMarketPlugins(try await host.marketPlugins(refresh: true, cached: false))
             if let notice { showNotice(notice) }
         } catch {
             showError(error.localizedDescription)

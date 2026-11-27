@@ -63,15 +63,27 @@ struct GeneralSettingsSectionView: View {
                     Picker(
                         "",
                         selection: Binding<String>(
-                            get: { state.defaultAgentID ?? "" },
+                            get: {
+                                if state.connectionMode.isRemote {
+                                    return store.hostSettings.defaultAgent ?? ""
+                                }
+                                return state.defaultAgentID ?? store.hostSettings.defaultAgent ?? ""
+                            },
                             set: { next in
                                 let value: String? = next.isEmpty ? nil : next
-                                state.defaultAgentID = value
-                                // Keep the local agent-host defaultAgent aligned for background tasks.
-                                Task {
-                                    _ = try? await daemon.updateHostSettings([
-                                        "general": .object(["defaultAgent": value.map(JSONValue.string) ?? .null]),
-                                    ])
+                                if !state.connectionMode.isRemote {
+                                    state.defaultAgentID = value
+                                }
+                                store.hostSettings.defaultAgent = value
+                                // Keep the active host's general.defaultAgent aligned for background tasks.
+                                if state.connectionMode.isLive {
+                                    Task {
+                                        await store.patchHostSettings(
+                                            ["general": .object(["defaultAgent": value.map(JSONValue.string) ?? .null])],
+                                            state: state,
+                                            daemon: daemon
+                                        )
+                                    }
                                 }
                             }
                         )
@@ -190,7 +202,7 @@ struct GeneralSettingsSectionView: View {
             }
         }
         .onAppear {
-            for item in store.lightAgents {
+            for item in store.lightAgents where !PrismSettingsStore.retiredAgentIDs.contains(item.agentId) {
                 state.ensureAgentOptionsLoaded(for: item.agentId)
             }
         }
@@ -339,6 +351,11 @@ private struct LaunchAtLoginSettingsRow: View {
 
 // MARK: - Installed System Font Catalog
 
+private enum SystemFontKind: Equatable, Sendable {
+    case prose
+    case mono
+}
+
 @MainActor
 private enum SystemFontCatalog {
     static let allFamilies: [String] = {
@@ -349,20 +366,69 @@ private enum SystemFontCatalog {
 
     static let installedSet: Set<String> = Set(allFamilies)
 
-    static let proseRecommended = ["SF Pro Text", "Inter", "PingFang SC", "Helvetica Neue", "Avenir Next"]
-    static let monoRecommended = [
+    private static let proseRecommended = ["SF Pro Text", "Inter", "PingFang SC", "Helvetica Neue", "Avenir Next"]
+    private static let monoRecommended = [
         "JetBrains Mono", "SF Mono", "Maple Mono", "Cascadia Code",
         "Fira Code", "Menlo", "Hack", "Sarasa Mono SC",
     ]
 
-    static func menuSections(recommended: [String], current: String) -> (preferred: [String], others: [String]) {
-        var preferred = recommended.filter { installedSet.contains($0) }
-        if !current.isEmpty, !preferred.contains(current), !installedSet.contains(current) {
-            preferred.insert(current, at: 0)
-        }
+    static let proseSections: (preferred: [String], others: [String]) = buildBaseSections(proseRecommended)
+    static let monoSections: (preferred: [String], others: [String]) = buildBaseSections(monoRecommended)
+
+    private static func buildBaseSections(_ recommended: [String]) -> (preferred: [String], others: [String]) {
+        let preferred = recommended.filter { installedSet.contains($0) }
         let prefSet = Set(preferred)
         let others = allFamilies.filter { !prefSet.contains($0) }
         return (preferred, others)
+    }
+
+    static func baseSections(for kind: SystemFontKind) -> (preferred: [String], others: [String]) {
+        switch kind {
+        case .prose: return proseSections
+        case .mono: return monoSections
+        }
+    }
+}
+
+/// Equatable leaf view so unrelated `SartoState` updates never re-diff hundreds of system font items.
+private struct SystemFontFamilyMenu: View, Equatable {
+    let selection: String
+    let kind: SystemFontKind
+    let defaultLabel: String
+    let onSelect: (String) -> Void
+
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.selection == rhs.selection && lhs.kind == rhs.kind && lhs.defaultLabel == rhs.defaultLabel
+    }
+
+    var body: some View {
+        let base = SystemFontCatalog.baseSections(for: kind)
+        let missingCurrent = !selection.isEmpty && !SystemFontCatalog.installedSet.contains(selection)
+        Picker(
+            "",
+            selection: Binding(
+                get: { selection },
+                set: { onSelect($0) }
+            )
+        ) {
+            Text(defaultLabel).tag("")
+            if missingCurrent || !base.preferred.isEmpty {
+                Divider()
+                if missingCurrent {
+                    Text(selection).tag(selection)
+                }
+                ForEach(base.preferred, id: \.self) { font in
+                    Text(font).tag(font)
+                }
+            }
+            if !base.others.isEmpty {
+                Divider()
+                ForEach(base.others, id: \.self) { font in
+                    Text(font).tag(font)
+                }
+            }
+        }
+        .labelsHidden()
     }
 }
 
@@ -377,8 +443,8 @@ struct AppearanceSettingsSectionView: View {
     @Environment(\.prismTokens) private var tokens
     @Environment(\.prismL10n) private var l10n
 
-    private var hasCustomFonts: Bool {
-        !state.proseFontFamily.isEmpty || !state.codeFontFamily.isEmpty || !state.terminalFontFamily.isEmpty
+    private var hasCustomTypographyFonts: Bool {
+        !state.proseFontFamily.isEmpty || !state.codeFontFamily.isEmpty
     }
 
     var body: some View {
@@ -540,11 +606,10 @@ struct AppearanceSettingsSectionView: View {
                                 .foregroundStyle(tokens.mutedForeground)
                         }
                         Spacer()
-                        if hasCustomFonts {
+                        if hasCustomTypographyFonts {
                             SettingsPillButton(l10n.tr("settings.common.reset")) {
                                 state.proseFontFamily = ""
                                 state.codeFontFamily = ""
-                                state.terminalFontFamily = ""
                             }
                         }
                     }
@@ -552,13 +617,15 @@ struct AppearanceSettingsSectionView: View {
                     HStack(spacing: 12) {
                         fontFamilyPicker(
                             label: l10n.tr("settings.appearance.proseFont"),
-                            selection: $state.proseFontFamily,
-                            recommended: SystemFontCatalog.proseRecommended
+                            selection: state.proseFontFamily,
+                            kind: .prose,
+                            onSelect: { state.proseFontFamily = $0 }
                         )
                         fontFamilyPicker(
                             label: l10n.tr("settings.appearance.codeFont"),
-                            selection: $state.codeFontFamily,
-                            recommended: SystemFontCatalog.monoRecommended
+                            selection: state.codeFontFamily,
+                            kind: .mono,
+                            onSelect: { state.codeFontFamily = $0 }
                         )
                     }
                 }
@@ -591,11 +658,21 @@ struct AppearanceSettingsSectionView: View {
                     title: l10n.tr("settings.terminal.fontFamily"),
                     subtitle: nil
                 ) {
-                    fontFamilyMenu(
-                        selection: $state.terminalFontFamily,
-                        recommended: SystemFontCatalog.monoRecommended
-                    )
-                    .frame(width: 190)
+                    HStack(spacing: 6) {
+                        if !state.terminalFontFamily.isEmpty {
+                            SettingsPillButton(l10n.tr("settings.common.reset")) {
+                                state.terminalFontFamily = ""
+                            }
+                        }
+                        SystemFontFamilyMenu(
+                            selection: state.terminalFontFamily,
+                            kind: .mono,
+                            defaultLabel: l10n.tr("settings.appearance.fontSystemDefault"),
+                            onSelect: { state.terminalFontFamily = $0 }
+                        )
+                        .equatable()
+                        .frame(width: 190)
+                    }
                 }
             }
 
@@ -643,34 +720,25 @@ struct AppearanceSettingsSectionView: View {
         }
     }
 
-    private func fontFamilyPicker(label: String, selection: Binding<String>, recommended: [String]) -> some View {
+    private func fontFamilyPicker(
+        label: String,
+        selection: String,
+        kind: SystemFontKind,
+        onSelect: @escaping (String) -> Void
+    ) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label)
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(tokens.mutedForeground)
-            fontFamilyMenu(selection: selection, recommended: recommended)
+            SystemFontFamilyMenu(
+                selection: selection,
+                kind: kind,
+                defaultLabel: l10n.tr("settings.appearance.fontSystemDefault"),
+                onSelect: onSelect
+            )
+            .equatable()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func fontFamilyMenu(selection: Binding<String>, recommended: [String]) -> some View {
-        let sections = SystemFontCatalog.menuSections(recommended: recommended, current: selection.wrappedValue)
-        return Picker("", selection: selection) {
-            Text(l10n.tr("settings.appearance.fontSystemDefault")).tag("")
-            if !sections.preferred.isEmpty {
-                Divider()
-                ForEach(sections.preferred, id: \.self) { font in
-                    Text(font).tag(font)
-                }
-            }
-            if !sections.others.isEmpty {
-                Divider()
-                ForEach(sections.others, id: \.self) { font in
-                    Text(font).tag(font)
-                }
-            }
-        }
-        .labelsHidden()
     }
 }
 
@@ -838,8 +906,10 @@ private struct IslandMenuBarSettingsBody: View {
     let highlightedID: String?
 
     @State private var displays = Displays.all()
+    @State private var showSyncedDevices: Bool = false
     @Environment(\.prismTokens) private var tokens
     @Environment(\.prismL10n) private var l10n
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var settings: Binding<UsageIslandSettings> { $settingsStore.settings }
 
@@ -848,20 +918,35 @@ private struct IslandMenuBarSettingsBody: View {
         let activeProvidersCount = allProviders.filter { !settings.wrappedValue.hidden.contains($0.id) }.count
         let encryptedUsageActive = state.sartoSyncStatus.isVaultReady
         let activeMacCount = max(usageStore.devices.count, state.sartoSyncStatus.usageDevices.count)
+        let previewHighlighted = highlightedID == "island.preview"
+        let motion = PrismSpringSpec.snappy.animation(tier: state.motionTier, reduceMotion: reduceMotion)
 
         VStack(alignment: .leading, spacing: 18) {
             SettingsGroupSection(l10n.tr("settings.island.groupIsland")) {
-                if settings.wrappedValue.islandEnabled {
-                    HStack(spacing: 6) {
-                        SettingsPillButton(l10n.tr("settings.island.previewPop"), icon: "bell.badge") {
-                            island.triggerPreviewPop()
-                        }
-                        SettingsPillButton(l10n.tr("settings.island.previewApproval"), icon: "checkmark.shield") {
-                            island.triggerPreviewApproval()
-                        }
+                HStack(spacing: 6) {
+                    SettingsPillButton(
+                        l10n.tr("settings.island.previewPop"),
+                        icon: "bell.badge",
+                        disabled: !settings.wrappedValue.islandEnabled
+                    ) {
+                        island.triggerPreviewPop()
                     }
-                    .id("island.preview")
+                    SettingsPillButton(
+                        l10n.tr("settings.island.previewApproval"),
+                        icon: "checkmark.shield",
+                        disabled: !settings.wrappedValue.islandEnabled
+                    ) {
+                        island.triggerPreviewApproval()
+                    }
                 }
+                .padding(.horizontal, 4)
+                .padding(.vertical, 2)
+                .background(
+                    RoundedRectangle(cornerRadius: tokens.rSM, style: .continuous)
+                        .fill(previewHighlighted ? tokens.primarySoft : Color.clear)
+                        .animation(.easeInOut(duration: 0.25), value: previewHighlighted)
+                )
+                .id("island.preview")
             } content: {
                 SettingsRowView(
                     id: "island.enabled",
@@ -1029,8 +1114,7 @@ private struct IslandMenuBarSettingsBody: View {
                                 .opacity(index == allProviders.count - 1 ? 0.35 : 1)
                             }
 
-                            let lastShown = !hidden
-                                && allProviders.filter { !settingsStore.settings.hidden.contains($0.id) }.count <= 1
+                            let lastShown = !hidden && activeProvidersCount <= 1
                             Toggle(
                                 "",
                                 isOn: Binding(
@@ -1116,6 +1200,64 @@ private struct IslandMenuBarSettingsBody: View {
                         .labelsHidden()
                         .pickerStyle(.segmented)
                         .frame(width: 190)
+                    }
+
+                    if usageStore.devices.contains(where: { !$0.isThisMac }) {
+                        SettingsRowDivider()
+                        Button {
+                            withAnimation(motion) {
+                                showSyncedDevices.toggle()
+                            }
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: showSyncedDevices ? "chevron.down" : "chevron.right")
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(tokens.mutedForeground)
+                                    .frame(width: 12)
+                                Text(l10n.tr("settings.usage.syncedDevices", usageStore.devices.count))
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundStyle(tokens.secondaryForeground)
+                                Spacer()
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 9)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+
+                        if showSyncedDevices {
+                            ForEach(usageStore.devices) { device in
+                                SettingsRowDivider()
+                                HStack(spacing: 10) {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        HStack(spacing: 6) {
+                                            Text(device.name)
+                                                .font(.system(size: 12.5, weight: .medium))
+                                                .foregroundStyle(tokens.foreground)
+                                            if device.isThisMac {
+                                                Text(l10n.tr("settings.usage.thisMac"))
+                                                    .font(.system(size: 10, weight: .semibold))
+                                                    .foregroundStyle(tokens.primary)
+                                                    .padding(.horizontal, 6)
+                                                    .padding(.vertical, 1.5)
+                                                    .background(Capsule().fill(tokens.primarySoft))
+                                            }
+                                        }
+                                        Text(device.updatedAt.map { UsageAgo.text($0, l10n: l10n) } ?? "—")
+                                            .font(.system(size: 11))
+                                            .foregroundStyle(tokens.mutedForeground)
+                                    }
+                                    Spacer()
+                                    if !device.isThisMac {
+                                        SettingsPillButton(l10n.tr("settings.common.remove"), destructive: true) {
+                                            usageStore.removeDevice(device.id)
+                                        }
+                                    }
+                                }
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 9)
+                            }
+                        }
                     }
 
                     if let syncError = usageStore.syncError {
@@ -1254,7 +1396,8 @@ private struct NotificationsSettingsBody: View {
                     .frame(width: 240)
                 }
 
-                if settingsStore.settings.lowAlert {
+                let showThresholdRow = settingsStore.settings.lowAlert || highlightedID == "notifications.threshold"
+                if showThresholdRow {
                     SettingsRowDivider()
 
                     SettingsRowView(
@@ -1271,10 +1414,12 @@ private struct NotificationsSettingsBody: View {
                         .labelsHidden()
                         .pickerStyle(.segmented)
                         .frame(width: 210)
+                        .disabled(!settingsStore.settings.lowAlert)
+                        .opacity(settingsStore.settings.lowAlert ? 1 : 0.5)
                     }
                 }
             }
-            .animation(motion, value: settingsStore.settings.lowAlert)
+            .animation(motion, value: settingsStore.settings.lowAlert || highlightedID == "notifications.threshold")
 
             Text(l10n.tr(
                 settingsStore.settings.islandEnabled
@@ -1526,9 +1671,15 @@ private struct PrismColorWheelPopover: View {
     @State private var saturation: Double = 0.72
     @State private var brightness: Double = 0.92
     @State private var didSeed = false
+    @State private var hasInteracted = false
+    @State private var lastCommittedHex: UInt32?
+    @State private var lastCommitTime: ContinuousClock.Instant?
+    @State private var pendingHex: UInt32?
+    @State private var pendingCommitTask: Task<Void, Never>?
 
     private let wheelSize: CGFloat = 176
     private let minBrightness: Double = 0.22
+    private static let dragCommitInterval: Duration = .milliseconds(120)
 
     private var currentHex: UInt32 {
         Self.hsbToHex(h: hue, s: saturation, b: brightness)
@@ -1596,7 +1747,10 @@ private struct PrismColorWheelPopover: View {
                         let rawAngle = atan2(dy, dx)
                         let normalized = rawAngle < 0 ? rawAngle + 2.0 * .pi : rawAngle
                         hue = normalized / (2.0 * .pi)
-                        onChangeHex(currentHex)
+                        scheduleHexCommit(currentHex, immediate: false)
+                    }
+                    .onEnded { _ in
+                        scheduleHexCommit(currentHex, immediate: true)
                     }
             )
 
@@ -1644,7 +1798,10 @@ private struct PrismColorWheelPopover: View {
                             .onChanged { value in
                                 let t = max(0, min(1, Double((value.location.x - 8) / max(1, w - 16))))
                                 brightness = minBrightness + t * (1.0 - minBrightness)
-                                onChangeHex(currentHex)
+                                scheduleHexCommit(currentHex, immediate: false)
+                            }
+                            .onEnded { _ in
+                                scheduleHexCommit(currentHex, immediate: true)
                             }
                     )
                 }
@@ -1679,6 +1836,54 @@ private struct PrismColorWheelPopover: View {
             saturation = hsb.s
             brightness = max(minBrightness, hsb.b)
         }
+        .onDisappear {
+            pendingCommitTask?.cancel()
+            pendingCommitTask = nil
+            if hasInteracted {
+                scheduleHexCommit(currentHex, immediate: true)
+            }
+        }
+    }
+
+    /// Keeps the wheel thumb at display refresh rate while throttling global `SartoState.accentMode`
+    /// writes (UserDefaults, sync timestamp JSON encoding, and full-window token recomputation).
+    private func scheduleHexCommit(_ hex: UInt32, immediate: Bool) {
+        hasInteracted = true
+        pendingHex = hex
+        if immediate {
+            pendingCommitTask?.cancel()
+            pendingCommitTask = nil
+            if hex != lastCommittedHex {
+                lastCommittedHex = hex
+                lastCommitTime = .now
+                onChangeHex(hex)
+            }
+            return
+        }
+        guard hex != lastCommittedHex else { return }
+        let now = ContinuousClock.Instant.now
+        if let lastCommitTime {
+            let elapsed = lastCommitTime.duration(to: now)
+            if elapsed < Self.dragCommitInterval {
+                if pendingCommitTask == nil {
+                    let delay = Self.dragCommitInterval - elapsed
+                    pendingCommitTask = Task { @MainActor in
+                        try? await Task.sleep(for: delay)
+                        pendingCommitTask = nil
+                        guard !Task.isCancelled, let latest = pendingHex, latest != lastCommittedHex else { return }
+                        lastCommittedHex = latest
+                        self.lastCommitTime = .now
+                        onChangeHex(latest)
+                    }
+                }
+                return
+            }
+        }
+        pendingCommitTask?.cancel()
+        pendingCommitTask = nil
+        lastCommittedHex = hex
+        lastCommitTime = now
+        onChangeHex(hex)
     }
 
     private static func rgbToHSB(_ hex: UInt32) -> (h: Double, s: Double, b: Double) {
