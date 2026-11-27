@@ -15,7 +15,7 @@
 [![macOS 15+](https://img.shields.io/badge/macOS-15%2B%20Native-111111?logo=apple&logoColor=white)](#纯血-mac-质感prism灵动岛与液态额度)
 [![Agents](https://img.shields.io/badge/agents-46-2F80ED)](#支持的-agent)
 [![Telemetry](https://img.shields.io/badge/telemetry-none-2EA043)](./PRIVACY.zh-CN.md)
-[![Version](https://img.shields.io/badge/version-0.3.3-7C5CFF)](https://sarto.1o.ink/releases/latest)
+[![Version](https://img.shields.io/badge/version-0.3.4-7C5CFF)](https://sarto.1o.ink/releases/latest)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](./LICENSE)
 
 [下载](https://sarto.1o.ink/releases/latest) · [双循环理念](#双循环左边硬核交付右边轻松挂机) · [46 个 Agent](#主舞台严肃硬核的多-agent-ade) · [挂机远征](#挂机远征边-coding-边挂机) · [安全](./SECURITY.zh-CN.md) · [隐私](./PRIVACY.zh-CN.md) · [English](./README.md)
@@ -23,7 +23,7 @@
 </div>
 
 > [!NOTE]
-> Sarto 处于早期快速开发阶段：当前版本 v0.3.3，支持 macOS 15+（Apple 芯片），并提供支持 macOS 与 Linux（`x64` / `arm64`，glibc 2.28+）的独立无头 daemon。
+> Sarto 处于早期快速开发阶段：当前版本 v0.3.4，支持 macOS 15+（Apple 芯片），并提供支持 macOS 与 Linux（`x64` / `arm64`，glibc 2.28+）的独立无头 daemon。
 
 ## 双循环：左边硬核交付，右边轻松挂机
 
@@ -56,7 +56,7 @@ flowchart LR
 ## 挂机远征：边 Coding 边挂机
 
 > [!NOTE]
-> **研发中：v0.3.3 中默认关闭并锁定。** 在服务端与数值平衡完成前，**设置**里的挂机游戏开关保持锁定，后台不会加载任何游戏模块，也不会产生任何游戏网络请求。
+> **研发中：v0.3.4 中默认关闭并锁定。** 在服务端与数值平衡完成前，**设置**里的挂机游戏开关保持锁定，后台不会加载任何游戏模块，也不会产生任何游戏网络请求。
 
 正式开放后，Sarto 将在右侧运行栏与独立的「远征」窗口中提供可选的 **挂机远征游戏**：
 

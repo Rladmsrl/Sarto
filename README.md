@@ -15,7 +15,7 @@ Pure SwiftUI & Metal · Notch Dynamic Island · Remote Claude Code · Zero Elect
 [![macOS 15+](https://img.shields.io/badge/macOS-15%2B%20Native-111111?logo=apple&logoColor=white)](#pure-mac-craft-prism-notch-and-quotas)
 [![Agents](https://img.shields.io/badge/agents-46-2F80ED)](#supported-agents)
 [![Telemetry](https://img.shields.io/badge/telemetry-none-2EA043)](./PRIVACY.md)
-[![Version](https://img.shields.io/badge/version-0.3.3-7C5CFF)](https://sarto.1o.ink/releases/latest)
+[![Version](https://img.shields.io/badge/version-0.3.4-7C5CFF)](https://sarto.1o.ink/releases/latest)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](./LICENSE)
 
 [Download](https://sarto.1o.ink/releases/latest) · [How It Works](#the-dual-loop-ship-code-level-up) · [46 Agents](#main-stage-a-serious-multi-agent-ade) · [Idle Expedition](#idle-expedition-grind-while-you-code) · [Security](./SECURITY.md) · [Privacy](./PRIVACY.md) · [简体中文](./README.zh-CN.md)
@@ -23,7 +23,7 @@ Pure SwiftUI & Metal · Notch Dynamic Island · Remote Claude Code · Zero Elect
 </div>
 
 > [!NOTE]
-> Sarto is in early, active development: v0.3.3 for macOS 15+ (Apple silicon), with a standalone headless daemon for macOS & Linux (`x64` / `arm64`, glibc 2.28+).
+> Sarto is in early, active development: v0.3.4 for macOS 15+ (Apple silicon), with a standalone headless daemon for macOS & Linux (`x64` / `arm64`, glibc 2.28+).
 
 ## The dual loop: ship code, level up
 
@@ -56,7 +56,7 @@ flowchart LR
 ## Idle Expedition: grind while you code
 
 > [!NOTE]
-> **In development — locked off in v0.3.3.** While the game service and balance are still being finalized, the switch in **Settings** stays locked off, nothing loads in the background, and no game traffic leaves your Mac.
+> **In development — locked off in v0.3.4.** While the game service and balance are still being finalized, the switch in **Settings** stays locked off, nothing loads in the background, and no game traffic leaves your Mac.
 
 When enabled in an upcoming release, Sarto pairs your collapsible running-sessions rail with an optional **Idle Expedition** companion window:
 
