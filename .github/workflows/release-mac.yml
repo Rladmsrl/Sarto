@@ -362,7 +362,9 @@ jobs:
             "dist/release/${APP_TAG}"/Sarto-*.delta \
             "dist/release/${APP_TAG}"/latest-mac.json \
             "dist/release/${APP_TAG}"/beta-mac.json; do
-            cp "$file" dist/out-mac-app/
+            if [ -f "$file" ]; then
+              cp "$file" dist/out-mac-app/
+            fi
           done
           cp "$NOTES_FILE" dist/out-mac-app/release-notes.md
 
