@@ -126,11 +126,8 @@ struct RemoteCloudSettingsSectionView: View {
         }
         .onChange(of: state.cloudAccountStatus.account.state) { _, newState in
             if newState == "signed-in" {
-                Task {
-                    async let devicesTask = try? daemon.listAccountDevices()
-                    async let syncTask = try? daemon.fetchSyncStatus()
-                    _ = await (devicesTask, syncTask)
-                }
+                Task { _ = try? await daemon.listAccountDevices() }
+                Task { _ = try? await daemon.fetchSyncStatus() }
             }
         }
         .task {

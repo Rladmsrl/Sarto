@@ -515,16 +515,27 @@ final class PrismSettingsStore {
 
     // MARK: - Section Loaders
 
+    // The loaders run their requests concurrently through Task handles, not `async let`: Swift 6.1
+    // to 6.3 can miscompile the teardown of `async let` in Release builds, which aborts the app with
+    // "freed pointer was not the last allocation" (swiftlang/swift#81771). Each loader cancels its
+    // handles when it is cancelled, as `async let` would, so switching hosts or sections stops the
+    // previous load's requests.
+
     func loadHostSettings(state: SartoState, daemon: LocalDaemonManager) async {
         if state.connectionMode.isRemote, let host = state.activeHostSession {
-            async let remoteTask: HostSettingsSnapshot? = try? host.adminSettingsGet()
-            async let localTask = try? daemon.fetchHostSettings()
-            if let remote = await remoteTask {
-                if hostSettings != remote { hostSettings = remote }
-                if !hostSettingsLiveRPC { hostSettingsLiveRPC = true }
-            }
-            if let fetched = await localTask, localHostSettings != fetched.snapshot {
-                localHostSettings = fetched.snapshot
+            let remoteTask = Task { try? await host.adminSettingsGet() }
+            let localTask = Task { try? await daemon.fetchHostSettings() }
+            await withTaskCancellationHandler {
+                if let remote = await remoteTask.value {
+                    if hostSettings != remote { hostSettings = remote }
+                    if !hostSettingsLiveRPC { hostSettingsLiveRPC = true }
+                }
+                if let fetched = await localTask.value, localHostSettings != fetched.snapshot {
+                    localHostSettings = fetched.snapshot
+                }
+            } onCancel: {
+                remoteTask.cancel()
+                localTask.cancel()
             }
             return
         }
@@ -553,31 +564,40 @@ final class PrismSettingsStore {
     func loadDaemonAndRemote(state: SartoState, daemon: LocalDaemonManager) async {
         isRefreshing = true
         defer { isRefreshing = false }
-        async let hostSettingsTask: Void = loadHostSettings(state: state, daemon: daemon)
-        async let statusTask = try? daemon.fetchStatus()
-        async let accountTask = try? daemon.fetchAccountStatus()
-        async let syncTask = try? daemon.fetchSyncStatus()
-        async let devsTask = try? daemon.listPairedDevices()
-        async let termTask = try? daemon.fetchRemoteTerminalAllowed()
+        let hostSettingsTask = Task { await self.loadHostSettings(state: state, daemon: daemon) }
+        let statusTask = Task { try? await daemon.fetchStatus() }
+        let accountTask = Task { try? await daemon.fetchAccountStatus() }
+        let syncTask = Task { try? await daemon.fetchSyncStatus() }
+        let devsTask = Task { try? await daemon.listPairedDevices() }
+        let termTask = Task { try? await daemon.fetchRemoteTerminalAllowed() }
 
-        _ = await hostSettingsTask
-        if let st = await statusTask, daemonStatus != st {
-            daemonStatus = st
-        }
-        if let accSt = await accountTask {
-            state.applyAccountStatus(accSt)
-            if accSt.account.isSignedIn {
-                _ = try? await daemon.listAccountDevices()
+        await withTaskCancellationHandler {
+            await hostSettingsTask.value
+            if let st = await statusTask.value, daemonStatus != st {
+                daemonStatus = st
             }
-        }
-        if let syncSt = await syncTask {
-            state.applySyncedStatus(syncSt)
-        }
-        if let devs = await devsTask, pairedDevices != devs {
-            pairedDevices = devs
-        }
-        if let term = await termTask, remoteTerminalAllowed != term {
-            remoteTerminalAllowed = term
+            if let accSt = await accountTask.value {
+                state.applyAccountStatus(accSt)
+                if accSt.account.isSignedIn {
+                    _ = try? await daemon.listAccountDevices()
+                }
+            }
+            if let syncSt = await syncTask.value {
+                state.applySyncedStatus(syncSt)
+            }
+            if let devs = await devsTask.value, pairedDevices != devs {
+                pairedDevices = devs
+            }
+            if let term = await termTask.value, remoteTerminalAllowed != term {
+                remoteTerminalAllowed = term
+            }
+        } onCancel: {
+            hostSettingsTask.cancel()
+            statusTask.cancel()
+            accountTask.cancel()
+            syncTask.cancel()
+            devsTask.cancel()
+            termTask.cancel()
         }
     }
 
@@ -592,20 +612,25 @@ final class PrismSettingsStore {
     func loadAgentsSection(state: SartoState, daemon: LocalDaemonManager) async {
         isRefreshing = true
         defer { isRefreshing = false }
-        async let hostSettingsTask: Void = loadHostSettings(state: state, daemon: daemon)
-        async let agentsTask: Void = state.refreshAgentsFromHost()
-        if let host = state.activeHostSession {
-            async let envTask = try? host.agentEnvironment()
-            async let lightsTask = try? host.listLightAgents()
-            _ = await (hostSettingsTask, agentsTask)
-            if let env = await envTask {
+        let hostSettingsTask = Task { await self.loadHostSettings(state: state, daemon: daemon) }
+        let agentsTask = Task { await state.refreshAgentsFromHost() }
+        let host = state.activeHostSession
+        let envTask = Task { try? await host?.agentEnvironment() }
+        let lightsTask = Task { try? await host?.listLightAgents() }
+        await withTaskCancellationHandler {
+            await hostSettingsTask.value
+            await agentsTask.value
+            if let env = await envTask.value {
                 environmentInfo = env
             }
-            if let lights = await lightsTask {
+            if let lights = await lightsTask.value {
                 lightAgents = lights
             }
-        } else {
-            _ = await (hostSettingsTask, agentsTask)
+        } onCancel: {
+            hostSettingsTask.cancel()
+            agentsTask.cancel()
+            envTask.cancel()
+            lightsTask.cancel()
         }
     }
 
@@ -701,26 +726,34 @@ final class PrismSettingsStore {
         await loadHostSettings(state: state, daemon: daemon)
         guard let host = state.activeHostSession else { return }
 
-        async let statusTask = try? host.mcpStatus()
-        async let keysTask = try? host.marketKeys()
-        async let connectionsTask = try? host.marketConnections()
-        async let catalogTask = try? host.marketCatalog(refresh: refresh, cached: !refresh)
-        async let pluginsTask = try? host.marketPlugins(refresh: refresh, cached: !refresh)
+        let statusTask = Task { try? await host.mcpStatus() }
+        let keysTask = Task { try? await host.marketKeys() }
+        let connectionsTask = Task { try? await host.marketConnections() }
+        let catalogTask = Task { try? await host.marketCatalog(refresh: refresh, cached: !refresh) }
+        let pluginsTask = Task { try? await host.marketPlugins(refresh: refresh, cached: !refresh) }
 
-        if let st = await statusTask {
-            mcpStatus = st
-        }
-        if let ks = await keysTask {
-            marketKeyState = ks
-        }
-        if let conns = await connectionsTask {
-            marketConnections = conns
-        }
-        if let cat = await catalogTask {
-            marketCatalog = cat
-        }
-        if let plugs = await pluginsTask {
-            applyMarketPlugins(plugs)
+        await withTaskCancellationHandler {
+            if let st = await statusTask.value {
+                mcpStatus = st
+            }
+            if let ks = await keysTask.value {
+                marketKeyState = ks
+            }
+            if let conns = await connectionsTask.value {
+                marketConnections = conns
+            }
+            if let cat = await catalogTask.value {
+                marketCatalog = cat
+            }
+            if let plugs = await pluginsTask.value {
+                applyMarketPlugins(plugs)
+            }
+        } onCancel: {
+            statusTask.cancel()
+            keysTask.cancel()
+            connectionsTask.cancel()
+            catalogTask.cancel()
+            pluginsTask.cancel()
         }
 
         // Background-refresh stale cached catalog/plugins without blocking initial paint.
