@@ -65,6 +65,8 @@ export interface LocalExecMcpDeps {
   hostName: string
   /** Optional home directory override used to skip OS-protected directories such as `~/Library`. */
   homeDir?: string
+  /** Optional local platform override for OS-protected directory rules; defaults to `process.platform`. */
+  platform?: Platform
   /** Current local permission mode (`default`, `acceptEdits`, `auto`, `plan`, `dontAsk`, `bypassPermissions`). */
   permissionMode(): string
   /** Asks the local user to approve an action on this computer. */
@@ -635,7 +637,7 @@ export class LocalExecMcp {
       return toolText(`Permission denied searching ${base}`, true)
     }
     const regex = globToRegExp(pattern.replaceAll('\\', '/'))
-    const platform = process.platform as Platform
+    const platform = this.deps.platform ?? (process.platform as Platform)
     const rawHome = this.deps.homeDir ?? os.homedir()
     const [realBase, realHome] = await Promise.all([
       realpath(base).catch(() => base),
@@ -726,7 +728,7 @@ export class LocalExecMcp {
       if (rootInfo.isFile()) {
         await scanFile(target, path.basename(target))
       } else {
-        const platform = process.platform as Platform
+        const platform = this.deps.platform ?? (process.platform as Platform)
         const rawHome = this.deps.homeDir ?? os.homedir()
         const [realTarget, realHome] = await Promise.all([
           realpath(target).catch(() => target),

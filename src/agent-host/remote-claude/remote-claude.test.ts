@@ -1022,6 +1022,7 @@ describe('RemoteClaudeHost <-> RemoteClaudeConnection end-to-end hosted flow', (
       }),
       hostName: 'Mac Studio',
       homeDir: home,
+      platform: 'darwin',
       permissionMode: () => 'acceptEdits',
       requestPermission: async () => ({ optionId: 'allow_once' }),
     })
