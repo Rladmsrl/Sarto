@@ -491,6 +491,9 @@ jobs:
                 MAC_MANIFEST="beta-mac.json"
               fi
               node tools/sarto/signing.mjs "${OUT_APP}/${MAC_MANIFEST}"
+            else
+              # Never publish unsigned channel manifests without a .sig companion.
+              rm -f "${OUT_APP}/latest-mac.json" "${OUT_APP}/beta-mac.json"
             fi
           fi
 
@@ -513,6 +516,9 @@ jobs:
               ASSEMBLE_ARGS+=(--allow-unsigned)
             fi
             node tools/sarto/assemble-daemon-release.mjs "${ASSEMBLE_ARGS[@]}"
+            if [ -z "${SARTO_UPDATE_SIGNING_KEY:-}" ]; then
+              rm -f "${OUT_DAEMON}/latest-daemon.json" "${OUT_DAEMON}/beta-daemon.json"
+            fi
           fi
 
           for dir in dist/release/*/; do

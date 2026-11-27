@@ -9,8 +9,8 @@
 
 import { execFile as execFileCb, spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { createReadStream, existsSync } from 'node:fs'
-import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
+import { createReadStream, existsSync, realpathSync } from 'node:fs'
+import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -22,6 +22,7 @@ import { stampBuildInfo } from './runtime-fingerprint.mjs'
 const execFile = promisify(execFileCb)
 const ROOT = fileURLToPath(new URL('../..', import.meta.url))
 const DEFAULT_MAX_GLIBC = '2.28'
+const DEFAULT_MAX_GLIBCXX = '3.4.25'
 
 /** @param {string} file */
 function sha256Of(file) {
@@ -53,14 +54,15 @@ export function compareDottedVersion(a, b) {
 }
 
 /**
- * Extracts the highest `GLIBC_X.Y[.Z]` symbol version from `objdump -T` or `readelf -V` output,
- * or null when no versioned GLIBC symbols appear.
+ * Extracts the highest `<prefix>_X.Y[.Z]` symbol version from `objdump -T` or `readelf -V` output,
+ * or null when no matching versioned symbols appear.
  *
  * @param {string} text
+ * @param {'GLIBC' | 'GLIBCXX'} prefix
  */
-export function parseMaxGlibcVersion(text) {
+export function parseMaxSymbolVersion(text, prefix) {
   let max = null
-  const pattern = /\bGLIBC_(\d+\.\d+(?:\.\d+)?)\b/g
+  const pattern = new RegExp(`\\b${prefix}_(\\d+\\.\\d+(?:\\.\\d+)?)\\b`, 'g')
   let match
   while ((match = pattern.exec(text)) !== null) {
     const ver = match[1]
@@ -73,12 +75,47 @@ export function parseMaxGlibcVersion(text) {
 }
 
 /**
- * Verifies that `binary` does not require glibc symbols newer than `maxGlibc`.
+ * Extracts the highest `GLIBC_X.Y[.Z]` symbol version from `objdump -T` or `readelf -V` output,
+ * or null when no versioned GLIBC symbols appear.
+ *
+ * @param {string} text
+ */
+export function parseMaxGlibcVersion(text) {
+  return parseMaxSymbolVersion(text, 'GLIBC')
+}
+
+/**
+ * Extracts the highest `GLIBCXX_X.Y[.Z]` symbol version from `objdump -T` or `readelf -V` output,
+ * or null when no versioned GLIBCXX symbols appear.
+ *
+ * @param {string} text
+ */
+export function parseMaxGlibcxxVersion(text) {
+  return parseMaxSymbolVersion(text, 'GLIBCXX')
+}
+
+/**
+ * Returns whether `objdump -T` or `readelf -V` output references `GLIBC_PRIVATE` internal symbols.
+ *
+ * @param {string} text
+ */
+export function hasPrivateGlibcSymbols(text) {
+  return /\bGLIBC_PRIVATE\b/.test(text)
+}
+
+/**
+ * Verifies that `binary` does not require `GLIBC_PRIVATE` or glibc/libstdc++ symbols newer than
+ * `maxGlibc` / `maxGlibcxx`.
  *
  * @param {string} binary
  * @param {string} maxGlibc
+ * @param {string} maxGlibcxx
  */
-export async function verifyGlibcCeiling(binary, maxGlibc = DEFAULT_MAX_GLIBC) {
+export async function verifyGlibcCeiling(
+  binary,
+  maxGlibc = DEFAULT_MAX_GLIBC,
+  maxGlibcxx = DEFAULT_MAX_GLIBCXX,
+) {
   let output
   try {
     const res = await execFile('objdump', ['-T', binary], { maxBuffer: 8 * 1024 * 1024 })
@@ -89,6 +126,9 @@ export async function verifyGlibcCeiling(binary, maxGlibc = DEFAULT_MAX_GLIBC) {
     })
     output = res.stdout
   }
+  if (hasPrivateGlibcSymbols(output)) {
+    throw new Error(`${binary} links GLIBC_PRIVATE internal symbols`)
+  }
   const highest = parseMaxGlibcVersion(output)
   if (highest && compareDottedVersion(highest, maxGlibc) > 0) {
     throw new Error(
@@ -96,7 +136,35 @@ export async function verifyGlibcCeiling(binary, maxGlibc = DEFAULT_MAX_GLIBC) {
         'build inside a glibc 2.28 container (e.g. quay.io/pypa/manylinux_2_28_*)',
     )
   }
+  const highestCxx = parseMaxGlibcxxVersion(output)
+  if (highestCxx && compareDottedVersion(highestCxx, maxGlibcxx) > 0) {
+    throw new Error(
+      `${binary} links GLIBCXX_${highestCxx}, exceeding the ${maxGlibcxx} libstdc++ floor; ` +
+        'build inside a manylinux_2_28 container with libstdc++_nonshared',
+    )
+  }
   return highest
+}
+
+/**
+ * Recursively collects all `.node` native addon binaries under `dir`.
+ *
+ * @param {string} dir
+ * @returns {Promise<string[]>}
+ */
+async function findNativeAddons(dir) {
+  /** @type {string[]} */
+  const out = []
+  if (!existsSync(dir)) return out
+  for (const entry of await readdir(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name)
+    if (entry.isDirectory()) {
+      out.push(...(await findNativeAddons(full)))
+    } else if (entry.isFile() && entry.name.endsWith('.node')) {
+      out.push(full)
+    }
+  }
+  return out
 }
 
 /**
@@ -174,7 +242,8 @@ async function smokeTestPty(pkgDir) {
 async function smokeTestDaemon(pkgDir) {
   const sartoBin = path.join(pkgDir, 'bin', 'sarto')
   // Keep data path short so control.sock fits within the 103-byte Unix socket sun_path limit.
-  const dataDir = await mkdtemp(path.join(os.tmpdir(), 'sd-'))
+  const tmpRoot = os.tmpdir().length > 60 ? '/tmp' : os.tmpdir()
+  const dataDir = await mkdtemp(path.join(tmpRoot, 'sd-'))
   /** @type {NodeJS.ProcessEnv} */
   const env = {
     ...process.env,
@@ -322,26 +391,16 @@ export async function buildDaemonPackage(options) {
     }
 
     if (process.platform === 'linux') {
-      const ptyCandidates = [
-        path.join(pkgDir, 'daemon', 'node_modules', 'node-pty', 'build', 'Release', 'pty.node'),
-        path.join(
-          pkgDir,
-          'daemon',
-          'node_modules',
-          'node-pty',
-          'prebuilds',
-          `${process.platform}-${process.arch}`,
-          'pty.node',
-        ),
-      ]
-      const ptyBinary = ptyCandidates.find((file) => existsSync(file))
-      if (!ptyBinary) {
+      const addons = await findNativeAddons(path.join(pkgDir, 'daemon', 'node_modules'))
+      if (!addons.some((file) => path.basename(file) === 'pty.node')) {
         throw new Error('Packaged Linux daemon is missing node-pty pty.node binary')
       }
-      const maxSym = await verifyGlibcCeiling(ptyBinary, maxGlibc)
-      console.log(
-        `Verified ${path.basename(ptyBinary)} max GLIBC symbol: ${maxSym ?? 'none'} (<= ${maxGlibc})`,
-      )
+      for (const addon of addons) {
+        const maxSym = await verifyGlibcCeiling(addon, maxGlibc)
+        console.log(
+          `Verified ${path.relative(pkgDir, addon)} max GLIBC symbol: ${maxSym ?? 'none'} (<= ${maxGlibc})`,
+        )
+      }
     }
 
     if (!skipSmoke) {
@@ -372,7 +431,17 @@ export async function buildDaemonPackage(options) {
   }
 }
 
-if (import.meta.main) {
+function isMainModule() {
+  if (import.meta.main !== undefined) return import.meta.main
+  if (!process.argv[1]) return false
+  try {
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+  } catch {
+    return false
+  }
+}
+
+if (isMainModule()) {
   const { values } = parseArgs({
     options: {
       version: { type: 'string' },

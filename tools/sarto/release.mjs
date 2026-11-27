@@ -276,6 +276,7 @@ async function minimumSystemVersion() {
  *   builtAt: string,
  *   node: string | null,
  *   extraDaemonDirs: string[],
+ *   skipSmoke: boolean,
  *   signUpdateFile: ((message: Buffer) => Buffer) | null,
  * }} opts
  */
@@ -290,7 +291,7 @@ async function buildStandaloneDaemon(opts) {
     builtAt: opts.builtAt,
     node: opts.node,
     skipBuild: true,
-    skipSmoke: true,
+    skipSmoke: opts.skipSmoke,
   })
   await assembleDaemonRelease({
     inputDirs: [localOut, ...opts.extraDaemonDirs],
@@ -321,6 +322,7 @@ async function main() {
       node: { type: 'string' },
       'skip-notarize': { type: 'boolean' },
       'skip-update-sign': { type: 'boolean' },
+      'skip-smoke': { type: 'boolean' },
       'allow-older': { type: 'boolean' },
       'delta-from': { type: 'string' },
       'harness-checks': { type: 'string' },
@@ -561,6 +563,7 @@ async function main() {
         builtAt,
         node: nodePath,
         extraDaemonDirs,
+        skipSmoke: values['skip-smoke'] === true,
         signUpdateFile,
       })
       if (!publishedDirs.includes(daemonOut)) publishedDirs.push(daemonOut)

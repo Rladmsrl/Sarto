@@ -155,28 +155,37 @@ if [ "$os" = darwin ] && [ "$arch" = x64 ]; then
   fi
 fi
 if [ "$os" = linux ]; then
-  case $(ldd --version 2>&1 || true) in
+  ldd_out=$(ldd --version 2>&1 || true)
+  case $ldd_out in
     *musl*) fail 'The Sarto daemon needs glibc; systems with musl, such as Alpine, are not supported' ;;
   esac
-  for musl in /lib/ld-musl-*.so* /usr/lib/ld-musl-*.so*; do
-    if [ -e "$musl" ]; then
-      fail 'The Sarto daemon needs glibc; systems with musl, such as Alpine, are not supported'
-    fi
-  done
+  libc=''
   if command -v getconf > /dev/null 2>&1; then
     libc=$(getconf GNU_LIBC_VERSION 2>/dev/null || true)
-    case $libc in
-      glibc\ [0-9]*.[0-9]*)
-        libc_ver=${libc#glibc }
-        libc_major=${libc_ver%%.*}
-        libc_rest=${libc_ver#*.}
-        libc_minor=${libc_rest%%.*}
-        if [ "$libc_major" -lt 2 ] || { [ "$libc_major" -eq 2 ] && [ "$libc_minor" -lt 28 ]; }; then
-          fail "The Sarto daemon needs glibc 2.28 or later (found glibc $libc_major.$libc_minor)"
-        fi
-        ;;
-    esac
   fi
+  # Only fall back to scanning ld-musl when neither ldd nor getconf confirms glibc, so glibc hosts
+  # with musl-tools installed for cross-compilation are not rejected.
+  case "$ldd_out|$libc" in
+    *GNU* | *GLIBC* | *glibc*) ;;
+    *)
+      for musl in /lib/ld-musl-*.so* /usr/lib/ld-musl-*.so*; do
+        if [ -e "$musl" ]; then
+          fail 'The Sarto daemon needs glibc; systems with musl, such as Alpine, are not supported'
+        fi
+      done
+      ;;
+  esac
+  case $libc in
+    glibc\ [0-9]*.[0-9]*)
+      libc_ver=${libc#glibc }
+      libc_major=${libc_ver%%.*}
+      libc_rest=${libc_ver#*.}
+      libc_minor=${libc_rest%%.*}
+      if [ "$libc_major" -lt 2 ] || { [ "$libc_major" -eq 2 ] && [ "$libc_minor" -lt 28 ]; }; then
+        fail "The Sarto daemon needs glibc 2.28 or later (found glibc $libc_major.$libc_minor)"
+      fi
+      ;;
+  esac
 fi
 
 # A place that cannot be reached, or stops sending, gives way to the next one soon.
@@ -262,6 +271,7 @@ fetch_from() {
 # Extracts a top-level string field from a 2-space formatted release manifest JSON without jq.
 manifest_field() {
   awk -v key="$2" '
+    { sub(/\r$/, "") }
     index($0, "  \"" key "\": \"") == 1 {
       line = substr($0, length("  \"" key "\": \"") + 1)
       sub(/",?$/, "", line)

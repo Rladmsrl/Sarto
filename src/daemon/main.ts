@@ -603,7 +603,6 @@ async function run(command: Exclude<Command, { kind: 'help' | 'version' | 'usage
       )
       if (installed.warning) {
         process.stderr.write(`sarto: ${installed.warning}\n`)
-        return 1
       }
       return 0
     }

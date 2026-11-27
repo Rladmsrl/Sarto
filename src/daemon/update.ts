@@ -439,6 +439,11 @@ export async function update(
   const expectedName =
     deps.platform && deps.arch ? `sarto-daemon-${deps.platform}-${deps.arch}.tar.gz` : null
   const matched = expectedName ? (files ?? []).filter((file) => file.name === expectedName) : []
+  if (expectedName && files && files.length > 0 && matched.length === 0) {
+    throw new UpdateError(
+      `Release ${latest} includes no daemon package for ${deps.platform}-${deps.arch}`,
+    )
+  }
   const pinned = [...new Set((matched.length > 0 ? matched : (files ?? [])).map((f) => f.sha256))]
   const args = [
     '--version',

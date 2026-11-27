@@ -11,13 +11,12 @@
 //     [--harness-checks <file>] [--allow-unsigned]
 
 import { createHash } from 'node:crypto'
-import { createReadStream } from 'node:fs'
+import { createReadStream, realpathSync } from 'node:fs'
 import { copyFile, mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import { isValidBuildNumber, isValidTag } from './build-version.mjs'
-import { buildHarnessManifest, signHarnessManifest } from './harnesses.mjs'
 import { signerFrom, updateFileMessage } from './signing.mjs'
 
 const ROOT = fileURLToPath(new URL('../..', import.meta.url))
@@ -126,27 +125,24 @@ export async function assembleDaemonRelease(options) {
     `${a.platform}-${a.arch}`.localeCompare(`${b.platform}-${b.arch}`),
   )
 
-  /** @type {Array<{ platform: string, arch: string, name: string, size: number, sha256: string }>} */
-  const files = []
-  /** @type {string[]} */
-  const sumLines = []
-
-  for (const item of ordered) {
-    const dest = path.resolve(outDir, item.name)
-    if (item.source !== dest) {
-      await copyFile(item.source, dest)
-    }
-    const sha256 = await sha256Of(dest)
-    const size = (await stat(dest)).size
-    files.push({
-      platform: item.platform,
-      arch: item.arch,
-      name: item.name,
-      size,
-      sha256,
-    })
-    sumLines.push(`${sha256}  ${item.name}`)
-  }
+  const processed = await Promise.all(
+    ordered.map(async (item) => {
+      const dest = path.resolve(outDir, item.name)
+      if (item.source !== dest) {
+        await copyFile(item.source, dest)
+      }
+      const [sha256, info] = await Promise.all([sha256Of(dest), stat(dest)])
+      return {
+        platform: item.platform,
+        arch: item.arch,
+        name: item.name,
+        size: info.size,
+        sha256,
+      }
+    }),
+  )
+  const files = processed
+  const sumLines = processed.map((item) => `${item.sha256}  ${item.name}`)
 
   await writeFile(path.join(outDir, 'sarto-daemon-sha256sums.txt'), `${sumLines.join('\n')}\n`)
 
@@ -177,6 +173,8 @@ export async function assembleDaemonRelease(options) {
   }
 
   if (harnessChecks) {
+    // Lazy-loaded so CI publish jobs that assemble daemon archives without harness checks need no node_modules.
+    const { buildHarnessManifest, signHarnessManifest } = await import('./harnesses.mjs')
     const document = buildHarnessManifest(
       JSON.parse(await readFile(path.resolve(harnessChecks), 'utf8')),
     )
@@ -186,7 +184,17 @@ export async function assembleDaemonRelease(options) {
   return { manifestName, manifest, files }
 }
 
-if (import.meta.main) {
+function isMainModule() {
+  if (import.meta.main !== undefined) return import.meta.main
+  if (!process.argv[1]) return false
+  try {
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+  } catch {
+    return false
+  }
+}
+
+if (isMainModule()) {
   const { values } = parseArgs({
     options: {
       in: { type: 'string', multiple: true },

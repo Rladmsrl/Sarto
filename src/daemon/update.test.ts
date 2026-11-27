@@ -4,7 +4,11 @@ import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { assembleDaemonRelease } from '../../tools/sarto/assemble-daemon-release.mjs'
-import { parseMaxGlibcVersion } from '../../tools/sarto/build-daemon-package.mjs'
+import {
+  hasPrivateGlibcSymbols,
+  parseMaxGlibcxxVersion,
+  parseMaxGlibcVersion,
+} from '../../tools/sarto/build-daemon-package.mjs'
 import KEYS from '../../tools/sarto/update-keys.json'
 import {
   DAEMON_MANIFEST_NAME,
@@ -551,14 +555,57 @@ describe('sarto update signature verification', () => {
     }
   })
 
-  it('extracts the maximum GLIBC symbol version from objdump output', () => {
+  it('rejects a signed manifest whose files list omits the current platform and arch', async () => {
+    const signer = keyPair()
+    const manifestBody = JSON.stringify({
+      version: '1.2.0',
+      channel: 'stable',
+      tag: 'daemon-v1.2.0',
+      files: [
+        {
+          platform: 'darwin',
+          arch: 'arm64',
+          name: 'sarto-daemon-darwin-arm64.tar.gz',
+          sha256: 'a'.repeat(64),
+        },
+      ],
+    })
+    const manifestSig = `${signer.sign(updateFileMessage('latest-daemon.json', Buffer.from(manifestBody)))}\n`
+    const scriptSig = `${signer.sign(updateFileMessage('install.sh', SCRIPT_BYTES))}\n`
+    const install = vi.fn(async () => 0)
+    const fetchImpl: typeof fetch = async (input) => {
+      const url = String(input)
+      if (url === `${ORIGIN}/latest/download/latest-daemon.json`) return new Response(manifestBody)
+      if (url === `${ORIGIN}/latest/download/latest-daemon.json.sig`)
+        return new Response(manifestSig)
+      if (url === `${ORIGIN}/download/daemon-v1.2.0/install.sh`) return new Response(SCRIPT)
+      if (url === `${ORIGIN}/download/daemon-v1.2.0/install.sh.sig`) return new Response(scriptSig)
+      return new Response('not found', { status: 404 })
+    }
+
+    await expect(
+      update(makeDeps(fetchImpl, install, { platform: 'linux', arch: 'x64', service: false }), [
+        signer.raw,
+      ]),
+    ).rejects.toThrow('Release 1.2.0 includes no daemon package for linux-x64')
+    expect(install).not.toHaveBeenCalled()
+  })
+
+  it('extracts maximum GLIBC/GLIBCXX versions and detects GLIBC_PRIVATE from objdump output', () => {
     const sample = [
       '0000000000000000      DF *UND* 0000000000000000  GLIBC_2.2.5 openpty',
       '0000000000000000      DF *UND* 0000000000000000  GLIBC_2.28  fcntl64',
       '0000000000000000      DF *UND* 0000000000000000  GLIBC_2.17  clock_gettime',
+      '0000000000000000      DF *UND* 0000000000000000  GLIBCXX_3.4.25 std::__throw_out_of_range',
+      '0000000000000000      DF *UND* 0000000000000000  GLIBCXX_3.4.21 std::__cxx11::basic_string',
     ].join('\n')
     expect(parseMaxGlibcVersion(sample)).toBe('2.28')
+    expect(parseMaxGlibcxxVersion(sample)).toBe('3.4.25')
+    expect(hasPrivateGlibcSymbols(sample)).toBe(false)
     expect(parseMaxGlibcVersion('00000000 DF *UND* GLIBC_2.34 pthread_create')).toBe('2.34')
+    expect(parseMaxGlibcxxVersion('00000000 DF *UND* GLIBCXX_3.4.30 std::string')).toBe('3.4.30')
+    expect(hasPrivateGlibcSymbols('00000000 DF *UND* GLIBC_PRIVATE __libc_start')).toBe(true)
     expect(parseMaxGlibcVersion('no glibc symbols here')).toBeNull()
+    expect(parseMaxGlibcxxVersion('no glibc symbols here')).toBeNull()
   })
 })

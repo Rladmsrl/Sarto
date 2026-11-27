@@ -5,9 +5,10 @@
 // the app would refuse.
 
 import { createPrivateKey, createPublicKey, sign, verify } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { readFileSync, realpathSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 
 /** @typedef {'release' | 'sources' | 'harnesses'} Purpose */
@@ -65,7 +66,17 @@ export function updateFileMessage(name, file) {
   return Buffer.concat([Buffer.from(`${name}\n`, 'utf8'), file])
 }
 
-if (import.meta.main) {
+function isMainModule() {
+  if (import.meta.main !== undefined) return import.meta.main
+  if (!process.argv[1]) return false
+  try {
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+  } catch {
+    return false
+  }
+}
+
+if (isMainModule()) {
   const { values, positionals } = parseArgs({
     allowPositionals: true,
     options: {
