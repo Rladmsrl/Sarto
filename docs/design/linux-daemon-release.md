@@ -216,7 +216,10 @@ Steps executed on the target platform (`darwin-arm64`, `linux-x64`, or `linux-ar
   "arch": "x64",
   "name": "sarto-daemon-linux-x64.tar.gz",
   "size": 52428800,
-  "sha256": "..."
+  "sha256": "...",
+  "version": "0.4.0",
+  "build": "261127153000",
+  "channel": "stable"
 }
 ```
 
@@ -272,7 +275,7 @@ node tools/sarto/assemble-daemon-release.mjs \
 
 Responsibilities:
 
-1. Discovers all `sarto-daemon-<platform>-<arch>.tar.gz` artifacts in `--in`, recomputes each file's `size` and `sha256` directly from bytes on disk (never trusts untrusted sidecar hashes blindly).
+1. Discovers all `sarto-daemon-<platform>-<arch>.tar.gz` artifacts in `--in`, recomputes each file's `size` and `sha256` directly from bytes on disk, and requires the `.meta.json` sidecar beside each one to name the same `sha256` and the release's `version`, `build` and `channel`, so an archive left over from another build is never signed into a manifest (the install script would refuse it on every computer once it reports its version).
 2. Validates that all `--require-platforms` targets are present (defaulting to `darwin-arm64,linux-x64,linux-arm64` in CI so a silently dropped platform fails the release before publishing).
 3. Sorts entries deterministically by `(platform, arch)` and writes:
    - `sarto-daemon-darwin-arm64.tar.gz`

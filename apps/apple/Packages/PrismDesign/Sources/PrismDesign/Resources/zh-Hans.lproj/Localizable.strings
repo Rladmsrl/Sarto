@@ -1003,13 +1003,6 @@
 "settings.memory.importSelected" = "导入所选项";
 "settings.memory.importDone" = "成功导入 %d 条记忆";
 
-"settings.archived.title" = "归档会话";
-"settings.archived.sub" = "将已归档对话恢复到侧边栏，或彻底删除";
-"settings.archived.searchPlaceholder" = "搜索归档会话…";
-"settings.archived.empty" = "暂无归档会话";
-"settings.archived.restore" = "恢复";
-"settings.archived.deleteConfirmTitle" = "确定彻底删除该会话？";
-
 "settings.git.fetch" = "后台定时 Git Fetch";
 "settings.git.fetchSub" = "自动在后台拉取已打开仓库的远程跟踪分支状态";
 "settings.git.worktreeRoot" = "Worktree 根目录";
@@ -1035,7 +1028,7 @@
 "settings.remote.terminal" = "允许远程终端访问";
 "settings.remote.terminalSub" = "允许已配对的远程设备在本机打开终端会话";
 "settings.remote.pauseMobilePush" = "在电脑前时暂停手机推送";
-"settings.remote.pauseMobilePushSub" = "本机未锁屏且近期有操作时暂缓向手机发送 APNs 推送；离开电脑后仍未处理的通知会自动补发";
+"settings.remote.pauseMobilePushSub" = "本机未锁屏、近期有操作，且能通过灵动岛或系统通知提醒你时，暂缓向手机发送 APNs 推送；离开电脑后仍未处理的通知会自动补发";
 
 "settings.advanced.proxy" = "网络代理";
 "settings.advanced.proxyMode" = "HTTP / HTTPS 代理模式";

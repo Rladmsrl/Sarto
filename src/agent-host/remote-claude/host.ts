@@ -101,7 +101,8 @@ interface HostedRun {
 export interface RemoteClaudeHostDeps {
   userDataPath: string
   platform: Platform
-  agents: Pick<AgentManager, 'ensureReady' | 'list'>
+  agents: Pick<AgentManager, 'ensureReady' | 'list'> &
+    Partial<Pick<AgentManager, 'sessionsChanged'>>
   /** Remembered options for `claude-code` so `status` can report models without starting a query. */
   claudeOptions(): ConfigOption[]
   settings(): RemoteClaudeSettings | undefined
@@ -144,19 +145,36 @@ function shadowKey(deviceId: string, sessionId: string): string {
 
 export class RemoteClaudeHost {
   private readonly runs = new Map<string, HostedRun>()
-  /** Runs still opening, by run id, with the port and whether the run is hidden. */
-  private readonly opening = new Map<string, { portId: string; hidden: boolean }>()
+  /** Runs still opening, by run id, with the port, agent and whether the run is hidden. */
+  private readonly opening = new Map<
+    string,
+    { portId: string; agentId: AgentId; hidden: boolean }
+  >()
   /** Shadow folders a run is opening in, so a second open of the same session waits for none. */
   private readonly openingKeys = new Set<string>()
   /** Opening runs their controller closed before they were ready, which end once they are. */
   private readonly abandoned = new Set<string>()
   /** Runs still ending, by shadow folder, whose cleanup a new run of the folder waits for. */
   private readonly settling = new Map<string, Promise<void>>()
+  /** Agent connections already watched so their closure ends every hosted run they carry. */
+  private readonly watchedConnections = new WeakSet<AgentConnection>()
   private sweepTimer: ReturnType<typeof setInterval> | null = null
   private readonly now: () => number
 
   constructor(private readonly deps: RemoteClaudeHostDeps) {
     this.now = deps.now ?? Date.now
+  }
+
+  /** Number of active or opening hosted runs on `agentId`, kept alive against idle stops. */
+  liveCount(agentId: AgentId): number {
+    let count = 0
+    for (const run of this.runs.values()) {
+      if (run.agentId === agentId && !run.closing) count++
+    }
+    for (const entry of this.opening.values()) {
+      if (entry.agentId === agentId) count++
+    }
+    return count
   }
 
   private config(): RemoteClaudeSettings {
@@ -322,14 +340,16 @@ export class RemoteClaudeHost {
         )
       }
     }
-    this.opening.set(params.runId, { portId, hidden })
+    this.opening.set(params.runId, { portId, agentId: params.agentId, hidden })
     this.openingKeys.add(key)
+    this.deps.agents.sessionsChanged?.(params.agentId)
     try {
       return await this.openReserved(portId, device, params, key, previous, hidden)
     } finally {
       this.opening.delete(params.runId)
       this.openingKeys.delete(key)
       this.abandoned.delete(params.runId)
+      this.deps.agents.sessionsChanged?.(params.agentId)
     }
   }
 
@@ -357,10 +377,15 @@ export class RemoteClaudeHost {
         )
       }
       runtime = await this.deps.agents.ensureReady(params.agentId)
+      this.watchConnection(runtime.connection)
       if (params.resumeSessionId) {
         await this.assertResumable(runtime.connection, params.resumeSessionId, shadow.virtualRoot)
       }
-      if (this.abandoned.has(params.runId) || !this.config().enabled) {
+      if (
+        this.abandoned.has(params.runId) ||
+        runtime.connection.isClosed ||
+        !this.config().enabled
+      ) {
         throw new HostError('unavailable', t('remoteClaude.notOpen'))
       }
     } catch (error) {
@@ -572,8 +597,27 @@ export class RemoteClaudeHost {
 
   /** A run ended or abandoned while it opened is not handed to its controller. */
   private assertStillOpening(run: HostedRun): void {
-    if (run.closing || this.abandoned.has(run.runId) || !this.config().enabled) {
+    if (
+      run.closing ||
+      run.connection.isClosed ||
+      this.abandoned.has(run.runId) ||
+      !this.config().enabled
+    ) {
       throw new HostError('unavailable', t('remoteClaude.notOpen'))
+    }
+  }
+
+  private watchConnection(connection: AgentConnection): void {
+    if (this.watchedConnections.has(connection)) return
+    this.watchedConnections.add(connection)
+    void connection.closed.then(() => this.connectionClosed(connection))
+  }
+
+  private connectionClosed(connection: AgentConnection): void {
+    for (const run of [...this.runs.values()]) {
+      if (run.connection === connection) {
+        void this.finishRun(run, 'closed')
+      }
     }
   }
 
@@ -681,7 +725,10 @@ export class RemoteClaudeHost {
 
   private ownedRun(portId: string, runId: string): HostedRun {
     const run = this.runs.get(runId)
-    if (!run || run.portId !== portId || run.closing) {
+    if (!run || run.portId !== portId || run.closing || run.connection.isClosed) {
+      if (run && !run.closing && run.connection.isClosed) {
+        void this.finishRun(run, 'closed')
+      }
       throw new HostError('not_found', t('remoteClaude.notOpen'))
     }
     return run
@@ -811,10 +858,12 @@ export class RemoteClaudeHost {
 
     if (run.acpSessionId) {
       run.connection.unregister(run.acpSessionId, run.target)
-      if (run.hidden) {
-        await run.connection.removeHidden(run.acpSessionId, () => {}).catch(() => {})
-      } else {
-        await run.connection.closeSession(run.acpSessionId).catch(() => {})
+      if (!run.connection.isClosed) {
+        if (run.hidden) {
+          await run.connection.removeHidden(run.acpSessionId, () => {}).catch(() => {})
+        } else {
+          await run.connection.closeSession(run.acpSessionId).catch(() => {})
+        }
       }
     }
     await run.tunnel?.close().catch(() => {})
@@ -828,6 +877,7 @@ export class RemoteClaudeHost {
     }
     if (this.runs.size === 0) this.stopSweeper()
     if (!run.hidden) this.notifyActive()
+    this.deps.agents.sessionsChanged?.(run.agentId)
   }
 
   private ensureSweeper(): void {
@@ -863,6 +913,9 @@ export class RemoteClaudeHost {
     if (error instanceof AgentRequestError) {
       if (error.kind === 'auth_required') {
         return new HostError('auth_required', t('remoteClaude.signIn'))
+      }
+      if (error.kind === 'closed') {
+        return new HostError('unavailable', error.message)
       }
       return new HostError('agent_error', error.message)
     }

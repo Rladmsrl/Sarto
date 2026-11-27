@@ -5,7 +5,12 @@
 //   node tools/sarto/release.mjs [--target all|app|daemon] [--channel stable|beta]
 //     [--app-version <ver> | --version <ver>] [--daemon-version <ver>] [--build <12-digits>]
 //     [--notes notes.md] [--out dist/release] [--node <folder>] [--skip-notarize]
-//     [--delta-from v1,v2] [--harness-checks <file>]
+//     [--delta-from v1,v2] [--harness-checks <file>] [--extra-daemon-dir <dir> ...]
+//     [--daemon-package-dir <dir>] [--skip-update-sign] [--skip-smoke] [--built-at <iso>]
+//
+// --extra-daemon-dir adds archives built elsewhere, each with the .meta.json
+// build-daemon-package.mjs writes beside it; --daemon-package-dir keeps this Mac's daemon archive
+// and its .meta.json there, as CI does to assemble every platform in a later job.
 //
 // App and daemon versions are decoupled:
 // - `--app-version` (or legacy `--version`) defaults to MARKETING_VERSION in apps/apple/project.yml.
@@ -276,12 +281,13 @@ async function minimumSystemVersion() {
  *   builtAt: string,
  *   node: string | null,
  *   extraDaemonDirs: string[],
+ *   packageDir: string | null,
  *   skipSmoke: boolean,
  *   signUpdateFile: ((message: Buffer) => Buffer) | null,
  * }} opts
  */
 async function buildStandaloneDaemon(opts) {
-  const localOut = path.join(opts.stage, 'daemon-package')
+  const localOut = opts.packageDir ?? path.join(opts.stage, 'daemon-package')
   await buildDaemonPackage({
     out: localOut,
     version: opts.daemonVersion,
@@ -327,6 +333,7 @@ async function main() {
       'delta-from': { type: 'string' },
       'harness-checks': { type: 'string' },
       'extra-daemon-dir': { type: 'string', multiple: true },
+      'daemon-package-dir': { type: 'string' },
       'built-at': { type: 'string' },
     },
   })
@@ -414,6 +421,9 @@ async function main() {
     ? null
     : signerFrom('release', 'SARTO_UPDATE_SIGNING_KEY')
   const extraDaemonDirs = (values['extra-daemon-dir'] ?? []).map((dir) => path.resolve(dir))
+  const daemonPackageDir = values['daemon-package-dir']
+    ? path.resolve(values['daemon-package-dir'])
+    : null
   if (wantsApp && !signed)
     console.warn('No SARTO_SIGN_IDENTITY: an ad-hoc, Link mode release, for testing only')
 
@@ -563,6 +573,7 @@ async function main() {
         builtAt,
         node: nodePath,
         extraDaemonDirs,
+        packageDir: daemonPackageDir,
         skipSmoke: values['skip-smoke'] === true,
         signUpdateFile,
       })

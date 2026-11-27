@@ -127,7 +127,10 @@ jobs:
             }
 
             // A beta tag names its build; the bundle's CFBundleVersion and the manifests carry it too.
-            const build = /-beta\.(\d+)$/.exec(rawApp || rawDaemon)?.[1] || generateBuildNumber();
+            const build =
+              /-beta\.(\d+)$/.exec(rawApp)?.[1] ||
+              /-beta\.(\d+)$/.exec(rawDaemon)?.[1] ||
+              generateBuildNumber();
             const builtAt = new Date().toISOString();
             const shortCommit = (process.env.GITHUB_SHA || '').slice(0, 7);
             const appVersion = formatChannelVersion(rawApp || readAppBaseVersion(root), channel, build);
@@ -344,6 +347,10 @@ jobs:
           if [ -z "${SARTO_SIGN_IDENTITY:-}" ] || [ -z "${SARTO_NOTARY_KEY:-}" ]; then
             ARGS+=(--skip-notarize)
           fi
+          if [ "${{ needs.meta.outputs.wants_daemon }}" = "true" ]; then
+            # Keeps the darwin-arm64 archive and the .meta.json the publish job checks it against.
+            ARGS+=(--daemon-package-dir dist/out-daemon-darwin-arm64)
+          fi
           node tools/sarto/release.mjs "${ARGS[@]}"
 
           # Separate macOS app artifacts from the darwin-arm64 daemon archive so the publish job
@@ -359,10 +366,6 @@ jobs:
           done
           cp "$NOTES_FILE" dist/out-mac-app/release-notes.md
 
-          if [ "${{ needs.meta.outputs.wants_daemon }}" = "true" ]; then
-            cp "dist/release/${DAEMON_TAG}/sarto-daemon-darwin-arm64.tar.gz" dist/out-daemon-darwin-arm64/
-          fi
-
       - name: Upload macOS app release artifacts
         if: needs.meta.outputs.wants_app == 'true'
         uses: actions/upload-artifact@v4
@@ -376,7 +379,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: daemon-darwin-arm64
-          path: dist/out-daemon-darwin-arm64/sarto-daemon-darwin-arm64.tar.gz
+          path: |
+            dist/out-daemon-darwin-arm64/sarto-daemon-darwin-arm64.tar.gz
+            dist/out-daemon-darwin-arm64/sarto-daemon-darwin-arm64.meta.json
           if-no-files-found: error
 
       - name: Clean up ephemeral Apple credentials
@@ -430,7 +435,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: daemon-linux-${{ matrix.arch }}
-          path: dist/out-daemon-linux-${{ matrix.arch }}/sarto-daemon-linux-${{ matrix.arch }}.tar.gz
+          path: |
+            dist/out-daemon-linux-${{ matrix.arch }}/sarto-daemon-linux-${{ matrix.arch }}.tar.gz
+            dist/out-daemon-linux-${{ matrix.arch }}/sarto-daemon-linux-${{ matrix.arch }}.meta.json
           if-no-files-found: error
 
   publish:
@@ -448,7 +455,6 @@ jobs:
       attestations: write
     env:
       SARTO_UPDATE_SIGNING_KEY: ${{ secrets.SARTO_UPDATE_SIGNING_KEY }}
-      SARTO_HARNESSES_SIGNING_KEY: ${{ secrets.SARTO_HARNESSES_SIGNING_KEY }}
     steps:
       - uses: actions/checkout@v4
 
@@ -570,7 +576,7 @@ jobs:
             {
               echo "## Sarto ${TAG}"
               echo ""
-              if [ -f "$NOTES_FILE" ]; then
+              if [[ "$TAG" != daemon-v* ]] && [ -f "$NOTES_FILE" ]; then
                 cat "$NOTES_FILE"
                 echo ""
               fi
@@ -581,7 +587,10 @@ jobs:
               echo "Built directly in GitHub Actions with signed SLSA Build Provenance Attestations."
               echo ""
               echo '```sh'
+              echo '# macOS'
               echo 'shasum -a 256 -c SHA256SUMS.txt --ignore-missing'
+              echo '# Linux'
+              echo 'sha256sum -c SHA256SUMS.txt --ignore-missing'
               echo '```'
             } > "$BODY_FILE"
             if gh release view "$TAG" >/dev/null 2>&1; then

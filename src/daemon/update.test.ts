@@ -1,11 +1,13 @@
-import { generateKeyPairSync, sign } from 'node:crypto'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { createHash, generateKeyPairSync, sign } from 'node:crypto'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { assembleDaemonRelease } from '../../tools/sarto/assemble-daemon-release.mjs'
 import {
   hasPrivateGlibcSymbols,
+  parseMaxCxxabiVersion,
+  parseMaxGccVersion,
   parseMaxGlibcxxVersion,
   parseMaxGlibcVersion,
 } from '../../tools/sarto/build-daemon-package.mjs'
@@ -31,6 +33,31 @@ function keyPair(): { raw: string; sign(message: Uint8Array): string } {
 const ORIGIN = 'https://sarto.example/releases'
 const SCRIPT = '#!/bin/sh\necho ok\n'
 const SCRIPT_BYTES = Buffer.from(SCRIPT, 'utf8')
+
+/** Writes a daemon archive and the meta file build-daemon-package.mjs writes beside it. */
+async function writeDaemonArchive(
+  folder: string,
+  platform: string,
+  arch: string,
+  body: string,
+  meta: Record<string, unknown> = {},
+): Promise<void> {
+  const name = `sarto-daemon-${platform}-${arch}`
+  await mkdir(folder, { recursive: true })
+  await writeFile(path.join(folder, `${name}.tar.gz`), body)
+  const described = {
+    platform,
+    arch,
+    name: `${name}.tar.gz`,
+    size: Buffer.byteLength(body),
+    sha256: createHash('sha256').update(body).digest('hex'),
+    version: '1.3.0',
+    build: '261127153000',
+    channel: 'stable',
+    ...meta,
+  }
+  await writeFile(path.join(folder, `${name}.meta.json`), `${JSON.stringify(described)}\n`)
+}
 
 function makeDeps(
   fetchImpl: typeof fetch,
@@ -474,13 +501,9 @@ describe('sarto update signature verification', () => {
       const inLinux = path.join(dir, 'in-linux')
       const outDir = path.join(dir, 'out')
       await writeFile(path.join(dir, 'install.sh'), SCRIPT)
-      await rm(inMac, { recursive: true, force: true })
-      const { mkdir } = await import('node:fs/promises')
-      await mkdir(inMac, { recursive: true })
-      await mkdir(inLinux, { recursive: true })
-      await writeFile(path.join(inMac, 'sarto-daemon-darwin-arm64.tar.gz'), 'mac-tar')
-      await writeFile(path.join(inLinux, 'sarto-daemon-linux-x64.tar.gz'), 'linux-x64-tar')
-      await writeFile(path.join(inLinux, 'sarto-daemon-linux-arm64.tar.gz'), 'linux-arm64-tar')
+      await writeDaemonArchive(inMac, 'darwin', 'arm64', 'mac-tar')
+      await writeDaemonArchive(inLinux, 'linux', 'x64', 'linux-x64-tar')
+      await writeDaemonArchive(inLinux, 'linux', 'arm64', 'linux-arm64-tar')
 
       await expect(
         assembleDaemonRelease({
@@ -555,6 +578,49 @@ describe('sarto update signature verification', () => {
     }
   })
 
+  it('refuses to sign a daemon release around an archive of another build', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'sarto-assemble-test-'))
+    try {
+      await writeFile(path.join(dir, 'install.sh'), SCRIPT)
+      const assemble = (input: string) =>
+        assembleDaemonRelease({
+          inputDirs: [input],
+          outDir: path.join(dir, 'out'),
+          daemonVersion: '1.3.0',
+          daemonTag: 'daemon-v1.3.0',
+          channel: 'stable',
+          build: '261127153000',
+          signUpdateFile: () => Buffer.from('sig'),
+          installScriptPath: path.join(dir, 'install.sh'),
+        })
+
+      const stale = path.join(dir, 'stale')
+      await writeDaemonArchive(stale, 'linux', 'x64', 'old-tar', { version: '1.2.0' })
+      await expect(assemble(stale)).rejects.toThrow(
+        'sarto-daemon-linux-x64.tar.gz is daemon 1.2.0, not 1.3.0',
+      )
+
+      const otherBuild = path.join(dir, 'other-build')
+      await writeDaemonArchive(otherBuild, 'linux', 'x64', 'tar', { build: '261126000000' })
+      await expect(assemble(otherBuild)).rejects.toThrow('build 261126000000, not 261127153000')
+
+      const otherChannel = path.join(dir, 'other-channel')
+      await writeDaemonArchive(otherChannel, 'linux', 'x64', 'tar', { channel: 'beta' })
+      await expect(assemble(otherChannel)).rejects.toThrow('channel beta, not stable')
+
+      const replaced = path.join(dir, 'replaced')
+      await writeDaemonArchive(replaced, 'linux', 'x64', 'tar', { sha256: 'f'.repeat(64) })
+      await expect(assemble(replaced)).rejects.toThrow('does not match its meta file')
+
+      const bare = path.join(dir, 'bare')
+      await mkdir(bare, { recursive: true })
+      await writeFile(path.join(bare, 'sarto-daemon-linux-x64.tar.gz'), 'tar')
+      await expect(assemble(bare)).rejects.toThrow('has no sarto-daemon-linux-x64.meta.json')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
   it('rejects a signed manifest whose files list omits the current platform and arch', async () => {
     const signer = keyPair()
     const manifestBody = JSON.stringify({
@@ -591,21 +657,31 @@ describe('sarto update signature verification', () => {
     expect(install).not.toHaveBeenCalled()
   })
 
-  it('extracts maximum GLIBC/GLIBCXX versions and detects GLIBC_PRIVATE from objdump output', () => {
+  it('extracts maximum GLIBC/GLIBCXX/CXXABI/GCC versions and detects GLIBC_PRIVATE from objdump output', () => {
     const sample = [
       '0000000000000000      DF *UND* 0000000000000000  GLIBC_2.2.5 openpty',
       '0000000000000000      DF *UND* 0000000000000000  GLIBC_2.28  fcntl64',
       '0000000000000000      DF *UND* 0000000000000000  GLIBC_2.17  clock_gettime',
       '0000000000000000      DF *UND* 0000000000000000  GLIBCXX_3.4.25 std::__throw_out_of_range',
       '0000000000000000      DF *UND* 0000000000000000  GLIBCXX_3.4.21 std::__cxx11::basic_string',
+      '0000000000000000      DF *UND* 0000000000000000  CXXABI_1.3.11 __cxa_init_primary_exception',
+      '0000000000000000      DF *UND* 0000000000000000  GCC_7.0.0 __divti3',
     ].join('\n')
     expect(parseMaxGlibcVersion(sample)).toBe('2.28')
     expect(parseMaxGlibcxxVersion(sample)).toBe('3.4.25')
+    expect(parseMaxCxxabiVersion(sample)).toBe('1.3.11')
+    expect(parseMaxGccVersion(sample)).toBe('7.0.0')
     expect(hasPrivateGlibcSymbols(sample)).toBe(false)
     expect(parseMaxGlibcVersion('00000000 DF *UND* GLIBC_2.34 pthread_create')).toBe('2.34')
     expect(parseMaxGlibcxxVersion('00000000 DF *UND* GLIBCXX_3.4.30 std::string')).toBe('3.4.30')
+    expect(parseMaxCxxabiVersion('00000000 DF *UND* CXXABI_1.3.13 __cxa_call_terminate')).toBe(
+      '1.3.13',
+    )
+    expect(parseMaxGccVersion('00000000 DF *UND* GCC_12.0.0 __unordtf2')).toBe('12.0.0')
     expect(hasPrivateGlibcSymbols('00000000 DF *UND* GLIBC_PRIVATE __libc_start')).toBe(true)
     expect(parseMaxGlibcVersion('no glibc symbols here')).toBeNull()
     expect(parseMaxGlibcxxVersion('no glibc symbols here')).toBeNull()
+    expect(parseMaxCxxabiVersion('no glibc symbols here')).toBeNull()
+    expect(parseMaxGccVersion('no glibc symbols here')).toBeNull()
   })
 })

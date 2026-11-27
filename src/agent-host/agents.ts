@@ -813,6 +813,8 @@ export class AgentManager {
     optionsSeen: () => {},
     configChanged: () => {},
   }
+  /** Live session counts beside the session layer's hooks, which addLiveSessions adds. */
+  private readonly liveSources = new Set<(agentId: AgentId) => number>()
 
   constructor(private readonly deps: AgentManagerDeps) {
     this.timings = { ...AGENT_TIMINGS, ...deps.timings }
@@ -1881,7 +1883,7 @@ export class AgentManager {
 
   /** The sessions open with any of the harness's agents. */
   private liveSessionsOf(h: Harness): number {
-    return this.agentsOf(h).reduce((sum, slot) => sum + this.hooks.liveSessions(slot.id), 0)
+    return this.agentsOf(h).reduce((sum, slot) => sum + this.liveCount(slot.id), 0)
   }
 
   /**
@@ -2459,7 +2461,7 @@ export class AgentManager {
     if (this.limitsTimer || this.stopped) return
     this.limitsTimer = setInterval(() => {
       for (const slot of this.slots.values()) {
-        if (!slot.runtime || this.hooks.liveSessions(slot.id) === 0) continue
+        if (!slot.runtime || this.liveCount(slot.id) === 0) continue
         this.refreshLimits(slot.id).catch((error: unknown) => {
           const message = (error as Error).message
           this.deps.diagnostics.log('warn', `${slot.name}: the plan limits read failed: ${message}`)
@@ -3664,14 +3666,33 @@ export class AgentManager {
       slot.preferredFailed = null
       await this.detect(slot.h)
     }
-    if (this.hooks.liveSessions(agentId) > 0 && !slot.runtime) await this.ensureReady(agentId)
+    if (this.liveCount(agentId) > 0 && !slot.runtime) await this.ensureReady(agentId)
+  }
+
+  /**
+   * Counts what else keeps an agent in use, such as the runs this computer hosts for others, as
+   * live sessions beside the session layer's, against idle stops and updates, until the returned
+   * function is called. Its owner calls sessionsChanged when its count changes.
+   */
+  addLiveSessions(count: (agentId: AgentId) => number): () => void {
+    this.liveSources.add(count)
+    return () => {
+      this.liveSources.delete(count)
+    }
+  }
+
+  /** The agent's live sessions: the session layer's and every other source's. */
+  private liveCount(agentId: AgentId): number {
+    let live = this.hooks.liveSessions(agentId)
+    for (const count of this.liveSources) live += count(agentId)
+    return live
   }
 
   /** Arms or clears the idle stop after the agent's live session count changed. */
   sessionsChanged(agentId: AgentId): void {
     const slot = this.slots.get(agentId)
     if (!slot) return
-    const live = this.hooks.liveSessions(agentId)
+    const live = this.liveCount(agentId)
     if (live > 0 || !slot.runtime) {
       if (slot.idleTimer) {
         clearTimeout(slot.idleTimer)
@@ -3681,7 +3702,7 @@ export class AgentManager {
     }
     slot.idleTimer ??= setTimeout(() => {
       slot.idleTimer = null
-      if (this.hooks.liveSessions(agentId) === 0 && !slot.signInAbort) {
+      if (this.liveCount(agentId) === 0 && !slot.signInAbort) {
         this.deps.diagnostics.event(agentId, 'idle stop')
         void this.stop(agentId)
       }
@@ -5542,7 +5563,7 @@ export class AgentManager {
     slot.resetsError = null
     slot.resetsReadAt = 0
     slot.signIn = 'unknown'
-    if (slot.runtime && this.hooks.liveSessions(slot.id) === 0) await this.stopProcess(slot)
+    if (slot.runtime && this.liveCount(slot.id) === 0) await this.stopProcess(slot)
     this.emit(slot)
   }
 

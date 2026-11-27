@@ -476,7 +476,10 @@ export class RemoteClaudeConnection implements AgentConnection {
       return await this.promptRun(run, blocks, sent)
     } catch (error) {
       // The host ended the run, as an idle one, just as the prompt went: it opens again once.
-      if (!(error instanceof HostError) || error.code !== 'not_found') throw toAgentError(error)
+      if (!(error instanceof HostError) || error.code !== 'not_found') {
+        if (error instanceof HostError && error.code === 'unavailable') run.reclaimed = true
+        throw toAgentError(error)
+      }
       run.reclaimed = true
       try {
         return await this.promptRun(run, blocks, sent)
@@ -581,6 +584,13 @@ export class RemoteClaudeConnection implements AgentConnection {
       run.config = updated
       return withLocalMode(updated, run.localMode)
     } catch (error) {
+      if (error instanceof HostError && error.code === 'not_found') {
+        run.reclaimed = true
+        run.config = run.config.map((opt) =>
+          opt.id === optionId ? ({ ...opt, value } as ConfigOption) : opt,
+        )
+        return withLocalMode(run.config, run.localMode)
+      }
       throw toAgentError(error)
     }
   }

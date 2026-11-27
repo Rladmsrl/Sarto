@@ -1444,7 +1444,13 @@ export class SessionManager {
   private connectedCount(agentId: AgentId): number {
     let count = 0
     for (const live of this.live.values()) {
-      if (live.record.agentId === agentId && CONNECTED.has(live.thread.session.status)) count++
+      if (
+        live.record.agentId === agentId &&
+        !live.record.modelHost &&
+        CONNECTED.has(live.thread.session.status)
+      ) {
+        count++
+      }
     }
     return count
   }

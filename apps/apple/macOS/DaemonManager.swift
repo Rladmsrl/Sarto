@@ -39,6 +39,11 @@ public final class LocalDaemonManager {
     private var gameWatching = false
     /// Whether the user is actively at this Mac, sent to the daemon so `onlyAway` pushes pause.
     private var desktopPresent: Bool? = nil
+    /// Last presence value confirmed accepted by the current `syncSession`.
+    private var syncedDesktopPresent: Bool? = nil
+    private var presenceUnsupportedForSession = false
+    private var presenceSyncTask: Task<Void, Never>? = nil
+    private var presenceSyncGeneration: UInt64 = 0
 
     private var process: Process?
     /// The runtime folder the connected daemon runs from; nil when unknown, as for a daemon an
@@ -147,9 +152,18 @@ public final class LocalDaemonManager {
         await existing.close()
     }
 
+    private func resetPresenceSync() {
+        presenceSyncGeneration &+= 1
+        presenceSyncTask?.cancel()
+        presenceSyncTask = nil
+        syncedDesktopPresent = nil
+        presenceUnsupportedForSession = false
+    }
+
     private func closeSyncSession() async {
         subscribeRetryTask?.cancel()
         subscribeRetryTask = nil
+        resetPresenceSync()
         syncTask?.cancel()
         syncTask = nil
         guard let existing = syncSession else { return }
@@ -179,8 +193,8 @@ public final class LocalDaemonManager {
         let syncSubscribed = await subscribeSync(on: session)
         let hostsSubscribed = await subscribeOtherHosts(on: session)
         let gameSubscribed = await subscribeGame(on: session)
-        let presenceSynced = await syncPresence(on: session)
         guard gen == syncStartGeneration, self.syncSession === session else { return }
+        triggerPresenceSync()
         syncTask = Task { [weak self] in
             for await event in session.events {
                 guard let self, !Task.isCancelled else { break }
@@ -216,6 +230,7 @@ public final class LocalDaemonManager {
             guard let self, !Task.isCancelled, self.syncSession === session else { return }
             self.subscribeRetryTask?.cancel()
             self.subscribeRetryTask = nil
+            self.resetPresenceSync()
             self.syncSession = nil
             self.syncTask = nil
             self.syncReconnectTask?.cancel()
@@ -230,22 +245,20 @@ public final class LocalDaemonManager {
                 }
             }
         }
-        guard !accountSubscribed || !syncSubscribed || !hostsSubscribed || !gameSubscribed || !presenceSynced else { return }
+        guard !accountSubscribed || !syncSubscribed || !hostsSubscribed || !gameSubscribed else { return }
         subscribeRetryTask = Task { [weak self] in
             var needAccount = !accountSubscribed
             var needSync = !syncSubscribed
             var needHosts = !hostsSubscribed
             var needGame = !gameSubscribed
-            var needPresence = !presenceSynced
             var delay: Duration = .milliseconds(500)
-            for _ in 0..<40 where needAccount || needSync || needHosts || needGame || needPresence {
+            for _ in 0..<40 where needAccount || needSync || needHosts || needGame {
                 try? await Task.sleep(for: delay)
                 guard let self, !Task.isCancelled, self.syncSession === session else { return }
                 if needAccount { needAccount = !(await self.subscribeAccount(on: session)) }
                 if needSync { needSync = !(await self.subscribeSync(on: session)) }
                 if needHosts { needHosts = !(await self.subscribeOtherHosts(on: session)) }
                 if needGame { needGame = !(await self.subscribeGame(on: session)) }
-                if needPresence { needPresence = !(await self.syncPresence(on: session)) }
                 delay = min(delay * 2, .seconds(10))
             }
         }
@@ -313,21 +326,50 @@ public final class LocalDaemonManager {
 
     /// Reports whether the user is actively at this Mac so `onlyAway` mobile pushes pause while present.
     public func setDesktopPresence(_ present: Bool) {
-        guard desktopPresent != present else { return }
         desktopPresent = present
-        guard let session = syncSession else { return }
-        Task { try? await session.daemonSetPresence(present) }
+        guard syncSession != nil, !presenceUnsupportedForSession else { return }
+        if syncedDesktopPresent == present && presenceSyncTask == nil { return }
+        triggerPresenceSync()
     }
 
-    private func syncPresence(on session: SartoHostSession) async -> Bool {
-        guard let present = desktopPresent else { return true }
-        do {
-            try await session.daemonSetPresence(present)
-            return true
-        } catch let error as PortRPCError where error.code == "unknown_method" {
-            return true
-        } catch {
-            return false
+    /// Serializes `presence.set` RPCs on `syncSession` so rapid transitions never arrive out of
+    /// order. Transient failures, such as `unavailable` while the daemon starts, retry with backoff
+    /// for as long as the session lasts: presence changes rarely, so a value given up on could stay
+    /// wrong for hours. A request the daemon refuses as invalid is not repeated.
+    private func triggerPresenceSync() {
+        guard presenceSyncTask == nil, !presenceUnsupportedForSession, let session = syncSession else { return }
+        guard let desired = desktopPresent, syncedDesktopPresent != desired else { return }
+        presenceSyncGeneration &+= 1
+        let gen = presenceSyncGeneration
+        presenceSyncTask = Task { @MainActor [weak self] in
+            var delay: Duration = .milliseconds(500)
+            while let self, !Task.isCancelled, self.syncSession === session, self.presenceSyncGeneration == gen {
+                guard let target = self.desktopPresent, self.syncedDesktopPresent != target else {
+                    break
+                }
+                do {
+                    try await session.daemonSetPresence(target)
+                    guard !Task.isCancelled, self.syncSession === session, self.presenceSyncGeneration == gen else {
+                        return
+                    }
+                    self.syncedDesktopPresent = target
+                    delay = .milliseconds(500)
+                } catch let error as PortRPCError where error.code == "unknown_method" {
+                    if self.syncSession === session, self.presenceSyncGeneration == gen {
+                        self.presenceUnsupportedForSession = true
+                        self.syncedDesktopPresent = target
+                    }
+                    break
+                } catch let error as PortRPCError where error.code == "invalid_params" {
+                    break
+                } catch {
+                    try? await Task.sleep(for: delay)
+                    delay = min(delay * 2, .seconds(30))
+                }
+            }
+            if let self, self.presenceSyncGeneration == gen {
+                self.presenceSyncTask = nil
+            }
         }
     }
 

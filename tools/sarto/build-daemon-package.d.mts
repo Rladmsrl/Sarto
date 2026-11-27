@@ -19,17 +19,27 @@ export interface BuildDaemonPackageResult {
   name: string
   size: number
   sha256: string
+  version: string
+  build: string
+  channel: 'stable' | 'beta'
 }
 
 export function compareDottedVersion(a: string, b: string): number
-export function parseMaxSymbolVersion(text: string, prefix: 'GLIBC' | 'GLIBCXX'): string | null
+export function parseMaxSymbolVersion(
+  text: string,
+  prefix: 'GLIBC' | 'GLIBCXX' | 'CXXABI' | 'GCC',
+): string | null
 export function parseMaxGlibcVersion(text: string): string | null
 export function parseMaxGlibcxxVersion(text: string): string | null
+export function parseMaxCxxabiVersion(text: string): string | null
+export function parseMaxGccVersion(text: string): string | null
 export function hasPrivateGlibcSymbols(text: string): boolean
 export function verifyGlibcCeiling(
   binary: string,
   maxGlibc?: string,
   maxGlibcxx?: string,
+  maxCxxabi?: string,
+  maxGcc?: string,
 ): Promise<string | null>
 export function buildDaemonPackage(
   options: BuildDaemonPackageOptions,

@@ -480,11 +480,13 @@ async function run(command: Exclude<Command, { kind: 'help' | 'version' | 'usage
   }
   const data = dataPath(where)
   const logDir = logFolderPath(where)
+  const serviceUser = systemUser()
   const service: ServiceDeps = {
     platform: process.platform,
     home: os.homedir(),
     env: process.env,
     uid: os.userInfo().uid,
+    ...(serviceUser ? { user: serviceUser } : {}),
     run: runTool,
   }
   const socket = controlSocketPath(data)

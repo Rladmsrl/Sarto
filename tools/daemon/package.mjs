@@ -139,10 +139,11 @@ function must(file, what) {
 }
 
 /**
- * Builds the package and returns its archive and checksum.
+ * Stages the unpacked daemon package tree into `<dest>/sarto-daemon-<platform>-<arch>` without
+ * compressing it, so release tooling can stamp and smoke-test before creating the final archive.
  *
  * @param {{
- *   out: string,
+ *   dest: string,
  *   build?: string,
  *   node?: string | null,
  *   cacheDir?: string | null,
@@ -151,8 +152,8 @@ function must(file, what) {
  *   arch?: string,
  * }} options
  */
-export async function packageDaemon({
-  out,
+export async function stageDaemonPackage({
+  dest,
   build = path.join(ROOT, 'out'),
   node = null,
   cacheDir = process.env.SARTO_PACKAGE_CACHE?.trim() || path.join(ROOT, '.cache', 'sarto-package'),
@@ -162,9 +163,10 @@ export async function packageDaemon({
 }) {
   const name = packageName(platform, arch)
   must(path.join(build, 'daemon', 'main.cjs'), "The daemon's build; run pnpm build first. It")
-  const stage = await mkdtemp(path.join(os.tmpdir(), 'sarto-daemon-package-'))
+  const dlStage = await mkdtemp(path.join(os.tmpdir(), 'sarto-daemon-node-'))
   try {
-    const dir = path.join(stage, name)
+    const dir = path.join(dest, name)
+    await mkdir(dest, { recursive: true })
     await cp(path.join(build, 'daemon'), path.join(dir, 'daemon'), { recursive: true })
 
     // node-pty's loader and its binaries: the ones this checkout built in build/Release, or else
@@ -201,17 +203,17 @@ export async function packageDaemon({
       ...(platform === 'darwin' && arch === 'arm64' ? ['@expo/serve-sim'] : []),
     ]
     const copied = new Set()
-    /** @param {string} name @param {string} from */
-    const copyPackage = async (name, from) => {
-      if (copied.has(name)) return
+    /** @param {string} depName @param {string} from */
+    const copyPackage = async (depName, from) => {
+      if (copied.has(depName)) return
       const resolve = createRequire(path.join(from, 'package.json'))
-      const paths = resolve.resolve.paths(name) ?? []
+      const paths = resolve.resolve.paths(depName) ?? []
       const source = paths
-        .map((dir) => path.join(dir, name))
-        .find((dir) => existsSync(path.join(dir, 'package.json')))
-      if (!source) throw new Error(`${name} is not installed`)
-      copied.add(name)
-      await cp(realpathSync(source), path.join(dir, 'daemon', 'node_modules', name), {
+        .map((folder) => path.join(folder, depName))
+        .find((folder) => existsSync(path.join(folder, 'package.json')))
+      if (!source) throw new Error(`${depName} is not installed`)
+      copied.add(depName)
+      await cp(realpathSync(source), path.join(dir, 'daemon', 'node_modules', depName), {
         recursive: true,
         dereference: true,
       })
@@ -220,13 +222,13 @@ export async function packageDaemon({
         await copyPackage(dependency, realpathSync(source))
       }
     }
-    for (const name of runtime) await copyPackage(name, root)
+    for (const depName of runtime) await copyPackage(depName, root)
     // The device host's helpers, which tools/install/device-helpers.mjs puts in out/helpers.
     if (existsSync(path.join(build, 'helpers'))) {
       await cp(path.join(build, 'helpers'), path.join(dir, 'helpers'), { recursive: true })
     }
 
-    const nodeDir = node ?? (await downloadNode(platform, arch, stage, cacheDir))
+    const nodeDir = node ?? (await downloadNode(platform, arch, dlStage, cacheDir))
     must(path.join(nodeDir, 'bin', 'node'), 'Node.js')
     must(path.join(nodeDir, 'LICENSE'), "Node.js's license")
     await mkdir(path.join(dir, 'node', 'bin'), { recursive: true })
@@ -238,6 +240,45 @@ export async function packageDaemon({
     await chmod(path.join(dir, 'bin', 'sarto'), 0o755)
     await copyFile(path.join(root, 'LICENSE'), path.join(dir, 'LICENSE'))
 
+    return { dir, name }
+  } finally {
+    await rm(dlStage, { recursive: true, force: true })
+  }
+}
+
+/**
+ * Builds the package and returns its archive and checksum.
+ *
+ * @param {{
+ *   out: string,
+ *   build?: string,
+ *   node?: string | null,
+ *   cacheDir?: string | null,
+ *   root?: string,
+ *   platform?: NodeJS.Platform,
+ *   arch?: string,
+ * }} options
+ */
+export async function packageDaemon({
+  out,
+  build = path.join(ROOT, 'out'),
+  node = null,
+  cacheDir = process.env.SARTO_PACKAGE_CACHE?.trim() || path.join(ROOT, '.cache', 'sarto-package'),
+  root = ROOT,
+  platform = process.platform,
+  arch = process.arch,
+}) {
+  const stage = await mkdtemp(path.join(os.tmpdir(), 'sarto-daemon-package-'))
+  try {
+    const { name } = await stageDaemonPackage({
+      dest: stage,
+      build,
+      node,
+      cacheDir,
+      root,
+      platform,
+      arch,
+    })
     await mkdir(out, { recursive: true })
     const archive = path.join(out, `${name}.tar.gz`)
     // macOS tar would add AppleDouble files for extended attributes.

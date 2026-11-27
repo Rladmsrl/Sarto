@@ -16,14 +16,15 @@ import { DEFAULT_SETTINGS } from '@shared/settings'
 import type { ThreadState } from '@shared/thread'
 import { mergeSettings, parseSettingsFile, validateSettingsPatch } from '../../core/settings-schema'
 import { portPair } from '../../remote-host/host-sockets'
-import type {
-  AgentConnection,
-  AgentInit,
-  McpServer,
-  OpenedSession,
-  PromptResult,
-  SessionOptions,
-  SessionTarget,
+import {
+  AgentRequestError,
+  type AgentConnection,
+  type AgentInit,
+  type McpServer,
+  type OpenedSession,
+  type PromptResult,
+  type SessionOptions,
+  type SessionTarget,
 } from '../connection'
 import { writeBranchSlug } from '../session-titles'
 import { newTurnScope } from '../session-updates'
@@ -484,6 +485,7 @@ describe('RemoteClaudeHost run ownership', () => {
     let release: (() => void) | null = null
     const connection = {
       isClosed: false,
+      closed: new Promise<void>(() => {}),
       hold() {
         return new Promise<void>((resolve) => {
           release = resolve
@@ -994,6 +996,228 @@ describe('RemoteClaudeHost <-> RemoteClaudeConnection end-to-end hosted flow', (
     await host.updateSettings(hostSettings)
     expect(host.activeRuns()).toHaveLength(0)
     expect(activeUpdates.at(-1)).toBe(0)
+
+    conn.close()
+    await host.shutdown()
+  })
+
+  it('keeps hosted runs counted as live for idle stops and resumes cleanly after an unexpected Claude connection close', async () => {
+    const localProject = await makeTempDir('sarto-proj-close-')
+    const remoteData = await makeTempDir('sarto-remote-close-')
+    const byCwd = new Map<string, string[]>()
+    const sessionChanges: string[] = []
+    let connCount = 0
+
+    function makeClaudeConnection() {
+      const id = ++connCount
+      let closed = false
+      let resolveClosed!: () => void
+      const closedPromise = new Promise<void>((resolve) => {
+        resolveClosed = resolve
+      })
+      const sessions = new Set<string>()
+      let inFlightReject: ((err: Error) => void) | null = null
+      const conn: AgentConnection = {
+        hiddenSessions: true,
+        unpromptedSessions: false,
+        get isClosed() {
+          return closed
+        },
+        closed: closedPromise,
+        close() {
+          if (closed) return
+          closed = true
+          sessions.clear()
+          inFlightReject?.(
+            new AgentRequestError('closed', 'The connection to Claude Code is closed'),
+          )
+          inFlightReject = null
+          resolveClosed()
+        },
+        async initialize(): Promise<AgentInit> {
+          return {
+            name: 'Claude Code',
+            version: '1.0.0',
+            capabilities: {
+              loadSession: false,
+              listSessions: true,
+              resumeSession: true,
+              closeSession: true,
+              deleteSession: false,
+              forkSession: false,
+              forkAtMessage: false,
+              ownTitles: 'sent',
+              logout: false,
+              steering: false,
+              mcpHttp: true,
+              mcpSse: false,
+              mcpStdio: false,
+              prompt: { image: false, audio: false, embeddedContext: false },
+            },
+            authMethods: [],
+            raw: {},
+          }
+        },
+        async authenticate() {},
+        async logout() {},
+        async newSession(cwd: string): Promise<OpenedSession> {
+          const sessionId = `cc-close-${id}`
+          sessions.add(sessionId)
+          byCwd.set(cwd, [...(byCwd.get(cwd) ?? []), sessionId])
+          return { sessionId, config: [] }
+        },
+        async loadSession() {
+          return { config: [] }
+        },
+        async resumeSession(sessionId: string) {
+          sessions.add(sessionId)
+          return { config: [] }
+        },
+        async forkSession(): Promise<OpenedSession> {
+          throw new Error('unsupported')
+        },
+        async closeSession(sessionId: string) {
+          sessions.delete(sessionId)
+        },
+        async deleteSession(sessionId: string) {
+          sessions.delete(sessionId)
+        },
+        async listSessions(cwd: string) {
+          return {
+            sessions: (byCwd.get(cwd) ?? []).map((sessionId) => ({
+              sessionId,
+              title: null,
+              updatedAt: null,
+              cwd,
+            })),
+            nextCursor: null,
+          }
+        },
+        register() {},
+        unregister() {},
+        reopen() {},
+        rootOf(sessionId: string) {
+          return sessionId
+        },
+        async prompt(sessionId: string): Promise<PromptResult> {
+          if (closed) {
+            throw new AgentRequestError('closed', 'The connection to Claude Code is closed')
+          }
+          if (!sessions.has(sessionId)) {
+            throw new AgentRequestError('agent_error', `Session ${sessionId} is not open`)
+          }
+          if (id === 1) {
+            return new Promise<PromptResult>((_resolve, reject) => {
+              inFlightReject = reject
+            })
+          }
+          return { stopReason: 'end_turn', tokens: null, models: [] }
+        },
+        async collect() {
+          return []
+        },
+        async steer() {
+          return 'promptRequired'
+        },
+        async cancel() {},
+        async setMode() {},
+        async setConfigOption() {
+          return []
+        },
+        async removeHidden() {},
+      }
+      return conn
+    }
+
+    let currentClaude = makeClaudeConnection()
+    const [clientPort, hostPort] = portPair()
+    const device: PortDevice = { id: 'c'.repeat(32), name: 'MacBook Air' }
+    const host = new RemoteClaudeHost({
+      userDataPath: remoteData,
+      platform: 'darwin',
+      agents: {
+        ensureReady: async () => {
+          if (currentClaude.isClosed) currentClaude = makeClaudeConnection()
+          return {
+            agentId: 'claude-code',
+            connection: currentClaude,
+            init: await currentClaude.initialize('1.0.0'),
+            sarto: true,
+          }
+        },
+        list: async () => [],
+        sessionsChanged: (agentId) => sessionChanges.push(agentId),
+      },
+      claudeOptions: () => [],
+      settings: () => ({ enabled: true, maxConcurrent: 2, idleMinutes: 5 }),
+      sendToPort: (_portId, event) => hostPort.send({ type: 'event', event }),
+      onActiveChanged: () => {},
+      log: () => {},
+    })
+
+    hostPort.onMessage((raw) => {
+      const msg = raw as { type?: string; id?: number; method?: string; params?: unknown }
+      if (msg.type !== 'request' || typeof msg.id !== 'number') return
+      const id = msg.id
+      void (async () => {
+        try {
+          let result: unknown
+          switch (msg.method) {
+            case 'remoteClaude.open':
+              result = await host.open('p1', device, msg.params as never)
+              break
+            case 'remoteClaude.prompt':
+              result = await host.prompt('p1', msg.params as never)
+              break
+            case 'remoteClaude.close':
+              result = await host.close('p1', (msg.params as { runId: string }).runId)
+              break
+            default:
+              throw new Error(`Unknown method ${msg.method}`)
+          }
+          hostPort.send({ type: 'response', id, result })
+        } catch (error) {
+          hostPort.send({
+            type: 'error',
+            id,
+            error: {
+              code: (error as { code?: string }).code ?? 'internal',
+              message: (error as Error).message,
+            },
+          })
+        }
+      })()
+    })
+
+    const peer = new RemoteHostPeer('d'.repeat(32), clientPort, () => {}, true)
+    const conn = new RemoteClaudeConnection(
+      peer,
+      'MacBook Pro Work',
+      'claude-code',
+      'darwin',
+      () => {},
+    )
+
+    const opened = await conn.newSession(localProject)
+    expect(host.liveCount('claude-code')).toBe(1)
+    expect(sessionChanges).toContain('claude-code')
+
+    // Start a turn, then close the host's underlying Claude connection mid-turn.
+    const failedTurn = conn.prompt(opened.sessionId, [{ type: 'text', text: 'First turn' }])
+    await new Promise((r) => setTimeout(r, 20))
+    currentClaude.close()
+
+    await expect(failedTurn).rejects.toThrow('The connection to Claude Code is closed')
+    await new Promise((r) => setTimeout(r, 20))
+    expect(host.activeRuns()).toHaveLength(0)
+    expect(host.liveCount('claude-code')).toBe(0)
+
+    // Retrying or sending the next prompt transparently reopens on a fresh Claude connection.
+    const retried = await conn.prompt(opened.sessionId, [{ type: 'text', text: 'Retry turn' }])
+    expect(retried.stopReason).toBe('end_turn')
+    expect(connCount).toBe(2)
+    expect(host.activeRuns()).toHaveLength(1)
+    expect(host.liveCount('claude-code')).toBe(1)
 
     conn.close()
     await host.shutdown()

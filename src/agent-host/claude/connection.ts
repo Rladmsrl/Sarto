@@ -1678,6 +1678,7 @@ export class ClaudeConnection implements AgentConnection {
 
   /** The session, its query opened again when it ended or its sign-in failed. */
   private async ready(sessionId: string): Promise<Session> {
+    if (this.done) throw this.closedError()
     const session = this.sessions.get(sessionId)
     if (!session) {
       throw new AgentRequestError(

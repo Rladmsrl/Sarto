@@ -550,7 +550,16 @@ struct SartoMacApp: App {
         appState.onPauseMobilePushWhenActiveChanged = { [presenceMonitor] enabled in
             presenceMonitor.setEnabled(enabled)
         }
-        presenceMonitor.start(enabled: appState.pauseMobilePushWhenActive)
+        // Pushes pause only while this Mac shows what waits: the island, or, with it off, the macOS
+        // notifications Notifications settings still post.
+        presenceMonitor.start(
+            enabled: appState.pauseMobilePushWhenActive,
+            islandEnabled: { [islandCoordinator] in islandCoordinator.isEnabled },
+            alertsWanted: { [appState] in
+                let prefs = appState.notificationPrefs
+                return prefs.permissionNeeded || prefs.turnEnded || prefs.error
+            }
+        )
         wireWorkspaceSyncBridge()
 
         bootstrapBoundDaemonIfNeeded()

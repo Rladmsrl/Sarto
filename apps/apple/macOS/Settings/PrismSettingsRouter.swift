@@ -459,6 +459,11 @@ final class PrismSettingsStore {
     @ObservationIgnored private var noticeTask: Task<Void, Never>?
     @ObservationIgnored private var bannerIsHovered: Bool = false
     private static let noticeAutoDismissSeconds: Double = 3.0
+    /// Host settings patches in order: only the newest one's answer or refusal shows at once.
+    @ObservationIgnored private var hostPatchRevision: UInt64 = 0
+    @ObservationIgnored private var hostPatchesInFlight = 0
+    /// Whether a patch was refused since the settings were last read again.
+    @ObservationIgnored private var hostPatchRefused = false
 
     func showNotice(_ text: String) {
         bannerError = nil
@@ -664,10 +669,22 @@ final class PrismSettingsStore {
         }
     }
 
-    func loadProjectWorktreeSettings(projectPath: String, state: SartoState) async {
-        guard let host = state.activeHostSession else { return }
+    static func worktreeCacheKey(hostID: String, path: String) -> String {
+        "\(hostID)::\(path)"
+    }
+
+    func worktreeSettings(hostID: String, path: String) -> ProjectWorktreeSettingsInfo? {
+        worktreeSettingsByProject[Self.worktreeCacheKey(hostID: hostID, path: path)]
+    }
+
+    func setWorktreeSettings(_ settings: ProjectWorktreeSettingsInfo, hostID: String, path: String) {
+        worktreeSettingsByProject[Self.worktreeCacheKey(hostID: hostID, path: path)] = settings
+    }
+
+    func loadProjectWorktreeSettings(projectPath: String, hostID: String, state: SartoState) async {
+        guard let host = state.activeHostSession, state.activeHostID == hostID else { return }
         if let wt = try? await host.projectWorktreeSettings(path: projectPath) {
-            worktreeSettingsByProject[projectPath] = wt
+            setWorktreeSettings(wt, hostID: hostID, path: projectPath)
         }
     }
 
@@ -771,6 +788,7 @@ final class PrismSettingsStore {
         daemon: LocalDaemonManager
     ) async {
         let unique = Array(Set(offAgentIds)).sorted()
+        let previous = hostSettings
         hostSettings.mcpSartoOff = unique
         await patchHostSettings(
             [
@@ -781,7 +799,8 @@ final class PrismSettingsStore {
                 ]),
             ],
             state: state,
-            daemon: daemon
+            daemon: daemon,
+            previous: previous
         )
     }
 
@@ -791,6 +810,7 @@ final class PrismSettingsStore {
         daemon: LocalDaemonManager,
         notice: String? = nil
     ) async {
+        let previous = hostSettings
         hostSettings.marketplaceMcp = servers
         await patchHostSettings(
             [
@@ -800,6 +820,7 @@ final class PrismSettingsStore {
             ],
             state: state,
             daemon: daemon,
+            previous: previous,
             notice: notice
         )
     }
@@ -1027,31 +1048,75 @@ final class PrismSettingsStore {
 
     // MARK: - Host Settings Mutations (Unified Remote HostAdmin + Local Daemon Control)
 
+    private func applyUpdatedHostSettings(
+        _ updated: HostSettingsSnapshot,
+        preservingVerboseFrom previous: HostSettingsSnapshot,
+        isRemote: Bool
+    ) {
+        var merged = updated
+        if merged.verboseUntil == nil {
+            merged.verboseUntil = previous.verboseUntil ?? (isRemote ? nil : localHostSettings.verboseUntil)
+        }
+        hostSettings = merged
+        hostSettingsLiveRPC = true
+        if !isRemote {
+            localHostSettings = merged
+        }
+    }
+
+    @discardableResult
     func patchHostSettings(
         _ patch: [String: JSONValue],
         state: SartoState,
         daemon: LocalDaemonManager,
+        previous: HostSettingsSnapshot? = nil,
         notice: String? = nil
-    ) async {
-        let previous = hostSettings
+    ) async -> Bool {
+        let rollback = previous ?? hostSettings
+        let isRemote = state.connectionMode.isRemote
+        hostPatchRevision &+= 1
+        let revision = hostPatchRevision
+        hostPatchesInFlight += 1
         do {
             let updated: HostSettingsSnapshot
-            if state.connectionMode.isRemote, let host = state.activeHostSession {
+            if isRemote, let host = state.activeHostSession {
                 updated = try await host.adminSettingsUpdate(patch)
             } else {
                 updated = try await daemon.updateHostSettings(patch)
             }
-            var merged = updated
-            if merged.verboseUntil == nil {
-                merged.verboseUntil = previous.verboseUntil
+            // An older answer would hide the changes the user made after it; the newest one's
+            // answer carries them all.
+            if revision == hostPatchRevision {
+                applyUpdatedHostSettings(updated, preservingVerboseFrom: rollback, isRemote: isRemote)
             }
-            hostSettings = merged
-            hostSettingsLiveRPC = true
             if let notice { showNotice(notice) }
+            await finishHostPatch(failed: false, state: state, daemon: daemon)
+            return true
         } catch {
-            hostSettings = previous
+            // Only the newest change goes back at once: an older one's `previous` would also undo
+            // the newer changes made meanwhile, which the read after the last answer settles.
+            if revision == hostPatchRevision {
+                hostSettings = rollback
+                if !isRemote {
+                    localHostSettings = rollback
+                }
+            }
             showError(error.localizedDescription)
+            await finishHostPatch(failed: true, state: state, daemon: daemon)
+            return false
         }
+    }
+
+    /// Once the last patch in flight is answered after any was refused, reads the settings again,
+    /// so what shows is what the host keeps even when an older change failed under a newer one.
+    private func finishHostPatch(failed: Bool, state: SartoState, daemon: LocalDaemonManager) async {
+        hostPatchesInFlight -= 1
+        if failed {
+            hostPatchRefused = true
+        }
+        guard hostPatchesInFlight == 0, hostPatchRefused else { return }
+        hostPatchRefused = false
+        await loadHostSettings(state: state, daemon: daemon)
     }
 
     /// Changes `remote.claude` on this computer through its own daemon, whichever host the window
@@ -1065,17 +1130,24 @@ final class PrismSettingsStore {
     ) async {
         do {
             let updated = try await daemon.updateHostSettings(["remote": .object(["claude": .object(fields)])])
-            localHostSettings = updated
+            var merged = updated
+            if merged.verboseUntil == nil {
+                merged.verboseUntil = previous.verboseUntil ?? localHostSettings.verboseUntil
+            }
+            localHostSettings = merged
             if !state.connectionMode.isRemote {
-                var merged = updated
-                if merged.verboseUntil == nil {
-                    merged.verboseUntil = hostSettings.verboseUntil
+                var mergedHost = merged
+                if mergedHost.verboseUntil == nil {
+                    mergedHost.verboseUntil = hostSettings.verboseUntil
                 }
-                hostSettings = merged
+                hostSettings = mergedHost
                 hostSettingsLiveRPC = true
             }
         } catch {
             localHostSettings = previous
+            if !state.connectionMode.isRemote {
+                hostSettings = previous
+            }
             showError(error.localizedDescription)
         }
     }
@@ -1086,17 +1158,15 @@ final class PrismSettingsStore {
         state: SartoState,
         daemon: LocalDaemonManager
     ) async throws {
-        let previousVerbose = hostSettings.verboseUntil
-        var updated: HostSettingsSnapshot
-        if state.connectionMode.isRemote, let host = state.activeHostSession {
+        let previous = hostSettings
+        let isRemote = state.connectionMode.isRemote
+        let updated: HostSettingsSnapshot
+        if isRemote, let host = state.activeHostSession {
             updated = try await host.adminSetAgentBinary(harnessId: harnessId, path: path)
         } else {
             updated = try await daemon.setHostAgentBinary(harnessId: harnessId, path: path)
         }
-        if updated.verboseUntil == nil {
-            updated.verboseUntil = previousVerbose
-        }
-        hostSettings = updated
+        applyUpdatedHostSettings(updated, preservingVerboseFrom: previous, isRemote: isRemote)
     }
 
     func setShellPath(
@@ -1104,16 +1174,14 @@ final class PrismSettingsStore {
         state: SartoState,
         daemon: LocalDaemonManager
     ) async throws {
-        let previousVerbose = hostSettings.verboseUntil
-        var updated: HostSettingsSnapshot
-        if state.connectionMode.isRemote, let host = state.activeHostSession {
+        let previous = hostSettings
+        let isRemote = state.connectionMode.isRemote
+        let updated: HostSettingsSnapshot
+        if isRemote, let host = state.activeHostSession {
             updated = try await host.adminSetShellPath(path)
         } else {
             updated = try await daemon.setHostShellPath(path)
         }
-        if updated.verboseUntil == nil {
-            updated.verboseUntil = previousVerbose
-        }
-        hostSettings = updated
+        applyUpdatedHostSettings(updated, preservingVerboseFrom: previous, isRemote: isRemote)
     }
 }

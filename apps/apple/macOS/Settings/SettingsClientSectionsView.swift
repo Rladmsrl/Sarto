@@ -1,4 +1,5 @@
 import AppKit
+import CoreText
 import SartoProtocol
 import MenuBarKit
 import PrismDesign
@@ -67,22 +68,30 @@ struct GeneralSettingsSectionView: View {
                                 if state.connectionMode.isRemote {
                                     return store.hostSettings.defaultAgent ?? ""
                                 }
-                                return state.defaultAgentID ?? store.hostSettings.defaultAgent ?? ""
+                                return state.defaultAgentID ?? ""
                             },
                             set: { next in
                                 let value: String? = next.isEmpty ? nil : next
-                                if !state.connectionMode.isRemote {
+                                let previous = store.hostSettings
+                                let previousLocalAgent = state.defaultAgentID
+                                let isRemote = state.connectionMode.isRemote
+                                if !isRemote {
                                     state.defaultAgentID = value
                                 }
                                 store.hostSettings.defaultAgent = value
                                 // Keep the active host's general.defaultAgent aligned for background tasks.
                                 if state.connectionMode.isLive {
                                     Task {
-                                        await store.patchHostSettings(
+                                        let ok = await store.patchHostSettings(
                                             ["general": .object(["defaultAgent": value.map(JSONValue.string) ?? .null])],
                                             state: state,
-                                            daemon: daemon
+                                            daemon: daemon,
+                                            previous: previous
                                         )
+                                        // A newer pick made meanwhile stays.
+                                        if !ok && !isRemote && state.defaultAgentID == value {
+                                            state.defaultAgentID = previousLocalAgent
+                                        }
                                     }
                                 }
                             }
@@ -124,12 +133,14 @@ struct GeneralSettingsSectionView: View {
                         isOn: Binding(
                             get: { store.hostSettings.sessionTitles },
                             set: { next in
+                                let previous = store.hostSettings
                                 store.hostSettings.sessionTitles = next
                                 Task {
                                     await store.patchHostSettings(
                                         ["general": .object(["sessionTitles": .bool(next)])],
                                         state: state,
-                                        daemon: daemon
+                                        daemon: daemon,
+                                        previous: previous
                                     )
                                 }
                             }
@@ -154,12 +165,14 @@ struct GeneralSettingsSectionView: View {
                         isOn: Binding(
                             get: { store.hostSettings.promptSuggestions },
                             set: { next in
+                                let previous = store.hostSettings
                                 store.hostSettings.promptSuggestions = next
                                 Task {
                                     await store.patchHostSettings(
                                         ["general": .object(["promptSuggestions": .bool(next)])],
                                         state: state,
-                                        daemon: daemon
+                                        daemon: daemon,
+                                        previous: previous
                                     )
                                 }
                             }
@@ -279,6 +292,7 @@ struct GeneralSettingsSectionView: View {
     }
 
     private func applyLightModelTag(_ tag: String) {
+        let previous = store.hostSettings
         let val: JSONValue
         if tag == "mode:session" {
             store.hostSettings.lightModelMode = "session"
@@ -305,7 +319,8 @@ struct GeneralSettingsSectionView: View {
             await store.patchHostSettings(
                 ["general": .object(["lightModel": val])],
                 state: state,
-                daemon: daemon
+                daemon: daemon,
+                previous: previous
             )
         }
     }
@@ -357,14 +372,9 @@ private enum SystemFontKind: Equatable, Sendable {
 }
 
 @MainActor
-private enum SystemFontCatalog {
-    static let allFamilies: [String] = {
-        NSFontManager.shared.availableFontFamilies
-            .filter { !$0.hasPrefix(".") }
-            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
-    }()
-
-    static let installedSet: Set<String> = Set(allFamilies)
+@Observable
+private final class SystemFontCatalog {
+    static let shared = SystemFontCatalog()
 
     private static let proseRecommended = ["SF Pro Text", "Inter", "PingFang SC", "Helvetica Neue", "Avenir Next"]
     private static let monoRecommended = [
@@ -372,17 +382,62 @@ private enum SystemFontCatalog {
         "Fira Code", "Menlo", "Hack", "Sarasa Mono SC",
     ]
 
-    static let proseSections: (preferred: [String], others: [String]) = buildBaseSections(proseRecommended)
-    static let monoSections: (preferred: [String], others: [String]) = buildBaseSections(monoRecommended)
+    private(set) var proseSections: (preferred: [String], others: [String]) = ([], [])
+    private(set) var monoSections: (preferred: [String], others: [String]) = ([], [])
+    /// The families each menu lists, so a menu shows a selection it does not list on its own.
+    private(set) var proseListed: Set<String> = []
+    private(set) var monoListed: Set<String> = []
+    private(set) var isLoaded = false
+    @ObservationIgnored private var loadStarted = false
 
-    private static func buildBaseSections(_ recommended: [String]) -> (preferred: [String], others: [String]) {
-        let preferred = recommended.filter { installedSet.contains($0) }
-        let prefSet = Set(preferred)
-        let others = allFamilies.filter { !prefSet.contains($0) }
-        return (preferred, others)
+    /// Enumerates and sorts installed macOS font families off `@MainActor` using thread-safe CoreText
+    /// APIs, keeping monospace pickers limited to fixed-pitch families.
+    func loadIfNeeded() {
+        guard !loadStarted else { return }
+        loadStarted = true
+        let proseRec = Self.proseRecommended
+        let monoRec = Self.monoRecommended
+        Task.detached(priority: .userInitiated) {
+            let allFamilies = ((CTFontManagerCopyAvailableFontFamilyNames() as? [String]) ?? [])
+                .filter { !$0.hasPrefix(".") }
+                .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+            let allSet = Set(allFamilies)
+
+            let monoAttrs: CFDictionary = [
+                kCTFontTraitsAttribute: [
+                    kCTFontSymbolicTrait: CTFontSymbolicTraits.monoSpaceTrait.rawValue,
+                ],
+            ] as CFDictionary
+            let monoDescriptor = CTFontDescriptorCreateWithAttributes(monoAttrs)
+            let matched = (CTFontDescriptorCreateMatchingFontDescriptors(monoDescriptor, nil) as? [CTFontDescriptor]) ?? []
+            let monoFamilySet = Set(
+                matched.compactMap { CTFontDescriptorCopyAttribute($0, kCTFontFamilyNameAttribute) as? String }
+                    .filter { !$0.hasPrefix(".") }
+            )
+            let monoFamilies = monoFamilySet.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+
+            let prosePreferred = proseRec.filter { allSet.contains($0) }
+            let prosePrefSet = Set(prosePreferred)
+            let proseOthers = allFamilies.filter { !prosePrefSet.contains($0) }
+
+            let monoPreferred = monoRec.filter { allSet.contains($0) || monoFamilySet.contains($0) }
+            let monoPrefSet = Set(monoPreferred)
+            let monoOthers = monoFamilies.filter { !monoPrefSet.contains($0) }
+            let proseListed = prosePrefSet.union(proseOthers)
+            let monoListed = monoPrefSet.union(monoOthers)
+
+            await MainActor.run {
+                let catalog = SystemFontCatalog.shared
+                catalog.proseListed = proseListed
+                catalog.monoListed = monoListed
+                catalog.proseSections = (prosePreferred, proseOthers)
+                catalog.monoSections = (monoPreferred, monoOthers)
+                catalog.isLoaded = true
+            }
+        }
     }
 
-    static func baseSections(for kind: SystemFontKind) -> (preferred: [String], others: [String]) {
+    func sections(for kind: SystemFontKind) -> (preferred: [String], others: [String]) {
         switch kind {
         case .prose: return proseSections
         case .mono: return monoSections
@@ -390,7 +445,7 @@ private enum SystemFontCatalog {
     }
 }
 
-/// Equatable leaf view so unrelated `SartoState` updates never re-diff hundreds of system font items.
+/// Equatable leaf view so unrelated `SartoState` updates never re-diff system font menus.
 private struct SystemFontFamilyMenu: View, Equatable {
     let selection: String
     let kind: SystemFontKind
@@ -402,8 +457,12 @@ private struct SystemFontFamilyMenu: View, Equatable {
     }
 
     var body: some View {
-        let base = SystemFontCatalog.baseSections(for: kind)
-        let missingCurrent = !selection.isEmpty && !SystemFontCatalog.installedSet.contains(selection)
+        let catalog = SystemFontCatalog.shared
+        let base = catalog.sections(for: kind)
+        // Checked against this menu's own list: an installed family the monospaced menu leaves out,
+        // such as a CJK one without the fixed-pitch trait, still shows as the selection.
+        let listed = kind == .mono ? catalog.monoListed : catalog.proseListed
+        let missingCurrent = !selection.isEmpty && (!catalog.isLoaded || !listed.contains(selection))
         Picker(
             "",
             selection: Binding(
@@ -429,6 +488,9 @@ private struct SystemFontFamilyMenu: View, Equatable {
             }
         }
         .labelsHidden()
+        .onAppear {
+            SystemFontCatalog.shared.loadIfNeeded()
+        }
     }
 }
 
@@ -1166,12 +1228,14 @@ private struct IslandMenuBarSettingsBody: View {
                         isOn: Binding(
                             get: { store.hostSettings.usageFromComputer },
                             set: { next in
+                                let previous = store.hostSettings
                                 store.hostSettings.usageFromComputer = next
                                 Task {
                                     await store.patchHostSettings(
                                         ["usage": .object(["fromComputer": .bool(next)])],
                                         state: state,
-                                        daemon: daemon
+                                        daemon: daemon,
+                                        previous: previous
                                     )
                                 }
                             }
@@ -1676,6 +1740,7 @@ private struct PrismColorWheelPopover: View {
     @State private var lastCommitTime: ContinuousClock.Instant?
     @State private var pendingHex: UInt32?
     @State private var pendingCommitTask: Task<Void, Never>?
+    @State private var commitToken: UInt64 = 0
 
     private let wheelSize: CGFloat = 176
     private let minBrightness: Double = 0.22
@@ -1851,6 +1916,7 @@ private struct PrismColorWheelPopover: View {
         hasInteracted = true
         pendingHex = hex
         if immediate {
+            commitToken &+= 1
             pendingCommitTask?.cancel()
             pendingCommitTask = nil
             if hex != lastCommittedHex {
@@ -1867,10 +1933,13 @@ private struct PrismColorWheelPopover: View {
             if elapsed < Self.dragCommitInterval {
                 if pendingCommitTask == nil {
                     let delay = Self.dragCommitInterval - elapsed
+                    commitToken &+= 1
+                    let token = commitToken
                     pendingCommitTask = Task { @MainActor in
                         try? await Task.sleep(for: delay)
+                        guard !Task.isCancelled, commitToken == token else { return }
                         pendingCommitTask = nil
-                        guard !Task.isCancelled, let latest = pendingHex, latest != lastCommittedHex else { return }
+                        guard let latest = pendingHex, latest != lastCommittedHex else { return }
                         lastCommittedHex = latest
                         self.lastCommitTime = .now
                         onChangeHex(latest)
@@ -1879,6 +1948,7 @@ private struct PrismColorWheelPopover: View {
                 return
             }
         }
+        commitToken &+= 1
         pendingCommitTask?.cancel()
         pendingCommitTask = nil
         lastCommittedHex = hex

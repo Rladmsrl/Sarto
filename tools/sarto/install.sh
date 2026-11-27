@@ -175,17 +175,39 @@ if [ "$os" = linux ]; then
       done
       ;;
   esac
+  libc_ver=''
   case $libc in
     glibc\ [0-9]*.[0-9]*)
       libc_ver=${libc#glibc }
-      libc_major=${libc_ver%%.*}
-      libc_rest=${libc_ver#*.}
-      libc_minor=${libc_rest%%.*}
-      if [ "$libc_major" -lt 2 ] || { [ "$libc_major" -eq 2 ] && [ "$libc_minor" -lt 28 ]; }; then
-        fail "The Sarto daemon needs glibc 2.28 or later (found glibc $libc_major.$libc_minor)"
-      fi
       ;;
   esac
+  if [ -z "$libc_ver" ]; then
+    # Fall back to the first line of `ldd --version` when `getconf` is unavailable.
+    ldd_first=$(printf '%s\n' "$ldd_out" | head -n 1)
+    case $ldd_first in
+      *GNU* | *GLIBC* | *glibc*)
+        ldd_last=${ldd_first##* }
+        case $ldd_last in
+          [0-9]*.[0-9]*) libc_ver=$ldd_last ;;
+        esac
+        ;;
+    esac
+  fi
+  if [ -n "$libc_ver" ]; then
+    libc_major=${libc_ver%%.*}
+    libc_rest=${libc_ver#*.}
+    libc_minor=${libc_rest%%.*}
+    libc_major=${libc_major%%[!0-9]*}
+    libc_minor=${libc_minor%%[!0-9]*}
+    case "$libc_major:$libc_minor" in
+      '' | *[!0-9:]* | :* | *:) ;;
+      *)
+        if [ "$libc_major" -lt 2 ] || { [ "$libc_major" -eq 2 ] && [ "$libc_minor" -lt 28 ]; }; then
+          fail "The Sarto daemon needs glibc 2.28 or later (found glibc $libc_major.$libc_minor)"
+        fi
+        ;;
+    esac
+  fi
 fi
 
 # A place that cannot be reached, or stops sending, gives way to the next one soon.
@@ -315,17 +337,18 @@ is_newer_version() {
 }
 resolve_channel() {
   base=$1
+  target_channel=$2
   best_ver=''
   best_tag=''
   for mname in beta-daemon.json latest-daemon.json; do
-    if [ "$channel" = stable ] && [ "$mname" = beta-daemon.json ]; then continue; fi
+    if [ "$target_channel" = stable ] && [ "$mname" = beta-daemon.json ]; then continue; fi
     mfile=$work/$mname
     if ! download "$base/latest/download/$mname" "$mfile"; then continue; fi
     mver=$(manifest_field "$mfile" version)
     mtag=$(manifest_field "$mfile" tag)
     [ -n "$mtag" ] || mtag=v$mver
     if ! is_version "$mver" || ! is_tag "$mtag"; then continue; fi
-    if [ "$channel" = stable ]; then
+    if [ "$target_channel" = stable ]; then
       case $mver in
         *-beta.*) continue ;;
       esac
@@ -336,7 +359,7 @@ resolve_channel() {
     fi
   done
   if [ -z "$best_tag" ]; then
-    why="Could not resolve a $channel daemon release from $base"
+    why="Could not resolve a $target_channel daemon release from $base"
     return 1
   fi
   wanted=$best_ver
@@ -345,9 +368,15 @@ resolve_channel() {
 }
 # Downloads the package and the checksums from one place and checks them, or sets why not.
 fetch() {
-  if [ -n "$channel" ]; then
-    if ! resolve_channel "$1"; then
-      if [ "$channel" = stable ]; then
+  resolve_target=$channel
+  # Resolve `latest-daemon.json` by default when no version or tag is pinned, so decoupled
+  # `daemon-v*` releases install cleanly even when `/releases/latest` points at an app release.
+  if [ -z "$resolve_target" ] && [ -z "$tag" ] && [ -z "$wanted" ]; then
+    resolve_target=stable
+  fi
+  if [ -n "$resolve_target" ]; then
+    if ! resolve_channel "$1" "$resolve_target"; then
+      if [ "$resolve_target" = stable ]; then
         fetch_from "$1/latest/download"
         return
       fi

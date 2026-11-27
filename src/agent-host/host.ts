@@ -1170,6 +1170,8 @@ export class AgentHost {
       },
       log,
     })
+    // Hosted runs keep their agent alive against idle stops and auto-updates, as local sessions do.
+    this.agents.addLiveSessions((agentId) => this.remoteClaudeHost.liveCount(agentId))
     // Earlier runs' shadow workspaces go before a device's first open makes one of its own.
     this.shadowsCleared = clearShadowWorkspaces(options.userDataPath)
     this.deviceBrowser = new DeviceBrowserCalls({

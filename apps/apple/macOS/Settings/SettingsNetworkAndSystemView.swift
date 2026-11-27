@@ -95,11 +95,13 @@ struct RemoteCloudSettingsSectionView: View {
                         isOn: Binding(
                             get: { store.remoteTerminalAllowed },
                             set: { next in
+                                let previous = store.remoteTerminalAllowed
                                 store.remoteTerminalAllowed = next
                                 Task {
                                     do {
                                         store.remoteTerminalAllowed = try await daemon.setRemoteTerminalAllowed(next)
                                     } catch {
+                                        store.remoteTerminalAllowed = previous
                                         store.showError(error.localizedDescription)
                                     }
                                 }
@@ -145,10 +147,12 @@ struct RemoteCloudSettingsSectionView: View {
             }
 
             // PrismSettingsWindowView's preload already fetched the initial paired-device snapshot;
-            // wait one interval before polling so entering this section avoids duplicate RPCs.
+            // wait one interval before polling, and skip polling while signed out since mobile rows
+            // are only shown for signed-in accounts.
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(3))
                 guard !Task.isCancelled else { break }
+                guard state.cloudAccountStatus.account.isSignedIn else { continue }
                 await store.refreshLiveDevicePresence(daemon: daemon)
             }
         }
@@ -1291,16 +1295,6 @@ struct RemoteCloudSettingsSectionView: View {
             return parts
         }()
 
-        let hostLoad: HostLoad? = {
-            if entry.isLocal {
-                return state.hostLoad(for: nil)
-            }
-            if let host, host.isOnline {
-                return state.hostLoad(for: host.id)
-            }
-            return nil
-        }()
-
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
                 ZStack(alignment: .bottomTrailing) {
@@ -1412,11 +1406,11 @@ struct RemoteCloudSettingsSectionView: View {
                 }
             }
 
-            if let hostLoad {
-                Rectangle()
-                    .fill(tokens.borderEtched)
-                    .frame(height: 1)
-                HostLoadMetersView(load: hostLoad)
+            if entry.isLocal || isOnline {
+                HostLoadRowSectionView(
+                    state: state,
+                    hostID: entry.isLocal ? nil : host?.id
+                )
             }
         }
         .padding(.horizontal, 10)
@@ -1652,6 +1646,20 @@ struct AdvancedServiceSettingsSectionView: View {
     @Environment(\.prismTokens) private var tokens
     @Environment(\.prismL10n) private var l10n
 
+    private struct ProxySnapshot: Equatable {
+        let mode: String
+        let url: String
+        let noProxy: String
+    }
+
+    private var storedProxySnapshot: ProxySnapshot {
+        ProxySnapshot(
+            mode: store.hostSettings.proxyMode,
+            url: store.hostSettings.proxyUrl,
+            noProxy: store.hostSettings.proxyNoProxy
+        )
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             // 1. Unified Local Background Service (Controls + Health Metrics)
@@ -1738,18 +1746,25 @@ struct AdvancedServiceSettingsSectionView: View {
                     title: l10n.tr("settings.advanced.proxyMode"),
                     subtitle: l10n.tr("settings.advanced.proxySub")
                 ) {
-                    Picker("", selection: $proxyMode) {
+                    Picker(
+                        "",
+                        selection: Binding(
+                            get: { proxyMode },
+                            set: { next in
+                                guard proxyMode != next else { return }
+                                proxyMode = next
+                                if next == "environment" {
+                                    saveProxy()
+                                }
+                            }
+                        )
+                    ) {
                         Text(l10n.tr("settings.advanced.proxyEnv")).tag("environment")
                         Text(l10n.tr("settings.advanced.proxyCustom")).tag("custom")
                     }
                     .labelsHidden()
                     .pickerStyle(.segmented)
                     .frame(width: 210)
-                    .onChange(of: proxyMode) { _, next in
-                        if next == "environment" {
-                            saveProxy()
-                        }
-                    }
                 }
 
                 if proxyMode == "custom" {
@@ -1856,10 +1871,12 @@ struct AdvancedServiceSettingsSectionView: View {
             }
         }
         .onAppear {
-            syncFromStore()
+            syncProxyFromStore()
+            syncVerboseFromStore()
         }
-        .onChange(of: store.hostSettings) { _, _ in syncFromStore() }
-        .onChange(of: store.localHostSettings) { _, _ in syncFromStore() }
+        .onChange(of: storedProxySnapshot) { _, _ in syncProxyFromStore() }
+        .onChange(of: state.activeHostID) { _, _ in syncProxyFromStore() }
+        .onChange(of: store.localHostSettings.verboseUntil) { _, _ in syncVerboseFromStore() }
         .alert(l10n.tr("settings.advanced.clearSessionsConfirmTitle"), isPresented: $showClearConfirm) {
             Button(l10n.tr("thread.entry.cancel"), role: .cancel) {}
             Button(l10n.tr("settings.advanced.clearAllBtn"), role: .destructive) {
@@ -1881,10 +1898,13 @@ struct AdvancedServiceSettingsSectionView: View {
         }
     }
 
-    private func syncFromStore() {
+    private func syncProxyFromStore() {
         proxyMode = store.hostSettings.proxyMode
         proxyUrl = store.hostSettings.proxyUrl
         proxyNoProxy = store.hostSettings.proxyNoProxy
+    }
+
+    private func syncVerboseFromStore() {
         // Verbose logging controls this Mac's local daemon even when viewing a remote host.
         if let until = store.localHostSettings.verboseUntil {
             verboseEnabled = until > Date().timeIntervalSince1970 * 1000
@@ -2710,6 +2730,24 @@ private struct CloudReportRowView: View {
             return String(format: "%.0f KB", Double(bytes) / 1024)
         }
         return "\(bytes) B"
+    }
+}
+
+/// Isolates `@Observable` reads of `state.hostLoadsByHostID` inside a leaf view so periodic
+/// CPU/memory/disk/battery samples only re-render the affected host's meters.
+private struct HostLoadRowSectionView: View {
+    let state: SartoState
+    let hostID: String?
+
+    @Environment(\.prismTokens) private var tokens
+
+    var body: some View {
+        if let load = state.hostLoad(for: hostID) {
+            Rectangle()
+                .fill(tokens.borderEtched)
+                .frame(height: 1)
+            HostLoadMetersView(load: load)
+        }
     }
 }
 

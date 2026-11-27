@@ -18,6 +18,11 @@ struct AgentsSettingsSectionView: View {
     @Environment(\.prismTokens) private var tokens
     @Environment(\.prismL10n) private var l10n
 
+    private struct AgentsRefreshKey: Equatable {
+        let hostID: String
+        let isLive: Bool
+    }
+
     private var visibleAgents: [AgentStatusInfo] {
         PrismSettingsStore.visibleAgents(from: state.agents)
     }
@@ -52,6 +57,7 @@ struct AgentsSettingsSectionView: View {
                         selection: Binding<String>(
                             get: { store.hostSettings.idleRelease },
                             set: { next in
+                                let previous = store.hostSettings
                                 let wasCustom = store.hostSettings.idleRelease == "custom"
                                 store.hostSettings.idleRelease = next
                                 var idleObj: [String: JSONValue] = ["release": .string(next)]
@@ -67,7 +73,8 @@ struct AgentsSettingsSectionView: View {
                                     await store.patchHostSettings(
                                         ["idleSessions": .object(idleObj)],
                                         state: state,
-                                        daemon: daemon
+                                        daemon: daemon,
+                                        previous: previous
                                     )
                                 }
                             }
@@ -111,7 +118,7 @@ struct AgentsSettingsSectionView: View {
             }
         }
         .modifier(AgentAvailabilityPresenter(state: state, surface: .settings, settings: storeSettings))
-        .task(id: state.connectionMode.isLive) {
+        .task(id: AgentsRefreshKey(hostID: state.activeHostID, isLive: state.connectionMode.isLive)) {
             guard state.connectionMode.isLive, let host = state.activeHostSession else { return }
             let pending = visibleAgents.filter { agent in
                 AgentAvailability.isInstalled(agent)
@@ -448,6 +455,7 @@ struct AgentsSettingsSectionView: View {
                         selection: Binding<String>(
                             get: { store.hostSettings.startModes[agent.id] ?? "" },
                             set: { next in
+                                let previous = store.hostSettings
                                 var modes = store.hostSettings.startModes
                                 if next.isEmpty { modes.removeValue(forKey: agent.id) } else { modes[agent.id] = next }
                                 store.hostSettings.startModes = modes
@@ -456,7 +464,8 @@ struct AgentsSettingsSectionView: View {
                                     await store.patchHostSettings(
                                         ["startModes": .object([agent.id: val])],
                                         state: state,
-                                        daemon: daemon
+                                        daemon: daemon,
+                                        previous: previous
                                     )
                                 }
                             }
@@ -628,6 +637,7 @@ struct AgentsSettingsSectionView: View {
     }
 
     private func toggleAgentEnabled(agentId: String, enabled: Bool) {
+        let previous = store.hostSettings
         var list = store.hostSettings.disabledAgents
         if enabled {
             list.removeAll { $0 == agentId }
@@ -639,7 +649,8 @@ struct AgentsSettingsSectionView: View {
             await store.patchHostSettings(
                 ["disabledAgents": .array(list.map(JSONValue.string))],
                 state: state,
-                daemon: daemon
+                daemon: daemon,
+                previous: previous
             )
             await state.refreshAgentsFromHost()
         }
@@ -1201,12 +1212,14 @@ struct GitTerminalSettingsSectionView: View {
                         isOn: Binding(
                             get: { store.hostSettings.gitBackgroundFetch },
                             set: { next in
+                                let previous = store.hostSettings
                                 store.hostSettings.gitBackgroundFetch = next
                                 Task {
                                     await store.patchHostSettings(
                                         ["git": .object(["backgroundFetch": .bool(next)])],
                                         state: state,
-                                        daemon: daemon
+                                        daemon: daemon,
+                                        previous: previous
                                     )
                                 }
                             }
@@ -1229,12 +1242,14 @@ struct GitTerminalSettingsSectionView: View {
                     HStack(spacing: 6) {
                         if store.hostSettings.gitWorktreeRoot != nil {
                             SettingsPillButton(l10n.tr("settings.common.reset")) {
+                                let previous = store.hostSettings
                                 store.hostSettings.gitWorktreeRoot = nil
                                 Task {
                                     await store.patchHostSettings(
                                         ["git": .object(["worktreeRoot": .null])],
                                         state: state,
                                         daemon: daemon,
+                                        previous: previous,
                                         notice: l10n.tr("settings.common.saved")
                                     )
                                 }
@@ -1242,12 +1257,14 @@ struct GitTerminalSettingsSectionView: View {
                         }
                         SettingsPillButton(l10n.tr("settings.common.choose")) {
                             chooseFolder { path in
+                                let previous = store.hostSettings
                                 store.hostSettings.gitWorktreeRoot = path
                                 Task {
                                     await store.patchHostSettings(
                                         ["git": .object(["worktreeRoot": .string(path)])],
                                         state: state,
                                         daemon: daemon,
+                                        previous: previous,
                                         notice: l10n.tr("settings.common.saved")
                                     )
                                 }
@@ -1345,12 +1362,14 @@ struct GitTerminalSettingsSectionView: View {
                     HStack(spacing: 6) {
                         if store.hostSettings.terminalShellPath != nil {
                             SettingsPillButton(l10n.tr("settings.common.reset")) {
+                                let previous = store.hostSettings
                                 store.hostSettings.terminalShellPath = nil
                                 Task {
                                     await store.patchHostSettings(
                                         ["terminal": .object(["shellPath": .null])],
                                         state: state,
                                         daemon: daemon,
+                                        previous: previous,
                                         notice: l10n.tr("settings.common.saved")
                                     )
                                 }
@@ -1417,10 +1436,11 @@ struct GitTerminalSettingsSectionView: View {
 
     private func loadSelectedProjectWorktree(_ path: String) {
         guard !path.isEmpty else { return }
+        let hostID = state.activeHostID
         Task {
-            await store.loadProjectWorktreeSettings(projectPath: path, state: state)
-            guard selectedProjectPath == path else { return }
-            if let wt = store.worktreeSettingsByProject[path] {
+            await store.loadProjectWorktreeSettings(projectPath: path, hostID: hostID, state: state)
+            guard selectedProjectPath == path, state.activeHostID == hostID else { return }
+            if let wt = store.worktreeSettings(hostID: hostID, path: path) {
                 wtBranchTemplate = wt.branchTemplate
                 wtCopyPaths = wt.copy.joined(separator: ", ")
                 wtSetupCmd = wt.setup ?? ""
@@ -1431,16 +1451,31 @@ struct GitTerminalSettingsSectionView: View {
 
     private func saveProjectWorktree() {
         guard !selectedProjectPath.isEmpty, let host = state.activeHostSession else { return }
+        let hostID = state.activeHostID
+        let path = selectedProjectPath
+        let branchTemplate = wtBranchTemplate.isEmpty ? "sarto/{slug}" : wtBranchTemplate
         let copies = wtCopyPaths.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
         let setup = wtSetupCmd.trimmingCharacters(in: .whitespacesAndNewlines)
+        let setupValue: String? = setup.isEmpty ? nil : setup
+        let waitForSetup = wtWaitForSetup
         Task {
             do {
                 try await host.setProjectWorktreeSettings(
-                    path: selectedProjectPath,
-                    branchTemplate: wtBranchTemplate.isEmpty ? "sarto/{slug}" : wtBranchTemplate,
+                    path: path,
+                    branchTemplate: branchTemplate,
                     copy: copies,
-                    setup: setup.isEmpty ? nil : setup,
-                    waitForSetup: wtWaitForSetup
+                    setup: setupValue,
+                    waitForSetup: waitForSetup
+                )
+                store.setWorktreeSettings(
+                    ProjectWorktreeSettingsInfo(
+                        branchTemplate: branchTemplate,
+                        copy: copies,
+                        setup: setupValue,
+                        waitForSetup: waitForSetup
+                    ),
+                    hostID: hostID,
+                    path: path
                 )
                 store.showNotice(l10n.tr("settings.common.saved"))
             } catch {

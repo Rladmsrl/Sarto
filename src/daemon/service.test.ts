@@ -72,8 +72,10 @@ describe('Linux systemd user service management', () => {
       const deps: ServiceDeps = {
         platform: 'linux',
         home: dir,
-        env: { USER: 'alice' },
+        // `su` without `-` keeps the caller's USER: linger goes to the account of the uid.
+        env: { USER: 'root', LOGNAME: 'root' },
         uid: 1001,
+        user: 'alice',
         dir,
         run,
         pathExists: async (file) => existing.has(file),
@@ -90,6 +92,7 @@ describe('Linux systemd user service management', () => {
 
       expect(installed.file).toBe(path.join(dir, SYSTEMD_UNIT))
       expect(installed.warning).toContain('sudo loginctl enable-linger alice')
+      expect(run).toHaveBeenCalledWith('loginctl', ['enable-linger', 'alice'], expect.any(Object))
       const content = await readFile(installed.file, 'utf8')
       expect(content).toContain('TimeoutStopSec=25')
       expect(seenEnvs).toHaveLength(4)
@@ -101,6 +104,51 @@ describe('Linux systemd user service management', () => {
       expect(await restartService(deps)).toBe(true)
       expect(await uninstallService(deps)).toBe(true)
       expect(await uninstallService(deps)).toBe(false)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('removes a disabled or broken systemd unit on uninstall unless still active', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'sarto-service-test-'))
+    try {
+      // systemctl is-active: 0 active, 3 not active, 4 no such unit, 1 could not ask (no bus).
+      const makeDeps = (activeCode: number): ServiceDeps => ({
+        platform: 'linux',
+        home: dir,
+        env: { USER: 'alice', XDG_RUNTIME_DIR: '/run/user/1000' },
+        uid: 1000,
+        dir,
+        run: async (command, args) => {
+          if (command === 'systemctl' && args.includes('disable')) {
+            return { code: 1, stdout: '', stderr: 'Unit sarto.service not loaded.' }
+          }
+          if (command === 'systemctl' && args.includes('is-active')) {
+            return {
+              code: activeCode,
+              stdout: '',
+              stderr: activeCode === 1 ? 'Failed to connect to bus: No medium found' : '',
+            }
+          }
+          return OK
+        },
+        pathExists: async (file) => file === '/run/systemd/system',
+      })
+      const command = {
+        program: '/bin/node',
+        args: ['/app/main.cjs', 'run'],
+        env: { SARTO_DAEMON_SERVICE: '1' },
+      }
+      const unit = path.join(dir, SYSTEMD_UNIT)
+      await installService(makeDeps(3), command, path.join(dir, 'data'))
+      await expect(uninstallService(makeDeps(0))).rejects.toThrow(ServiceError)
+      await expect(uninstallService(makeDeps(1))).rejects.toThrow(ServiceError)
+      // A unit whose state could not be read stays, as one still running would.
+      await expect(readFile(unit, 'utf8')).resolves.toContain('ExecStart=')
+      expect(await uninstallService(makeDeps(3))).toBe(true)
+      expect(await uninstallService(makeDeps(3))).toBe(false)
+      await installService(makeDeps(3), command, path.join(dir, 'data'))
+      expect(await uninstallService(makeDeps(4))).toBe(true)
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

@@ -15,7 +15,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs, promisify } from 'node:util'
-import { packageDaemon } from '../daemon/package.mjs'
+import { stageDaemonPackage } from '../daemon/package.mjs'
 import { isValidBuildNumber, readGitCommit } from './build-version.mjs'
 import { stampBuildInfo } from './runtime-fingerprint.mjs'
 
@@ -23,6 +23,8 @@ const execFile = promisify(execFileCb)
 const ROOT = fileURLToPath(new URL('../..', import.meta.url))
 const DEFAULT_MAX_GLIBC = '2.28'
 const DEFAULT_MAX_GLIBCXX = '3.4.25'
+const DEFAULT_MAX_CXXABI = '1.3.11'
+const DEFAULT_MAX_GCC = '7.0.0'
 
 /** @param {string} file */
 function sha256Of(file) {
@@ -58,7 +60,7 @@ export function compareDottedVersion(a, b) {
  * or null when no matching versioned symbols appear.
  *
  * @param {string} text
- * @param {'GLIBC' | 'GLIBCXX'} prefix
+ * @param {'GLIBC' | 'GLIBCXX' | 'CXXABI' | 'GCC'} prefix
  */
 export function parseMaxSymbolVersion(text, prefix) {
   let max = null
@@ -95,6 +97,26 @@ export function parseMaxGlibcxxVersion(text) {
 }
 
 /**
+ * Extracts the highest `CXXABI_X.Y[.Z]` symbol version from `objdump -T` or `readelf -V` output,
+ * or null when no versioned CXXABI symbols appear.
+ *
+ * @param {string} text
+ */
+export function parseMaxCxxabiVersion(text) {
+  return parseMaxSymbolVersion(text, 'CXXABI')
+}
+
+/**
+ * Extracts the highest `GCC_X.Y[.Z]` symbol version from `objdump -T` or `readelf -V` output,
+ * or null when no versioned GCC symbols appear.
+ *
+ * @param {string} text
+ */
+export function parseMaxGccVersion(text) {
+  return parseMaxSymbolVersion(text, 'GCC')
+}
+
+/**
  * Returns whether `objdump -T` or `readelf -V` output references `GLIBC_PRIVATE` internal symbols.
  *
  * @param {string} text
@@ -104,25 +126,29 @@ export function hasPrivateGlibcSymbols(text) {
 }
 
 /**
- * Verifies that `binary` does not require `GLIBC_PRIVATE` or glibc/libstdc++ symbols newer than
- * `maxGlibc` / `maxGlibcxx`.
+ * Verifies that `binary` does not require `GLIBC_PRIVATE` or glibc/libstdc++/libgcc symbols newer
+ * than the glibc 2.28 / GCC 8 baseline.
  *
  * @param {string} binary
  * @param {string} maxGlibc
  * @param {string} maxGlibcxx
+ * @param {string} maxCxxabi
+ * @param {string} maxGcc
  */
 export async function verifyGlibcCeiling(
   binary,
   maxGlibc = DEFAULT_MAX_GLIBC,
   maxGlibcxx = DEFAULT_MAX_GLIBCXX,
+  maxCxxabi = DEFAULT_MAX_CXXABI,
+  maxGcc = DEFAULT_MAX_GCC,
 ) {
   let output
   try {
-    const res = await execFile('objdump', ['-T', binary], { maxBuffer: 8 * 1024 * 1024 })
+    const res = await execFile('objdump', ['-T', binary], { maxBuffer: 16 * 1024 * 1024 })
     output = res.stdout
   } catch {
     const res = await execFile('readelf', ['--version-info', '--wide', binary], {
-      maxBuffer: 8 * 1024 * 1024,
+      maxBuffer: 16 * 1024 * 1024,
     })
     output = res.stdout
   }
@@ -143,6 +169,16 @@ export async function verifyGlibcCeiling(
         'build inside a manylinux_2_28 container with libstdc++_nonshared',
     )
   }
+  const highestCxxabi = parseMaxCxxabiVersion(output)
+  if (highestCxxabi && compareDottedVersion(highestCxxabi, maxCxxabi) > 0) {
+    throw new Error(
+      `${binary} links CXXABI_${highestCxxabi}, exceeding the ${maxCxxabi} libstdc++ ABI floor`,
+    )
+  }
+  const highestGcc = parseMaxGccVersion(output)
+  if (highestGcc && compareDottedVersion(highestGcc, maxGcc) > 0) {
+    throw new Error(`${binary} links GCC_${highestGcc}, exceeding the ${maxGcc} libgcc floor`)
+  }
   return highest
 }
 
@@ -160,8 +196,13 @@ async function findNativeAddons(dir) {
     const full = path.join(dir, entry.name)
     if (entry.isDirectory()) {
       out.push(...(await findNativeAddons(full)))
-    } else if (entry.isFile() && entry.name.endsWith('.node')) {
-      out.push(full)
+    } else if (entry.name.endsWith('.node')) {
+      if (entry.isFile()) {
+        out.push(full)
+      } else if (entry.isSymbolicLink()) {
+        const target = await stat(full).catch(() => null)
+        if (target?.isFile()) out.push(full)
+      }
     }
   }
   return out
@@ -358,20 +399,18 @@ export async function buildDaemonPackage(options) {
 
   const stage = await mkdtemp(path.join(os.tmpdir(), 'sarto-daemon-release-'))
   try {
-    // Always fetch and checksum-verify Node.js from nodejs.org for release artifacts (cacheDir: null).
-    const packaged = await packageDaemon({
-      out: path.join(stage, 'raw'),
+    // Stage directly into `unpacked` (single compression pass) and always checksum-verify Node.js
+    // from nodejs.org for release artifacts (cacheDir: null).
+    const unpacked = path.join(stage, 'unpacked')
+    const staged = await stageDaemonPackage({
+      dest: unpacked,
       build: buildDir,
       node,
       cacheDir: null,
     })
-    const archiveName = path.basename(packaged.archive)
-    const pkgName = path.basename(packaged.archive, '.tar.gz')
-    const unpacked = path.join(stage, 'unpacked')
-    await mkdir(unpacked, { recursive: true })
-    await execFile('tar', ['-xzf', packaged.archive, '-C', unpacked])
-
-    const pkgDir = path.join(unpacked, pkgName)
+    const pkgName = staged.name
+    const archiveName = `${pkgName}.tar.gz`
+    const pkgDir = staged.dir
     const stamped = await stampBuildInfo(pkgDir, {
       version,
       build,
@@ -395,10 +434,11 @@ export async function buildDaemonPackage(options) {
       if (!addons.some((file) => path.basename(file) === 'pty.node')) {
         throw new Error('Packaged Linux daemon is missing node-pty pty.node binary')
       }
-      for (const addon of addons) {
-        const maxSym = await verifyGlibcCeiling(addon, maxGlibc)
+      const binariesToVerify = [path.join(pkgDir, 'node', 'bin', 'node'), ...addons]
+      for (const bin of binariesToVerify) {
+        const maxSym = await verifyGlibcCeiling(bin, maxGlibc)
         console.log(
-          `Verified ${path.relative(pkgDir, addon)} max GLIBC symbol: ${maxSym ?? 'none'} (<= ${maxGlibc})`,
+          `Verified ${path.relative(pkgDir, bin)} max GLIBC symbol: ${maxSym ?? 'none'} (<= ${maxGlibc})`,
         )
       }
     }
@@ -417,12 +457,16 @@ export async function buildDaemonPackage(options) {
     })
     const sha256 = await sha256Of(archive)
     const size = (await stat(archive)).size
+    // assemble-daemon-release.mjs takes the archive into a release only when these match it.
     const meta = {
       platform: process.platform,
       arch: process.arch,
       name: archiveName,
       size,
       sha256,
+      version,
+      build,
+      channel,
     }
     await writeFile(path.join(out, `${pkgName}.meta.json`), `${JSON.stringify(meta, null, 2)}\n`)
     return { archive, ...meta }

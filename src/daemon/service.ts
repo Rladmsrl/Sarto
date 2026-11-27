@@ -31,6 +31,11 @@ export interface ServiceDeps {
   home: string
   env: NodeJS.ProcessEnv
   uid: number
+  /**
+   * The account name of `uid`, read from the system: `su` without `-` and `sudo -E` keep another
+   * user's USER and LOGNAME, so the environment cannot name it.
+   */
+  user?: string
   /** Runs a system tool, such as systemctl or launchctl, and never throws for its exit code. */
   run(command: string, args: string[], env?: NodeJS.ProcessEnv): Promise<CommandResult>
   /** Checks whether a path exists on disk; defaults to `stat`. */
@@ -259,8 +264,14 @@ export async function installService(
   await must(deps, 'systemctl', ['--user', 'enable', SYSTEMD_UNIT], sysEnv)
   await must(deps, 'systemctl', ['--user', 'restart', SYSTEMD_UNIT], sysEnv)
   // Without linger, systemd stops the user's services when their last session ends.
-  const linger = await deps.run('loginctl', ['enable-linger'], sysEnv)
-  const user = deps.env.USER || deps.env.LOGNAME || '$USER'
+  // Without a name loginctl takes the caller's own account, which is right too.
+  const loginUser = deps.user?.trim() || null
+  const linger = await deps.run(
+    'loginctl',
+    loginUser ? ['enable-linger', loginUser] : ['enable-linger'],
+    sysEnv,
+  )
+  const user = loginUser || '$USER'
   return {
     file,
     log: null,
@@ -290,7 +301,19 @@ export async function uninstallService(deps: ServiceDeps): Promise<boolean> {
   const sysEnv = await systemdEnv(deps)
   // Linger stays on: other services of the user may need it.
   const result = await deps.run('systemctl', ['--user', 'disable', '--now', SYSTEMD_UNIT], sysEnv)
-  if (result.code !== 0) throw failure(`systemctl --user disable --now ${SYSTEMD_UNIT}`, result)
+  if (result.code !== 0) {
+    // An already disabled or failed unit is removed all the same, but only when systemd says it
+    // is not running: 3 is not active and 4 no such unit, while 1 is also what a user bus that
+    // cannot be reached gives, which says nothing about the daemon.
+    const active = await deps.run(
+      'systemctl',
+      ['--user', 'is-active', '--quiet', SYSTEMD_UNIT],
+      sysEnv,
+    )
+    if (active.code !== 3 && active.code !== 4) {
+      throw failure(`systemctl --user disable --now ${SYSTEMD_UNIT}`, result)
+    }
+  }
   await rm(file, { force: true })
   await must(deps, 'systemctl', ['--user', 'daemon-reload'], sysEnv)
   return true

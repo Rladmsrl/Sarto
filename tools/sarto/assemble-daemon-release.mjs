@@ -2,6 +2,8 @@
 // Assembles one or more platform standalone daemon tarballs into a release directory with
 // combined `sarto-daemon-sha256sums.txt`, `install.sh` (+ `.sig`), signed multi-platform
 // `latest-daemon.json` / `beta-daemon.json` (+ `.sig`), and optional signed `harnesses.json`.
+// Each `sarto-daemon-<platform>-<arch>.tar.gz` needs the `.meta.json` build-daemon-package.mjs
+// writes beside it, whose version, build, channel and SHA-256 must match this release.
 //
 //   node tools/sarto/assemble-daemon-release.mjs \
 //     --in <dir> [--in <dir2> ...] --out <dir> \
@@ -23,7 +25,10 @@ const ROOT = fileURLToPath(new URL('../..', import.meta.url))
 const DAEMON_MANIFEST = { stable: 'latest-daemon.json', beta: 'beta-daemon.json' }
 const ARCHIVE_RE = /^sarto-daemon-(darwin|linux)-(x64|arm64)\.tar\.gz$/
 
-/** @param {string} file */
+/**
+ * @param {string} file
+ * @returns {Promise<string>}
+ */
 function sha256Of(file) {
   return new Promise((resolve, reject) => {
     const hash = createHash('sha256')
@@ -47,6 +52,53 @@ export function parseDaemonArchiveName(name) {
     platform: /** @type {'darwin' | 'linux'} */ (match[1]),
     arch: /** @type {'x64' | 'arm64'} */ (match[2]),
   }
+}
+
+/**
+ * Checks a daemon archive against the meta file build-daemon-package.mjs wrote beside it, which
+ * names the version, build and channel stamped inside, and resolves to the archive's SHA-256.
+ *
+ * @param {{ platform: string, arch: string, name: string, source: string, meta: string }} item
+ * @param {{ daemonVersion: string, build: string, channel: string }} expected
+ * @returns {Promise<string>}
+ */
+async function checkArchiveMeta(item, expected) {
+  const metaName = path.basename(item.meta)
+  /** @type {unknown} */
+  let meta
+  try {
+    meta = JSON.parse(await readFile(item.meta, 'utf8'))
+  } catch (error) {
+    const code = /** @type {NodeJS.ErrnoException} */ (error).code
+    throw new Error(
+      code === 'ENOENT'
+        ? `${path.dirname(item.source)} has no ${metaName} beside ${item.name}; ` +
+            'build the archive with tools/sarto/build-daemon-package.mjs'
+        : `${metaName} cannot be read: ${/** @type {Error} */ (error).message}`,
+      { cause: error },
+    )
+  }
+  const field = (/** @type {string} */ key) =>
+    meta && typeof meta === 'object' ? /** @type {Record<string, unknown>} */ (meta)[key] : null
+  const want = [
+    ['name', item.name, 'is named'],
+    ['platform', item.platform, 'is for platform'],
+    ['arch', item.arch, 'is for arch'],
+    ['version', expected.daemonVersion, 'is daemon'],
+    ['build', expected.build, 'is build'],
+    ['channel', expected.channel, 'is for channel'],
+  ]
+  for (const [key, value, what] of want) {
+    const actual = field(key)
+    if (actual !== value) {
+      throw new Error(`${item.name} ${what} ${String(actual)}, not ${value} (${metaName})`)
+    }
+  }
+  const sha256 = await sha256Of(item.source)
+  if (field('sha256') !== sha256) {
+    throw new Error(`${item.name} does not match its meta file ${metaName}`)
+  }
+  return sha256
 }
 
 /**
@@ -91,7 +143,7 @@ export async function assembleDaemonRelease(options) {
     throw new Error(`tag ${daemonTag} is not valid`)
   }
 
-  /** @type {Map<string, { platform: 'darwin' | 'linux', arch: 'x64' | 'arm64', name: string, source: string }>} */
+  /** @type {Map<string, { platform: 'darwin' | 'linux', arch: 'x64' | 'arm64', name: string, source: string, meta: string }>} */
   const found = new Map()
   for (const dir of inputDirs) {
     const entries = await readdir(dir, { withFileTypes: true })
@@ -105,7 +157,8 @@ export async function assembleDaemonRelease(options) {
       if (existing && existing.source !== source) {
         throw new Error(`Duplicate daemon archive for ${key}: ${existing.source} and ${source}`)
       }
-      found.set(key, { ...parsed, name: entry.name, source })
+      const meta = path.resolve(dir, entry.name.replace(/\.tar\.gz$/, '.meta.json'))
+      found.set(key, { ...parsed, name: entry.name, source, meta })
     }
   }
 
@@ -120,18 +173,26 @@ export async function assembleDaemonRelease(options) {
     throw new Error(`Missing required daemon platform archives: ${missing.join(', ')}`)
   }
 
-  await mkdir(outDir, { recursive: true })
   const ordered = [...found.values()].sort((a, b) =>
     `${a.platform}-${a.arch}`.localeCompare(`${b.platform}-${b.arch}`),
   )
+  // Checked before anything is written: a signed manifest never names an archive of another
+  // build, which the install script would refuse on every computer once it reports its version.
+  const checked = await Promise.all(
+    ordered.map(async (item) => ({
+      item,
+      sha256: await checkArchiveMeta(item, { daemonVersion, build, channel }),
+    })),
+  )
 
+  await mkdir(outDir, { recursive: true })
   const processed = await Promise.all(
-    ordered.map(async (item) => {
+    checked.map(async ({ item, sha256 }) => {
       const dest = path.resolve(outDir, item.name)
       if (item.source !== dest) {
         await copyFile(item.source, dest)
       }
-      const [sha256, info] = await Promise.all([sha256Of(dest), stat(dest)])
+      const info = await stat(dest)
       return {
         platform: item.platform,
         arch: item.arch,

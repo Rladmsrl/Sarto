@@ -1003,13 +1003,6 @@
 "settings.memory.importSelected" = "Import Selected";
 "settings.memory.importDone" = "Imported %d memory entries";
 
-"settings.archived.title" = "Archived Sessions";
-"settings.archived.sub" = "Restore archived sessions back to the sidebar or delete permanently";
-"settings.archived.searchPlaceholder" = "Search archived sessions…";
-"settings.archived.empty" = "No archived sessions";
-"settings.archived.restore" = "Restore";
-"settings.archived.deleteConfirmTitle" = "Permanently Delete Session?";
-
 "settings.git.fetch" = "Background Git Fetch";
 "settings.git.fetchSub" = "Periodically fetch remote tracking refs for open repositories";
 "settings.git.worktreeRoot" = "Worktree Root Folder";
@@ -1035,7 +1028,7 @@
 "settings.remote.terminal" = "Allow Remote Terminal";
 "settings.remote.terminalSub" = "Permit paired remote devices to open shell terminals on this Mac";
 "settings.remote.pauseMobilePush" = "Pause Mobile Push While Active";
-"settings.remote.pauseMobilePushSub" = "Hold APNs notifications to mobile devices while this Mac is unlocked and recently active; anything still unread or waiting is sent once you step away";
+"settings.remote.pauseMobilePushSub" = "Hold APNs notifications to mobile devices while this Mac is unlocked, recently used and able to show them itself, on the island or as macOS notifications; anything still unread or waiting is sent once you step away";
 
 "settings.advanced.proxy" = "Network Proxy";
 "settings.advanced.proxyMode" = "HTTP / HTTPS Proxy Mode";
