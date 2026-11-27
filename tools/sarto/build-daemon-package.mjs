@@ -194,24 +194,30 @@ async function smokeTestDaemon(pkgDir) {
   try {
     const deadline = Date.now() + 20_000
     let ready = false
+    let lastStatus = ''
     while (Date.now() < deadline) {
       if (child.exitCode !== null) {
         throw new Error(`sarto run exited prematurely (${child.exitCode}):\n${logs}`)
       }
       const status = await execFile(sartoBin, ['status'], { env, timeout: 5_000 }).catch(() => null)
-      if (
-        status &&
-        /Agent host:\s+ready/.test(status.stdout) &&
-        /Terminal host:\s+ready/.test(status.stdout) &&
-        /Remote host:\s+ready/.test(status.stdout)
-      ) {
-        ready = true
-        break
+      if (status) {
+        lastStatus = status.stdout
+        // Terminal host starts lazily when a client opens a terminal; Agent and Remote start eagerly.
+        if (
+          /Agent host:\s+ready/.test(status.stdout) &&
+          /Remote host:\s+ready/.test(status.stdout) &&
+          /Terminal host:\s+(?:ready|not started)/.test(status.stdout)
+        ) {
+          ready = true
+          break
+        }
       }
       await new Promise((resolve) => setTimeout(resolve, 250))
     }
     if (!ready) {
-      throw new Error(`sarto daemon did not report ready hosts within 20s:\n${logs}`)
+      throw new Error(
+        `sarto daemon did not report ready hosts within 20s:\nstatus:\n${lastStatus}\nlogs:\n${logs}`,
+      )
     }
   } finally {
     if (child.exitCode === null) {
