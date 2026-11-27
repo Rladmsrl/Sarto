@@ -117,6 +117,13 @@ node tools/sarto/publish-release.mjs dist/release/app-v0.4.0-beta.261125143512 u
 node tools/sarto/publish-release.mjs dist/release/daemon-v0.5.0-beta.261125143512 user@host:/srv/sarto/releases
 ```
 
+The release workflow publishes only to GitHub, so mirror each of its releases to `sarto.1o.ink` by hand: download the release into a folder named after its tag, then publish that folder. The manifests are already signed, so no signing key is needed here.
+
+```bash
+gh release download v0.4.0 -D dist/release/v0.4.0
+node tools/sarto/publish-release.mjs dist/release/v0.4.0 user@host:/srv/sarto/releases
+```
+
 ## 4. Signed Channel Manifests & Sarto Cloud Routing Layout
 
 All update manifests are signed with Ed25519 over `"<filename>\n" + bytes` (`tools/sarto/signing.mjs` and `SartoUpdate/Signatures.swift`), so a manifest signed for one channel or component cannot be replayed on another.
@@ -146,7 +153,7 @@ All update manifests are signed with Ed25519 over `"<filename>\n" + bytes` (`too
   - `meta` (`ubuntu-24.04`): resolves unified `target`, `channel`, `build`, `built_at`, tags and macOS delta targets, enforces `checkReleaseVersionOrder`, and runs `format:check`, `lint`, `typecheck` and `test`.
   - `build-mac` (`macos-15`): builds, signs and notarizes `Sarto.app` (ZIP, DMG, delta patches) when `target` includes `app`, and builds `sarto-daemon-darwin-arm64.tar.gz` when `target` includes `daemon`. Receives only Apple signing/notarization secrets.
   - `build-linux-daemon` (`ubuntu-24.04` in `quay.io/pypa/manylinux_2_28_x86_64` and `ubuntu-24.04-arm` in `quay.io/pypa/manylinux_2_28_aarch64`): builds `sarto-daemon-linux-x64.tar.gz` and `sarto-daemon-linux-arm64.tar.gz` via `tools/sarto/build-daemon-package.mjs`, verifying `node-pty` links `GLIBC <= 2.28`, passing PTY and headless `sarto run`/`sarto status` smoke tests. Receives no release secrets.
-  - `publish` (`ubuntu-24.04`): sole job holding `SARTO_UPDATE_SIGNING_KEY`, `SARTO_HARNESSES_SIGNING_KEY` and mirror SSH secrets; runs `tools/sarto/assemble-daemon-release.mjs` (requiring all three platforms `darwin-arm64`, `linux-x64`, `linux-arm64`, each with the `.meta.json` its build job uploads beside it, whose version, build, channel and SHA-256 must match the release), signs channel manifests and `install.sh`, generates `SHA256SUMS.txt`, attests SLSA provenance, publishes GitHub Releases and mirrors atomically to `sarto.1o.ink`.
+  - `publish` (`ubuntu-24.04`): sole job holding `SARTO_UPDATE_SIGNING_KEY` and `SARTO_HARNESSES_SIGNING_KEY`; runs `tools/sarto/assemble-daemon-release.mjs` (requiring all three platforms `darwin-arm64`, `linux-x64`, `linux-arm64`, each with the `.meta.json` its build job uploads beside it, whose version, build, channel and SHA-256 must match the release), signs channel manifests and `install.sh`, generates `SHA256SUMS.txt`, attests SLSA provenance and publishes GitHub Releases. It does not mirror to `sarto.1o.ink`; the maintainer does that by hand afterwards (see Publishing Releases).
 - **Tag triggers**:
   - `vX.Y.Z` (or `vX.Y.Z-beta.<build>`): builds `target=all`
   - `app-vX.Y.Z` (or `app-vX.Y.Z-beta.<build>`): builds `target=app`
