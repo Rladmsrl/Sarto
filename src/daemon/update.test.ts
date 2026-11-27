@@ -1,5 +1,10 @@
 import { generateKeyPairSync, sign } from 'node:crypto'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
+import { assembleDaemonRelease } from '../../tools/sarto/assemble-daemon-release.mjs'
+import { parseMaxGlibcVersion } from '../../tools/sarto/build-daemon-package.mjs'
 import KEYS from '../../tools/sarto/update-keys.json'
 import {
   DAEMON_MANIFEST_NAME,
@@ -398,5 +403,162 @@ describe('sarto update signature verification', () => {
 
     await expect(update(makeDeps(fetchImpl, install), [signer.raw])).rejects.toThrow(UpdateError)
     expect(install).not.toHaveBeenCalled()
+  })
+
+  it('pins only the matching platform package checksum when platform and arch are provided', async () => {
+    const signer = keyPair()
+    const darwin = 'a'.repeat(64)
+    const linuxX64 = 'b'.repeat(64)
+    const linuxArm64 = 'c'.repeat(64)
+    const manifestBody = JSON.stringify({
+      version: '1.2.0',
+      channel: 'stable',
+      tag: 'daemon-v1.2.0',
+      files: [
+        {
+          platform: 'darwin',
+          arch: 'arm64',
+          name: 'sarto-daemon-darwin-arm64.tar.gz',
+          sha256: darwin,
+        },
+        {
+          platform: 'linux',
+          arch: 'arm64',
+          name: 'sarto-daemon-linux-arm64.tar.gz',
+          sha256: linuxArm64,
+        },
+        { platform: 'linux', arch: 'x64', name: 'sarto-daemon-linux-x64.tar.gz', sha256: linuxX64 },
+      ],
+    })
+    const manifestSig = `${signer.sign(updateFileMessage('latest-daemon.json', Buffer.from(manifestBody)))}\n`
+    const scriptSig = `${signer.sign(updateFileMessage('install.sh', SCRIPT_BYTES))}\n`
+    const install = vi.fn(async () => 0)
+    const fetchImpl: typeof fetch = async (input) => {
+      const url = String(input)
+      if (url === `${ORIGIN}/latest/download/latest-daemon.json`) return new Response(manifestBody)
+      if (url === `${ORIGIN}/latest/download/latest-daemon.json.sig`)
+        return new Response(manifestSig)
+      if (url === `${ORIGIN}/download/daemon-v1.2.0/install.sh`) return new Response(SCRIPT)
+      if (url === `${ORIGIN}/download/daemon-v1.2.0/install.sh.sig`) return new Response(scriptSig)
+      return new Response('not found', { status: 404 })
+    }
+
+    const code = await update(
+      makeDeps(fetchImpl, install, { platform: 'linux', arch: 'x64', service: false }),
+      [signer.raw],
+    )
+    expect(code).toBe(0)
+    expect(install).toHaveBeenCalledWith(SCRIPT, [
+      '--version',
+      '1.2.0',
+      '--tag',
+      'daemon-v1.2.0',
+      '--sha256',
+      linuxX64,
+      '--no-service',
+    ])
+  })
+
+  it('verifies a multi-platform daemon release assembled by assemble-daemon-release.mjs', async () => {
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519')
+    const rawPub = Buffer.from(publicKey.export({ format: 'jwk' }).x!, 'base64url').toString(
+      'base64',
+    )
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'sarto-assemble-test-'))
+    try {
+      const inMac = path.join(dir, 'in-mac')
+      const inLinux = path.join(dir, 'in-linux')
+      const outDir = path.join(dir, 'out')
+      await writeFile(path.join(dir, 'install.sh'), SCRIPT)
+      await rm(inMac, { recursive: true, force: true })
+      const { mkdir } = await import('node:fs/promises')
+      await mkdir(inMac, { recursive: true })
+      await mkdir(inLinux, { recursive: true })
+      await writeFile(path.join(inMac, 'sarto-daemon-darwin-arm64.tar.gz'), 'mac-tar')
+      await writeFile(path.join(inLinux, 'sarto-daemon-linux-x64.tar.gz'), 'linux-x64-tar')
+      await writeFile(path.join(inLinux, 'sarto-daemon-linux-arm64.tar.gz'), 'linux-arm64-tar')
+
+      await expect(
+        assembleDaemonRelease({
+          inputDirs: [inMac],
+          outDir,
+          daemonVersion: '1.3.0',
+          daemonTag: 'daemon-v1.3.0',
+          channel: 'stable',
+          build: '261127153000',
+          requirePlatforms: ['darwin-arm64', 'linux-x64', 'linux-arm64'],
+          signUpdateFile: (msg) => sign(null, msg, privateKey),
+          installScriptPath: path.join(dir, 'install.sh'),
+        }),
+      ).rejects.toThrow('Missing required daemon platform archives: linux-x64, linux-arm64')
+
+      const assembled = await assembleDaemonRelease({
+        inputDirs: [inMac, inLinux],
+        outDir,
+        daemonVersion: '1.3.0',
+        daemonTag: 'daemon-v1.3.0',
+        channel: 'stable',
+        build: '261127153000',
+        requirePlatforms: ['darwin-arm64', 'linux-x64', 'linux-arm64'],
+        signUpdateFile: (msg) => sign(null, msg, privateKey),
+        installScriptPath: path.join(dir, 'install.sh'),
+      })
+
+      expect(assembled.files.map((f) => f.name)).toEqual([
+        'sarto-daemon-darwin-arm64.tar.gz',
+        'sarto-daemon-linux-arm64.tar.gz',
+        'sarto-daemon-linux-x64.tar.gz',
+      ])
+      const sums = await readFile(path.join(outDir, 'sarto-daemon-sha256sums.txt'), 'utf8')
+      expect(sums.trim().split('\n')).toHaveLength(3)
+
+      const manifestBody = await readFile(path.join(outDir, 'latest-daemon.json'), 'utf8')
+      const manifestSig = await readFile(path.join(outDir, 'latest-daemon.json.sig'), 'utf8')
+      const scriptBody = await readFile(path.join(outDir, 'install.sh'), 'utf8')
+      const scriptSig = await readFile(path.join(outDir, 'install.sh.sig'), 'utf8')
+      const install = vi.fn(async () => 0)
+      const fetchImpl: typeof fetch = async (input) => {
+        const url = String(input)
+        if (url === `${ORIGIN}/latest/download/latest-daemon.json`)
+          return new Response(manifestBody)
+        if (url === `${ORIGIN}/latest/download/latest-daemon.json.sig`)
+          return new Response(manifestSig)
+        if (url === `${ORIGIN}/download/daemon-v1.3.0/install.sh`) return new Response(scriptBody)
+        if (url === `${ORIGIN}/download/daemon-v1.3.0/install.sh.sig`)
+          return new Response(scriptSig)
+        return new Response('not found', { status: 404 })
+      }
+
+      const linuxArmHash = assembled.files.find(
+        (f) => f.name === 'sarto-daemon-linux-arm64.tar.gz',
+      )!.sha256
+      const code = await update(
+        makeDeps(fetchImpl, install, { platform: 'linux', arch: 'arm64', service: false }),
+        [rawPub],
+      )
+      expect(code).toBe(0)
+      expect(install).toHaveBeenCalledWith(scriptBody, [
+        '--version',
+        '1.3.0',
+        '--tag',
+        'daemon-v1.3.0',
+        '--sha256',
+        linuxArmHash,
+        '--no-service',
+      ])
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('extracts the maximum GLIBC symbol version from objdump output', () => {
+    const sample = [
+      '0000000000000000      DF *UND* 0000000000000000  GLIBC_2.2.5 openpty',
+      '0000000000000000      DF *UND* 0000000000000000  GLIBC_2.28  fcntl64',
+      '0000000000000000      DF *UND* 0000000000000000  GLIBC_2.17  clock_gettime',
+    ].join('\n')
+    expect(parseMaxGlibcVersion(sample)).toBe('2.28')
+    expect(parseMaxGlibcVersion('00000000 DF *UND* GLIBC_2.34 pthread_create')).toBe('2.34')
+    expect(parseMaxGlibcVersion('no glibc symbols here')).toBeNull()
   })
 })

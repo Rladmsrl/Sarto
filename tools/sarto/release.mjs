@@ -32,7 +32,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs, promisify } from 'node:util'
-import { packageDaemon } from '../daemon/package.mjs'
+import { assembleDaemonRelease } from './assemble-daemon-release.mjs'
+import { buildDaemonPackage } from './build-daemon-package.mjs'
 import {
   checkReleaseVersionOrder,
   compareVersions,
@@ -48,14 +49,13 @@ import {
 import { makeDelta } from './delta.mjs'
 import { buildHarnessManifest, signHarnessManifest } from './harnesses.mjs'
 import { releaseHighlights } from './release-notes.mjs'
-import { RUNTIME_FILE, stampBuildInfo } from './runtime-fingerprint.mjs'
+import { RUNTIME_FILE } from './runtime-fingerprint.mjs'
 import { signerFrom, updateFileMessage } from './signing.mjs'
 
 const execFile = promisify(execFileCb)
 const ROOT = fileURLToPath(new URL('../..', import.meta.url))
 const ARCH = 'arm64'
 const MAC_MANIFEST = { stable: 'latest-mac.json', beta: 'beta-mac.json' }
-const DAEMON_MANIFEST = { stable: 'latest-daemon.json', beta: 'beta-daemon.json' }
 const GITHUB_RELEASE_SOURCE = 'https://github.com/Rladmsrl/Sarto/releases'
 const RELEASE_SOURCE = 'https://sarto.1o.ink/releases'
 const PREVIOUS_RELEASE_SOURCES = [GITHUB_RELEASE_SOURCE, RELEASE_SOURCE]
@@ -262,8 +262,8 @@ async function minimumSystemVersion() {
 }
 
 /**
- * Packages the standalone daemon, writes checksums, install.sh (+ sig) and signed daemon manifest
- * into `outDir`.
+ * Packages the standalone daemon for this host and assembles checksums, install.sh (+ sig) and
+ * signed daemon manifest into `outDir` (merging any extra platform archives from `extraDaemonDirs`).
  *
  * @param {{
  *   outDir: string,
@@ -275,79 +275,33 @@ async function minimumSystemVersion() {
  *   commit: string,
  *   builtAt: string,
  *   node: string | null,
- *   signUpdateFile: (message: Buffer) => Buffer,
+ *   extraDaemonDirs: string[],
+ *   signUpdateFile: ((message: Buffer) => Buffer) | null,
  * }} opts
  */
 async function buildStandaloneDaemon(opts) {
-  // A release takes Node.js from nodejs.org, checked against its checksums, never from the cache.
-  const daemon = await packageDaemon({
-    out: path.join(opts.stage, 'daemon-package'),
-    node: opts.node,
-    cacheDir: null,
-  })
-  const daemonName = path.basename(daemon.archive)
-  const packageName = path.basename(daemon.archive, '.tar.gz')
-  const unpacked = path.join(opts.stage, 'daemon-unpacked')
-  await mkdir(unpacked, { recursive: true })
-  await execFile('tar', ['-xzf', daemon.archive, '-C', unpacked])
-  const stamped = await stampBuildInfo(path.join(unpacked, packageName), {
+  const localOut = path.join(opts.stage, 'daemon-package')
+  await buildDaemonPackage({
+    out: localOut,
     version: opts.daemonVersion,
     build: opts.build,
     channel: opts.channel,
     commit: opts.commit,
     builtAt: opts.builtAt,
+    node: opts.node,
+    skipBuild: true,
+    skipSmoke: true,
   })
-  if (stamped === 0) {
-    fail('The daemon in out/ was not built with placeholders')
-  }
-  const { stdout: reported } = await execFile(path.join(unpacked, packageName, 'bin', 'sarto'), [
-    '--version',
-  ])
-  if (reported.trim() !== opts.daemonVersion) {
-    fail(`The standalone daemon reports ${reported.trim()}, expected ${opts.daemonVersion}`)
-  }
-  const archive = path.join(opts.outDir, daemonName)
-  // macOS tar would add AppleDouble files for extended attributes.
-  await execFile('tar', ['-czf', archive, '-C', unpacked, packageName], {
-    env: { ...process.env, COPYFILE_DISABLE: '1' },
-  })
-  const sha256 = await digest(archive, 'sha256', 'hex')
-  await writeFile(
-    path.join(opts.outDir, 'sarto-daemon-sha256sums.txt'),
-    `${sha256}  ${daemonName}\n`,
-  )
-  const installBody = await readFile(path.join(ROOT, 'tools', 'sarto', 'install.sh'))
-  const installSignature = opts.signUpdateFile(updateFileMessage('install.sh', installBody))
-  await writeFile(path.join(opts.outDir, 'install.sh'), installBody)
-  await writeFile(
-    path.join(opts.outDir, 'install.sh.sig'),
-    `${installSignature.toString('base64')}\n`,
-  )
-
-  const manifestName = DAEMON_MANIFEST[opts.channel]
-  const manifest = {
-    version: opts.daemonVersion,
+  await assembleDaemonRelease({
+    inputDirs: [localOut, ...opts.extraDaemonDirs],
+    outDir: opts.outDir,
+    daemonVersion: opts.daemonVersion,
+    daemonTag: opts.daemonTag,
     channel: opts.channel,
     build: opts.build,
-    tag: opts.daemonTag,
-    releaseDate: opts.builtAt,
-    files: [
-      {
-        platform: process.platform,
-        arch: process.arch,
-        name: daemonName,
-        size: (await stat(archive)).size,
-        sha256,
-      },
-    ],
-  }
-  const body = Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
-  const signature = opts.signUpdateFile(updateFileMessage(manifestName, body))
-  await writeFile(path.join(opts.outDir, manifestName), body)
-  await writeFile(
-    path.join(opts.outDir, `${manifestName}.sig`),
-    `${signature.toString('base64')}\n`,
-  )
+    builtAt: opts.builtAt,
+    signUpdateFile: opts.signUpdateFile,
+  })
 }
 
 async function main() {
@@ -366,9 +320,12 @@ async function main() {
       out: { type: 'string' },
       node: { type: 'string' },
       'skip-notarize': { type: 'boolean' },
+      'skip-update-sign': { type: 'boolean' },
       'allow-older': { type: 'boolean' },
       'delta-from': { type: 'string' },
       'harness-checks': { type: 'string' },
+      'extra-daemon-dir': { type: 'string', multiple: true },
+      'built-at': { type: 'string' },
     },
   })
 
@@ -403,7 +360,7 @@ async function main() {
   const daemonChannel = target === 'app' && !isBetaVersion(rawDaemonVersion) ? 'stable' : channel
   const daemonVersion = formatChannelVersion(rawDaemonVersion, daemonChannel, build)
   const commit = process.env.SARTO_GIT_COMMIT?.trim() || readGitCommit(ROOT) || ''
-  const builtAt = new Date().toISOString()
+  const builtAt = values['built-at']?.trim() || new Date().toISOString()
 
   const releasesRoot = path.resolve(values.out ?? path.join(ROOT, 'dist', 'release'))
   if (!values['allow-older']) {
@@ -449,8 +406,12 @@ async function main() {
   if (wantsApp && signed && !values['skip-notarize'] && !credentials) {
     fail('A signed release is notarized: set SARTO_NOTARY_PROFILE, or the SARTO_NOTARY_KEY trio')
   }
-  // Checked before the long build: a release never ships an update file the app would refuse.
-  const signUpdateFile = signerFrom('release', 'SARTO_UPDATE_SIGNING_KEY')
+  // Checked before the long build: a release never ships an update file the app would refuse,
+  // unless --skip-update-sign defers Ed25519 signing to the CI publish job.
+  const signUpdateFile = values['skip-update-sign']
+    ? null
+    : signerFrom('release', 'SARTO_UPDATE_SIGNING_KEY')
+  const extraDaemonDirs = (values['extra-daemon-dir'] ?? []).map((dir) => path.resolve(dir))
   if (wantsApp && !signed)
     console.warn('No SARTO_SIGN_IDENTITY: an ad-hoc, Link mode release, for testing only')
 
@@ -565,12 +526,14 @@ async function main() {
         runtime: runtime.fingerprint,
       }
       const body = Buffer.from(`${JSON.stringify(update, null, 2)}\n`, 'utf8')
-      const signature = signUpdateFile(updateFileMessage(macManifestName, body))
       await writeFile(path.join(appOut, macManifestName), body)
-      await writeFile(
-        path.join(appOut, `${macManifestName}.sig`),
-        `${signature.toString('base64')}\n`,
-      )
+      if (signUpdateFile) {
+        const signature = signUpdateFile(updateFileMessage(macManifestName, body))
+        await writeFile(
+          path.join(appOut, `${macManifestName}.sig`),
+          `${signature.toString('base64')}\n`,
+        )
+      }
       publishedDirs.push(appOut)
     }
 
@@ -597,6 +560,7 @@ async function main() {
         commit,
         builtAt,
         node: nodePath,
+        extraDaemonDirs,
         signUpdateFile,
       })
       if (!publishedDirs.includes(daemonOut)) publishedDirs.push(daemonOut)

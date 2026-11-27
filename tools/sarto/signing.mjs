@@ -6,6 +6,9 @@
 
 import { createPrivateKey, createPublicKey, sign, verify } from 'node:crypto'
 import { readFileSync } from 'node:fs'
+import { readFile, writeFile } from 'node:fs/promises'
+import path from 'node:path'
+import { parseArgs } from 'node:util'
 
 /** @typedef {'release' | 'sources' | 'harnesses'} Purpose */
 
@@ -60,4 +63,31 @@ export function signerFrom(purpose, variable) {
  */
 export function updateFileMessage(name, file) {
   return Buffer.concat([Buffer.from(`${name}\n`, 'utf8'), file])
+}
+
+if (import.meta.main) {
+  const { values, positionals } = parseArgs({
+    allowPositionals: true,
+    options: {
+      purpose: { type: 'string' },
+      env: { type: 'string' },
+    },
+  })
+  const purpose = /** @type {Purpose} */ (values.purpose?.trim() || 'release')
+  const envVar = values.env?.trim() || 'SARTO_UPDATE_SIGNING_KEY'
+  if (positionals.length === 0) {
+    console.error(
+      'Usage: node tools/sarto/signing.mjs [--purpose release] [--env SARTO_UPDATE_SIGNING_KEY] <file> [...]',
+    )
+    process.exit(2)
+  }
+  const signer = signerFrom(purpose, envVar)
+  for (const target of positionals) {
+    const resolved = path.resolve(target)
+    const body = await readFile(resolved)
+    const name = path.basename(resolved)
+    const signature = signer(updateFileMessage(name, body))
+    await writeFile(`${resolved}.sig`, `${signature.toString('base64')}\n`)
+    console.log(`Signed ${name} -> ${name}.sig`)
+  }
 }

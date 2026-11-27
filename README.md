@@ -114,11 +114,11 @@ Full notices live in [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md).
 ## Install
 
 - **Mac app** (macOS 15+, Apple silicon, bundles daemon & Node.js): download `Sarto-<version>-arm64.dmg` from [`sarto.1o.ink/releases/latest`](https://sarto.1o.ink/releases/latest) and drag to Applications.
-- **Standalone headless daemon**:
+- **Standalone headless daemon** (macOS Apple silicon & Linux x64/arm64, glibc 2.28+, zero root, bundles Node.js):
   ```sh
   curl -fsSL https://sarto.1o.ink/releases/latest/download/install.sh | sh
   ```
-  Installs to `~/.local/share/sarto`, links `~/.local/bin/sarto` and sets up launchd (`sh -s -- --no-service` to skip), then run `sarto login`.
+  Installs to `~/.local/share/sarto`, links `~/.local/bin/sarto` and sets up a user service (launchd on macOS, `systemd --user` with linger on Linux; pass `sh -s -- --channel beta` for beta or `sh -s -- --no-service` in containers), then run `sarto login` (or add the host over SSH from Sarto on macOS).
 - **From source** (Xcode 16+, Node.js 22.13+, pnpm 10 — see [CONTRIBUTING.md](./CONTRIBUTING.md)):
   ```sh
   pnpm install && pnpm build:daemon && open apps/apple/Sarto.xcodeproj

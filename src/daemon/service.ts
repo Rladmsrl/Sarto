@@ -32,7 +32,9 @@ export interface ServiceDeps {
   env: NodeJS.ProcessEnv
   uid: number
   /** Runs a system tool, such as systemctl or launchctl, and never throws for its exit code. */
-  run(command: string, args: string[]): Promise<CommandResult>
+  run(command: string, args: string[], env?: NodeJS.ProcessEnv): Promise<CommandResult>
+  /** Checks whether a path exists on disk; defaults to `stat`. */
+  pathExists?(file: string): Promise<boolean>
   /** Where the service file goes, when a test names a folder of its own. */
   dir?: string
 }
@@ -95,6 +97,7 @@ ExecStart=${exec}
 Environment=${env}
 Restart=always
 RestartSec=2
+TimeoutStopSec=25
 # SIGTERM to the daemon alone, which stops its hosts in order; SIGKILL to what is left at the end.
 KillMode=mixed
 
@@ -152,8 +155,13 @@ function failure(what: string, result: CommandResult): ServiceError {
   return new ServiceError(`${what} failed with ${result.code}${output ? `: ${output}` : ''}`)
 }
 
-async function must(deps: ServiceDeps, command: string, args: string[]): Promise<void> {
-  const result = await deps.run(command, args)
+async function must(
+  deps: ServiceDeps,
+  command: string,
+  args: string[],
+  env?: NodeJS.ProcessEnv,
+): Promise<void> {
+  const result = await deps.run(command, args, env)
   if (result.code !== 0) throw failure(`${command} ${args.join(' ')}`, result)
 }
 
@@ -165,6 +173,39 @@ async function exists(file: string): Promise<boolean> {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
     throw error
   }
+}
+
+async function hasPath(deps: ServiceDeps, file: string): Promise<boolean> {
+  return deps.pathExists ? deps.pathExists(file) : exists(file)
+}
+
+/**
+ * Ensures `systemctl --user` can locate the user bus in headless `su` / stripped SSH shells where
+ * `XDG_RUNTIME_DIR` or `DBUS_SESSION_BUS_ADDRESS` is omitted even though `/run/user/<uid>` exists.
+ */
+async function systemdEnv(deps: ServiceDeps): Promise<NodeJS.ProcessEnv> {
+  if (!(await hasPath(deps, '/run/systemd/system'))) {
+    throw new ServiceError(
+      'systemd is not running on this host; run `sarto run` in the foreground, ' +
+        'or reinstall with `--no-service` in containers and non-systemd environments.',
+    )
+  }
+  const env: NodeJS.ProcessEnv = { ...deps.env }
+  let runtimeDir = env.XDG_RUNTIME_DIR?.trim()
+  if (!runtimeDir) {
+    const candidate = `/run/user/${deps.uid}`
+    if (await hasPath(deps, candidate)) {
+      runtimeDir = candidate
+      env.XDG_RUNTIME_DIR = candidate
+    }
+  }
+  if (!env.DBUS_SESSION_BUS_ADDRESS?.trim() && runtimeDir) {
+    const bus = path.join(runtimeDir, 'bus')
+    if (await hasPath(deps, bus)) {
+      env.DBUS_SESSION_BUS_ADDRESS = `unix:path=${bus}`
+    }
+  }
+  return env
 }
 
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
@@ -211,13 +252,14 @@ export async function installService(
     return { file, log, warning: null }
   }
 
+  const sysEnv = await systemdEnv(deps)
   await mkdir(path.dirname(file), { recursive: true })
   await writeFile(file, systemdUnit(command))
-  await must(deps, 'systemctl', ['--user', 'daemon-reload'])
-  await must(deps, 'systemctl', ['--user', 'enable', SYSTEMD_UNIT])
-  await must(deps, 'systemctl', ['--user', 'restart', SYSTEMD_UNIT])
+  await must(deps, 'systemctl', ['--user', 'daemon-reload'], sysEnv)
+  await must(deps, 'systemctl', ['--user', 'enable', SYSTEMD_UNIT], sysEnv)
+  await must(deps, 'systemctl', ['--user', 'restart', SYSTEMD_UNIT], sysEnv)
   // Without linger, systemd stops the user's services when their last session ends.
-  const linger = await deps.run('loginctl', ['enable-linger'])
+  const linger = await deps.run('loginctl', ['enable-linger'], sysEnv)
   const user = deps.env.USER || deps.env.LOGNAME || '$USER'
   return {
     file,
@@ -245,11 +287,12 @@ export async function uninstallService(deps: ServiceDeps): Promise<boolean> {
     return installed
   }
   if (!installed) return false
+  const sysEnv = await systemdEnv(deps)
   // Linger stays on: other services of the user may need it.
-  const result = await deps.run('systemctl', ['--user', 'disable', '--now', SYSTEMD_UNIT])
+  const result = await deps.run('systemctl', ['--user', 'disable', '--now', SYSTEMD_UNIT], sysEnv)
   if (result.code !== 0) throw failure(`systemctl --user disable --now ${SYSTEMD_UNIT}`, result)
   await rm(file, { force: true })
-  await must(deps, 'systemctl', ['--user', 'daemon-reload'])
+  await must(deps, 'systemctl', ['--user', 'daemon-reload'], sysEnv)
   return true
 }
 
@@ -260,7 +303,8 @@ export async function restartService(deps: ServiceDeps): Promise<boolean> {
     // -k stops the running daemon first; launchd waits for it as it does at logout.
     await must(deps, 'launchctl', ['kickstart', '-k', `gui/${deps.uid}/${LAUNCH_AGENT_LABEL}`])
   } else {
-    await must(deps, 'systemctl', ['--user', 'restart', SYSTEMD_UNIT])
+    const sysEnv = await systemdEnv(deps)
+    await must(deps, 'systemctl', ['--user', 'restart', SYSTEMD_UNIT], sysEnv)
   }
   return true
 }

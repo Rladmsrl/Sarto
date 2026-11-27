@@ -1,4 +1,4 @@
-name: Release macOS
+name: Release (macOS & Linux Daemon)
 
 on:
   push:
@@ -42,20 +42,27 @@ on:
         type: boolean
 
 permissions:
-  contents: write
-  id-token: write
-  attestations: write
+  contents: read
 
 jobs:
-  release:
-    name: Build, Attest & Publish macOS Release
-    runs-on: macos-15
-    env:
-      SARTO_SIGN_IDENTITY: ${{ secrets.SARTO_SIGN_IDENTITY }}
-      SARTO_NOTARY_KEY_ID: ${{ secrets.SARTO_NOTARY_KEY_ID }}
-      SARTO_NOTARY_ISSUER: ${{ secrets.SARTO_NOTARY_ISSUER }}
-      SARTO_UPDATE_SIGNING_KEY: ${{ secrets.SARTO_UPDATE_SIGNING_KEY }}
-      SARTO_HARNESSES_SIGNING_KEY: ${{ secrets.SARTO_HARNESSES_SIGNING_KEY }}
+  meta:
+    name: Resolve Metadata & Run Daemon Checks
+    runs-on: ubuntu-24.04
+    outputs:
+      target: ${{ steps.meta.outputs.target }}
+      channel: ${{ steps.meta.outputs.channel }}
+      build: ${{ steps.meta.outputs.build }}
+      built_at: ${{ steps.meta.outputs.built_at }}
+      short_commit: ${{ steps.meta.outputs.short_commit }}
+      app_version: ${{ steps.meta.outputs.app_version }}
+      daemon_version: ${{ steps.meta.outputs.daemon_version }}
+      daemon_channel: ${{ steps.meta.outputs.daemon_channel }}
+      app_tag: ${{ steps.meta.outputs.app_tag }}
+      daemon_tag: ${{ steps.meta.outputs.daemon_tag }}
+      share_folder: ${{ steps.meta.outputs.share_folder }}
+      wants_app: ${{ steps.meta.outputs.wants_app }}
+      wants_daemon: ${{ steps.meta.outputs.wants_daemon }}
+      delta_from: ${{ steps.meta.outputs.delta_from }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -121,6 +128,8 @@ jobs:
 
             // A beta tag names its build; the bundle's CFBundleVersion and the manifests carry it too.
             const build = /-beta\.(\d+)$/.exec(rawApp || rawDaemon)?.[1] || generateBuildNumber();
+            const builtAt = new Date().toISOString();
+            const shortCommit = (process.env.GITHUB_SHA || '').slice(0, 7);
             const appVersion = formatChannelVersion(rawApp || readAppBaseVersion(root), channel, build);
             const daemonRaw =
               rawDaemon || (target === 'all' && channel === 'stable' && rawApp && !process.env.INPUT_DAEMON_VERSION ? rawApp : readDaemonBaseVersion(root));
@@ -174,12 +183,16 @@ jobs:
               'target=' + target,
               'channel=' + channel,
               'build=' + build,
+              'built_at=' + builtAt,
+              'short_commit=' + shortCommit,
               'app_version=' + appVersion,
               'daemon_version=' + daemonVersion,
               'daemon_channel=' + daemonChannel,
               'app_tag=' + appTag,
               'daemon_tag=' + daemonTag,
               'share_folder=' + (shareFolder ? 'true' : 'false'),
+              'wants_app=' + (wantsApp ? 'true' : 'false'),
+              'wants_daemon=' + (wantsDaemon ? 'true' : 'false'),
               'delta_from=' + deltaFrom,
             ];
             appendFileSync(out, lines.join('\n') + '\n');
@@ -194,13 +207,40 @@ jobs:
           pnpm typecheck
           pnpm test
 
+  build-mac:
+    name: Build macOS (App & darwin-arm64 Daemon)
+    needs: meta
+    if: needs.meta.outputs.wants_app == 'true' || needs.meta.outputs.wants_daemon == 'true'
+    runs-on: macos-15
+    env:
+      SARTO_SIGN_IDENTITY: ${{ secrets.SARTO_SIGN_IDENTITY }}
+      SARTO_NOTARY_KEY_ID: ${{ secrets.SARTO_NOTARY_KEY_ID }}
+      SARTO_NOTARY_ISSUER: ${{ secrets.SARTO_NOTARY_ISSUER }}
+      SARTO_GIT_COMMIT: ${{ needs.meta.outputs.short_commit }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
       - name: Test Swift packages
+        if: needs.meta.outputs.wants_app == 'true'
         run: |
           (cd apps/apple/Packages/SartoProtocol && swift test)
           (cd apps/apple/Packages/PrismDesign && swift test)
           (cd apps/apple/Packages/SartoUpdate && swift test)
 
       - name: Import Apple Developer ID signing certificate (if configured)
+        if: needs.meta.outputs.wants_app == 'true'
         env:
           MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
           MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
@@ -225,6 +265,7 @@ jobs:
           rm -f "$CERT_PATH"
 
       - name: Write App Store Connect notary key (if configured)
+        if: needs.meta.outputs.wants_app == 'true'
         env:
           SARTO_NOTARY_KEY_BASE64: ${{ secrets.SARTO_NOTARY_KEY_BASE64 }}
         run: |
@@ -237,17 +278,31 @@ jobs:
           chmod 600 "$NOTARY_KEY_PATH"
           echo "SARTO_NOTARY_KEY=$NOTARY_KEY_PATH" >> "$GITHUB_ENV"
 
-      - name: Build release artifacts & delta patches
+      - name: Build macOS app & darwin-arm64 daemon
         run: |
-          TARGET="${{ steps.meta.outputs.target }}"
-          CHANNEL="${{ steps.meta.outputs.channel }}"
-          BUILD="${{ steps.meta.outputs.build }}"
-          APP_VERSION="${{ steps.meta.outputs.app_version }}"
-          DAEMON_VERSION="${{ steps.meta.outputs.daemon_version }}"
-          DAEMON_CHANNEL="${{ steps.meta.outputs.daemon_channel }}"
-          APP_TAG="${{ steps.meta.outputs.app_tag }}"
-          DAEMON_TAG="${{ steps.meta.outputs.daemon_tag }}"
-          DELTA_FROM="${{ steps.meta.outputs.delta_from }}"
+          TARGET="${{ needs.meta.outputs.target }}"
+          CHANNEL="${{ needs.meta.outputs.channel }}"
+          BUILD="${{ needs.meta.outputs.build }}"
+          BUILT_AT="${{ needs.meta.outputs.built_at }}"
+          SHORT_COMMIT="${{ needs.meta.outputs.short_commit }}"
+          APP_VERSION="${{ needs.meta.outputs.app_version }}"
+          DAEMON_VERSION="${{ needs.meta.outputs.daemon_version }}"
+          APP_TAG="${{ needs.meta.outputs.app_tag }}"
+          DAEMON_TAG="${{ needs.meta.outputs.daemon_tag }}"
+          DELTA_FROM="${{ needs.meta.outputs.delta_from }}"
+
+          mkdir -p dist/out-mac-app dist/out-daemon-darwin-arm64
+
+          if [ "$TARGET" = "daemon" ]; then
+            node tools/sarto/build-daemon-package.mjs \
+              --version "$DAEMON_VERSION" \
+              --build "$BUILD" \
+              --channel "$CHANNEL" \
+              --commit "$SHORT_COMMIT" \
+              --built-at "$BUILT_AT" \
+              --out dist/out-daemon-darwin-arm64
+            exit 0
+          fi
 
           NOTES_FILE="${RUNNER_TEMP}/release-notes.md"
           BASE_VERSION="${APP_VERSION%%-*}"
@@ -272,88 +327,192 @@ jobs:
           EOF
           fi
 
-          if [ -n "${SARTO_UPDATE_SIGNING_KEY:-}" ]; then
-            ARGS=(
-              --target "$TARGET"
+          ARGS=(
+            --target "$TARGET"
+            --channel "$CHANNEL"
+            --app-version "$APP_VERSION"
+            --daemon-version "$DAEMON_VERSION"
+            --build "$BUILD"
+            --built-at "$BUILT_AT"
+            --notes "$NOTES_FILE"
+            --out dist/release
+            --skip-update-sign
+          )
+          if [ -n "$DELTA_FROM" ]; then
+            ARGS+=(--delta-from "$DELTA_FROM")
+          fi
+          if [ -z "${SARTO_SIGN_IDENTITY:-}" ] || [ -z "${SARTO_NOTARY_KEY:-}" ]; then
+            ARGS+=(--skip-notarize)
+          fi
+          node tools/sarto/release.mjs "${ARGS[@]}"
+
+          # Separate macOS app artifacts from the darwin-arm64 daemon archive so the publish job
+          # assembles a unified multi-platform daemon manifest and checksums file cleanly.
+          shopt -s nullglob
+          for file in \
+            "dist/release/${APP_TAG}"/Sarto-*.zip \
+            "dist/release/${APP_TAG}"/Sarto-*.dmg \
+            "dist/release/${APP_TAG}"/Sarto-*.delta \
+            "dist/release/${APP_TAG}"/latest-mac.json \
+            "dist/release/${APP_TAG}"/beta-mac.json; do
+            cp "$file" dist/out-mac-app/
+          done
+          cp "$NOTES_FILE" dist/out-mac-app/release-notes.md
+
+          if [ "${{ needs.meta.outputs.wants_daemon }}" = "true" ]; then
+            cp "dist/release/${DAEMON_TAG}/sarto-daemon-darwin-arm64.tar.gz" dist/out-daemon-darwin-arm64/
+          fi
+
+      - name: Upload macOS app release artifacts
+        if: needs.meta.outputs.wants_app == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-app-release
+          path: dist/out-mac-app/
+          if-no-files-found: error
+
+      - name: Upload darwin-arm64 daemon artifact
+        if: needs.meta.outputs.wants_daemon == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: daemon-darwin-arm64
+          path: dist/out-daemon-darwin-arm64/sarto-daemon-darwin-arm64.tar.gz
+          if-no-files-found: error
+
+      - name: Clean up ephemeral Apple credentials
+        if: always() && needs.meta.outputs.wants_app == 'true'
+        run: |
+          security delete-keychain "${RUNNER_TEMP}/sarto-signing.keychain-db" 2>/dev/null || true
+          rm -f "${RUNNER_TEMP}/developer-id.p12" "${RUNNER_TEMP}/notary-key.p8"
+
+  build-linux-daemon:
+    name: Build Linux Daemon (${{ matrix.arch }})
+    needs: meta
+    if: needs.meta.outputs.wants_daemon == 'true'
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - arch: x64
+            runner: ubuntu-24.04
+            image: quay.io/pypa/manylinux_2_28_x86_64
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            image: quay.io/pypa/manylinux_2_28_aarch64
+    runs-on: ${{ matrix.runner }}
+    container:
+      image: ${{ matrix.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+
+      - name: Install dependencies & compile node-pty against glibc 2.28
+        run: pnpm install --frozen-lockfile
+
+      - name: Build, verify ABI <= glibc 2.28 & smoke-test linux-${{ matrix.arch }} daemon
+        run: |
+          node tools/sarto/build-daemon-package.mjs \
+            --version "${{ needs.meta.outputs.daemon_version }}" \
+            --build "${{ needs.meta.outputs.build }}" \
+            --channel "${{ needs.meta.outputs.channel }}" \
+            --commit "${{ needs.meta.outputs.short_commit }}" \
+            --built-at "${{ needs.meta.outputs.built_at }}" \
+            --max-glibc 2.28 \
+            --out "dist/out-daemon-linux-${{ matrix.arch }}"
+
+      - name: Upload linux-${{ matrix.arch }} daemon artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: daemon-linux-${{ matrix.arch }}
+          path: dist/out-daemon-linux-${{ matrix.arch }}/sarto-daemon-linux-${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
+
+  publish:
+    name: Assemble, Sign, Attest & Publish Release
+    needs: [meta, build-mac, build-linux-daemon]
+    if: >-
+      always() &&
+      needs.meta.result == 'success' &&
+      (needs.build-mac.result == 'success' || needs.build-mac.result == 'skipped') &&
+      (needs.build-linux-daemon.result == 'success' || needs.build-linux-daemon.result == 'skipped')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      SARTO_UPDATE_SIGNING_KEY: ${{ secrets.SARTO_UPDATE_SIGNING_KEY }}
+      SARTO_HARNESSES_SIGNING_KEY: ${{ secrets.SARTO_HARNESSES_SIGNING_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Assemble release directories & sign manifests
+        run: |
+          CHANNEL="${{ needs.meta.outputs.channel }}"
+          BUILD="${{ needs.meta.outputs.build }}"
+          BUILT_AT="${{ needs.meta.outputs.built_at }}"
+          APP_TAG="${{ needs.meta.outputs.app_tag }}"
+          DAEMON_TAG="${{ needs.meta.outputs.daemon_tag }}"
+          DAEMON_VERSION="${{ needs.meta.outputs.daemon_version }}"
+          WANTS_APP="${{ needs.meta.outputs.wants_app }}"
+          WANTS_DAEMON="${{ needs.meta.outputs.wants_daemon }}"
+
+          mkdir -p dist/release
+
+          if [ "$WANTS_APP" = "true" ]; then
+            OUT_APP="dist/release/${APP_TAG}"
+            mkdir -p "$OUT_APP"
+            shopt -s nullglob
+            for file in artifacts/mac-app-release/*; do
+              if [ "$(basename "$file")" = "release-notes.md" ]; then
+                cp "$file" "${RUNNER_TEMP}/release-notes.md"
+              else
+                cp "$file" "$OUT_APP/"
+              fi
+            done
+            if [ -n "${SARTO_UPDATE_SIGNING_KEY:-}" ]; then
+              MAC_MANIFEST="latest-mac.json"
+              if [ "$CHANNEL" = "beta" ]; then
+                MAC_MANIFEST="beta-mac.json"
+              fi
+              node tools/sarto/signing.mjs "${OUT_APP}/${MAC_MANIFEST}"
+            fi
+          fi
+
+          if [ "$WANTS_DAEMON" = "true" ]; then
+            OUT_DAEMON="dist/release/${DAEMON_TAG}"
+            mkdir -p "$OUT_DAEMON"
+            ASSEMBLE_ARGS=(
+              --in artifacts/daemon-darwin-arm64
+              --in artifacts/daemon-linux-x64
+              --in artifacts/daemon-linux-arm64
+              --out "$OUT_DAEMON"
+              --version "$DAEMON_VERSION"
+              --tag "$DAEMON_TAG"
               --channel "$CHANNEL"
-              --app-version "$APP_VERSION"
-              --daemon-version "$DAEMON_VERSION"
               --build "$BUILD"
-              --out dist/release
+              --built-at "$BUILT_AT"
+              --require-platforms darwin-arm64,linux-x64,linux-arm64
             )
-            if [ "$TARGET" != "daemon" ]; then
-              ARGS+=(--notes "$NOTES_FILE")
+            if [ -z "${SARTO_UPDATE_SIGNING_KEY:-}" ]; then
+              ASSEMBLE_ARGS+=(--allow-unsigned)
             fi
-            if [ -n "$DELTA_FROM" ]; then
-              ARGS+=(--delta-from "$DELTA_FROM")
-            fi
-            if [ -z "${SARTO_SIGN_IDENTITY:-}" ] || [ -z "${SARTO_NOTARY_KEY:-}" ]; then
-              ARGS+=(--skip-notarize)
-            fi
-            node tools/sarto/release.mjs "${ARGS[@]}"
-          else
-            # Fallback when offline Ed25519 update signing key is not configured:
-            # still packages signed/ad-hoc app, DMG, ZIP, and standalone daemon archive.
-            STAGE="${RUNNER_TEMP}/sarto-stage"
-            mkdir -p "$STAGE"
-            if [ "$TARGET" != "daemon" ]; then
-              OUT_APP="dist/release/${APP_TAG}"
-              mkdir -p "$OUT_APP"
-              node apps/apple/scripts/package-mac.mjs \
-                --version "$APP_VERSION" \
-                --daemon-version "$DAEMON_VERSION" \
-                --daemon-channel "$DAEMON_CHANNEL" \
-                --channel "$CHANNEL" \
-                --build "$BUILD" \
-                --clean \
-                --out "$STAGE"
-              ditto -c -k --sequesterRsrc --keepParent "$STAGE/Sarto.app" "$OUT_APP/Sarto-${APP_VERSION}-arm64.zip"
-
-              DMG_STAGE="${RUNNER_TEMP}/sarto-dmg"
-              mkdir -p "$DMG_STAGE"
-              ditto "$STAGE/Sarto.app" "$DMG_STAGE/Sarto.app"
-              ln -s /Applications "$DMG_STAGE/Applications"
-              hdiutil create -volname "Sarto ${APP_VERSION}" -srcfolder "$DMG_STAGE" -fs APFS -format UDZO -ov "$OUT_APP/Sarto-${APP_VERSION}-arm64.dmg"
-              if [ -n "${SARTO_SIGN_IDENTITY:-}" ]; then
-                codesign --force --sign "$SARTO_SIGN_IDENTITY" --timestamp "$OUT_APP/Sarto-${APP_VERSION}-arm64.dmg"
-              fi
-            fi
-
-            if [ "$TARGET" != "app" ]; then
-              OUT_DAEMON="dist/release/${DAEMON_TAG}"
-              mkdir -p "$OUT_DAEMON"
-              if [ "$TARGET" = "daemon" ]; then
-                SARTO_BUILD_PLACEHOLDER=1 pnpm build:daemon
-                node tools/install/device-helpers.mjs
-              fi
-              node --input-type=module -e "
-                import { packageDaemon } from './tools/daemon/package.mjs';
-                import { stampBuildInfo } from './tools/sarto/runtime-fingerprint.mjs';
-                import { execFile as execFileCb } from 'node:child_process';
-                import { mkdir } from 'node:fs/promises';
-                import path from 'node:path';
-                import { promisify } from 'node:util';
-                const execFile = promisify(execFileCb);
-                const stage = process.env.RUNNER_TEMP;
-                const outDir = path.resolve('${OUT_DAEMON}');
-                const daemon = await packageDaemon({ out: path.join(stage, 'daemon-pkg') });
-                const name = path.basename(daemon.archive);
-                const pkgDir = path.basename(daemon.archive, '.tar.gz');
-                const unpacked = path.join(stage, 'daemon-unpacked');
-                await mkdir(unpacked, { recursive: true });
-                await execFile('tar', ['-xzf', daemon.archive, '-C', unpacked]);
-                await stampBuildInfo(path.join(unpacked, pkgDir), {
-                  version: '${DAEMON_VERSION}',
-                  build: '${BUILD}',
-                  channel: '${CHANNEL}',
-                  commit: '${GITHUB_SHA}'.slice(0, 7),
-                  builtAt: new Date().toISOString(),
-                });
-                await execFile('tar', ['-czf', path.join(outDir, name), '-C', unpacked, pkgDir], {
-                  env: { ...process.env, COPYFILE_DISABLE: '1' },
-                });
-              "
-            fi
+            node tools/sarto/assemble-daemon-release.mjs "${ASSEMBLE_ARGS[@]}"
           fi
 
           for dir in dist/release/*/; do
@@ -362,7 +521,7 @@ jobs:
               shopt -s nullglob
               TARGETS=(Sarto-*.dmg Sarto-*.zip Sarto-*.delta sarto-daemon-*.tar.gz)
               if [ "${#TARGETS[@]}" -gt 0 ]; then
-                shasum -a 256 "${TARGETS[@]}" > SHA256SUMS.txt
+                sha256sum "${TARGETS[@]}" > SHA256SUMS.txt
               fi
             )
           done
@@ -380,8 +539,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          CHANNEL="${{ steps.meta.outputs.channel }}"
-          BUILD="${{ steps.meta.outputs.build }}"
+          CHANNEL="${{ needs.meta.outputs.channel }}"
+          BUILD="${{ needs.meta.outputs.build }}"
 
           DRAFT_FLAG=""
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.draft }}" = "true" ]; then
@@ -474,6 +633,4 @@ jobs:
 
       - name: Clean up ephemeral credentials
         if: always()
-        run: |
-          security delete-keychain "${RUNNER_TEMP}/sarto-signing.keychain-db" 2>/dev/null || true
-          rm -f "${RUNNER_TEMP}/developer-id.p12" "${RUNNER_TEMP}/notary-key.p8" "$HOME/.ssh/sarto_publish_key"
+        run: rm -f "$HOME/.ssh/sarto_publish_key"

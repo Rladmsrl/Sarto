@@ -225,6 +225,9 @@ export interface UpdateDeps {
   version: string
   /** Release channel to follow; defaults to beta for beta builds, stable otherwise. */
   channel?: UpdateChannel
+  /** Current host OS and CPU architecture used to pin the matching package checksum. */
+  platform?: NodeJS.Platform
+  arch?: string
   /** The folder of the running daemon's bundle. */
   bundleDir: string
   /** The places to try in order, laid out as GitHub's releases. */
@@ -433,7 +436,10 @@ export async function update(
   // The script tries the same places in the same order for the package. The checksums it finds
   // beside the package are not signed, so it is given the ones the signed manifest lists and
   // takes a package only when it matches one of them.
-  const pinned = [...new Set((files ?? []).map((file) => file.sha256))]
+  const expectedName =
+    deps.platform && deps.arch ? `sarto-daemon-${deps.platform}-${deps.arch}.tar.gz` : null
+  const matched = expectedName ? (files ?? []).filter((file) => file.name === expectedName) : []
+  const pinned = [...new Set((matched.length > 0 ? matched : (files ?? [])).map((f) => f.sha256))]
   const args = [
     '--version',
     latest,

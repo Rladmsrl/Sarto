@@ -142,6 +142,11 @@ All update manifests are signed with Ed25519 over `"<filename>\n" + bytes` (`too
 
 ### GitHub Actions Releases (`.github/workflows/release-mac.yml`)
 
+- **Multi-platform 4-job pipeline**:
+  - `meta` (`ubuntu-24.04`): resolves unified `target`, `channel`, `build`, `built_at`, tags and macOS delta targets, enforces `checkReleaseVersionOrder`, and runs `format:check`, `lint`, `typecheck` and `test`.
+  - `build-mac` (`macos-15`): builds, signs and notarizes `Sarto.app` (ZIP, DMG, delta patches) when `target` includes `app`, and builds `sarto-daemon-darwin-arm64.tar.gz` when `target` includes `daemon`. Receives only Apple signing/notarization secrets.
+  - `build-linux-daemon` (`ubuntu-24.04` in `quay.io/pypa/manylinux_2_28_x86_64` and `ubuntu-24.04-arm` in `quay.io/pypa/manylinux_2_28_aarch64`): builds `sarto-daemon-linux-x64.tar.gz` and `sarto-daemon-linux-arm64.tar.gz` via `tools/sarto/build-daemon-package.mjs`, verifying `node-pty` links `GLIBC <= 2.28`, passing PTY and headless `sarto run`/`sarto status` smoke tests. Receives no release secrets.
+  - `publish` (`ubuntu-24.04`): sole job holding `SARTO_UPDATE_SIGNING_KEY`, `SARTO_HARNESSES_SIGNING_KEY` and mirror SSH secrets; runs `tools/sarto/assemble-daemon-release.mjs` (requiring all three platforms `darwin-arm64`, `linux-x64`, `linux-arm64`), signs channel manifests and `install.sh`, generates `SHA256SUMS.txt`, attests SLSA provenance, publishes GitHub Releases and mirrors atomically to `sarto.1o.ink`.
 - **Tag triggers**:
   - `vX.Y.Z` (or `vX.Y.Z-beta.<build>`): builds `target=all`
   - `app-vX.Y.Z` (or `app-vX.Y.Z-beta.<build>`): builds `target=app`
@@ -156,10 +161,17 @@ All update manifests are signed with Ed25519 over `"<filename>\n" + bytes` (`too
 ### Standalone Daemon CLI Update, Install & SSH Provisioning
 
 ```bash
-# Stable channel (verifies latest-daemon.json, falls back to /latest redirect on older servers)
+# Install stable (default) or beta channel on macOS (arm64) or Linux (x64/arm64, glibc 2.28+)
+curl -fsSL https://sarto.1o.ink/releases/latest/download/install.sh | sh
+curl -fsSL https://sarto.1o.ink/releases/latest/download/install.sh | sh -s -- --channel beta
+
+# Container / non-systemd Linux host
+curl -fsSL https://sarto.1o.ink/releases/latest/download/install.sh | sh -s -- --no-service
+
+# Stable channel self-update (verifies latest-daemon.json, pins current platform SHA-256)
 sarto update
 
-# Beta channel (verifies beta-daemon.json and latest-daemon.json, installs the newer SemVer)
+# Beta channel self-update (verifies beta-daemon.json and latest-daemon.json, installs the newer SemVer)
 sarto update --channel beta
 
 # Direct install of a decoupled tag

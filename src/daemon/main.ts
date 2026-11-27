@@ -75,12 +75,17 @@ function systemUser(): string | undefined {
   }
 }
 
-function runTool(command: string, args: string[]): Promise<CommandResult> {
+function runTool(command: string, args: string[], env?: NodeJS.ProcessEnv): Promise<CommandResult> {
   return new Promise((resolve) => {
-    execFile(command, args, { timeout: 30_000 }, (error, stdout, stderr) => {
-      const code = error ? (typeof error.code === 'number' ? error.code : 127) : 0
-      resolve({ code, stdout, stderr: stderr || (error && code === 127 ? error.message : '') })
-    })
+    execFile(
+      command,
+      args,
+      { timeout: 30_000, ...(env ? { env } : {}) },
+      (error, stdout, stderr) => {
+        const code = error ? (typeof error.code === 'number' ? error.code : 127) : 0
+        resolve({ code, stdout, stderr: stderr || (error && code === 127 ? error.message : '') })
+      },
+    )
   })
 }
 
@@ -661,6 +666,8 @@ async function run(command: Exclude<Command, { kind: 'help' | 'version' | 'usage
       return update({
         version,
         channel,
+        platform: process.platform,
+        arch: process.arch,
         bundleDir: __dirname,
         releases: releaseSources(process.env[RELEASES_ENV]),
         userAgent: daemonUserAgent(version, process.platform, process.arch),

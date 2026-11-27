@@ -8,6 +8,7 @@
 # ~/.local/bin/sarto to it and sets up the daemon's service. `sarto update` runs it again for a
 # newer release. Pass options after `sh -s --`:
 #
+#   --channel <name>     Install the latest release on that channel: stable (default) or beta
 #   --version <version>  Install that release instead of the latest (X.Y.Z or X.Y.Z-beta.<build>)
 #   --tag <tag>          Download from release folder download/<tag> (for decoupled daemon/beta tags)
 #   --sha256 <hex>       Take the package only if this is its SHA-256; may be given more than once
@@ -17,6 +18,7 @@
 set -eu
 
 downloads=https://sarto.1o.ink/releases
+channel=''
 wanted=''
 tag=''
 pinned=''
@@ -67,6 +69,15 @@ is_tag() {
 
 while [ $# -gt 0 ]; do
   case $1 in
+    --channel)
+      [ $# -ge 2 ] || fail '--channel needs stable or beta'
+      channel=$2
+      shift 2
+      ;;
+    --channel=*)
+      channel=${1#--channel=}
+      shift
+      ;;
     --version)
       [ $# -ge 2 ] || fail '--version needs a version, such as 0.1.0'
       wanted=$2
@@ -101,12 +112,21 @@ while [ $# -gt 0 ]; do
       shift
       ;;
     -h | --help)
-      sed -n '2,16s/^# \{0,1\}//p' "$0" 2>/dev/null || say 'See https://sarto.1o.ink/releases'
+      sed -n '2,17s/^# \{0,1\}//p' "$0" 2>/dev/null || say 'See https://sarto.1o.ink/releases'
       exit 0
       ;;
     *) fail "Unknown option $1" ;;
   esac
 done
+if [ -n "$channel" ]; then
+  case $channel in
+    stable | beta) ;;
+    *) fail "--channel must be stable or beta, not '$channel'" ;;
+  esac
+  if [ -n "$wanted" ] || [ -n "$tag" ]; then
+    fail '--channel cannot be combined with --version or --tag'
+  fi
+fi
 wanted=${wanted#v}
 if [ -n "$wanted" ] && ! is_version "$wanted"; then
   fail "'$wanted' is not a version, such as 0.1.0 or 0.4.0-beta.261125143512"
@@ -138,6 +158,25 @@ if [ "$os" = linux ]; then
   case $(ldd --version 2>&1 || true) in
     *musl*) fail 'The Sarto daemon needs glibc; systems with musl, such as Alpine, are not supported' ;;
   esac
+  for musl in /lib/ld-musl-*.so* /usr/lib/ld-musl-*.so*; do
+    if [ -e "$musl" ]; then
+      fail 'The Sarto daemon needs glibc; systems with musl, such as Alpine, are not supported'
+    fi
+  done
+  if command -v getconf > /dev/null 2>&1; then
+    libc=$(getconf GNU_LIBC_VERSION 2>/dev/null || true)
+    case $libc in
+      glibc\ [0-9]*.[0-9]*)
+        libc_ver=${libc#glibc }
+        libc_major=${libc_ver%%.*}
+        libc_rest=${libc_ver#*.}
+        libc_minor=${libc_rest%%.*}
+        if [ "$libc_major" -lt 2 ] || { [ "$libc_major" -eq 2 ] && [ "$libc_minor" -lt 28 ]; }; then
+          fail "The Sarto daemon needs glibc 2.28 or later (found glibc $libc_major.$libc_minor)"
+        fi
+        ;;
+    esac
+  fi
 fi
 
 # A place that cannot be reached, or stops sending, gives way to the next one soon.
@@ -157,6 +196,7 @@ elif command -v shasum > /dev/null 2>&1; then
 else
   fail 'Checking the download needs sha256sum or shasum'
 fi
+command -v tar > /dev/null 2>&1 || fail 'Unpacking the download needs tar'
 
 share=${XDG_DATA_HOME:-}
 case $share in
@@ -219,8 +259,91 @@ fetch_from() {
     return 1
   fi
 }
+# Extracts a top-level string field from a 2-space formatted release manifest JSON without jq.
+manifest_field() {
+  awk -v key="$2" '
+    index($0, "  \"" key "\": \"") == 1 {
+      line = substr($0, length("  \"" key "\": \"") + 1)
+      sub(/",?$/, "", line)
+      print line
+      exit
+    }
+  ' "$1"
+}
+# Compares two X.Y.Z or X.Y.Z-beta.<build> versions; exits 0 when $1 > $2 (SemVer precedence).
+is_newer_version() {
+  a_core=${1%%-*}
+  b_core=${2%%-*}
+  a_maj=${a_core%%.*}
+  a_rem=${a_core#*.}
+  a_min=${a_rem%%.*}
+  a_pat=${a_rem#*.}
+  b_maj=${b_core%%.*}
+  b_rem=${b_core#*.}
+  b_min=${b_rem%%.*}
+  b_pat=${b_rem#*.}
+  if [ "$a_maj" -ne "$b_maj" ]; then [ "$a_maj" -gt "$b_maj" ]; return; fi
+  if [ "$a_min" -ne "$b_min" ]; then [ "$a_min" -gt "$b_min" ]; return; fi
+  if [ "$a_pat" -ne "$b_pat" ]; then [ "$a_pat" -gt "$b_pat" ]; return; fi
+  case $1 in
+    *-beta.*) a_pre=${1#*-beta.} ;;
+    *) a_pre='' ;;
+  esac
+  case $2 in
+    *-beta.*) b_pre=${2#*-beta.} ;;
+    *) b_pre='' ;;
+  esac
+  if [ -z "$a_pre" ] && [ -n "$b_pre" ]; then return 0; fi
+  if [ -n "$a_pre" ] && [ -z "$b_pre" ]; then return 1; fi
+  if [ -z "$a_pre" ] && [ -z "$b_pre" ]; then return 1; fi
+  # Compare arbitrary-length positive integer build numbers without 32-bit shell overflow.
+  if [ "${#a_pre}" -ne "${#b_pre}" ]; then
+    [ "${#a_pre}" -gt "${#b_pre}" ]
+    return
+  fi
+  [ "$(printf '%s\n%s\n' "$a_pre" "$b_pre" | LC_ALL=C sort | tail -n 1)" = "$a_pre" ] && [ "$a_pre" != "$b_pre" ]
+}
+resolve_channel() {
+  base=$1
+  best_ver=''
+  best_tag=''
+  for mname in beta-daemon.json latest-daemon.json; do
+    if [ "$channel" = stable ] && [ "$mname" = beta-daemon.json ]; then continue; fi
+    mfile=$work/$mname
+    if ! download "$base/latest/download/$mname" "$mfile"; then continue; fi
+    mver=$(manifest_field "$mfile" version)
+    mtag=$(manifest_field "$mfile" tag)
+    [ -n "$mtag" ] || mtag=v$mver
+    if ! is_version "$mver" || ! is_tag "$mtag"; then continue; fi
+    if [ "$channel" = stable ]; then
+      case $mver in
+        *-beta.*) continue ;;
+      esac
+    fi
+    if [ -z "$best_ver" ] || is_newer_version "$mver" "$best_ver"; then
+      best_ver=$mver
+      best_tag=$mtag
+    fi
+  done
+  if [ -z "$best_tag" ]; then
+    why="Could not resolve a $channel daemon release from $base"
+    return 1
+  fi
+  wanted=$best_ver
+  tag=$best_tag
+  return 0
+}
 # Downloads the package and the checksums from one place and checks them, or sets why not.
 fetch() {
+  if [ -n "$channel" ]; then
+    if ! resolve_channel "$1"; then
+      if [ "$channel" = stable ]; then
+        fetch_from "$1/latest/download"
+        return
+      fi
+      return 1
+    fi
+  fi
   if [ -n "$tag" ]; then
     fetch_from "$1/download/$tag"
   elif [ -n "$wanted" ]; then
@@ -277,6 +400,7 @@ if [ "$service" = 1 ]; then
   if ! "$target/bin/sarto" service install; then
     fail 'The daemon is installed, but its service is not set up; run sarto service install again, or sarto run in the foreground'
   fi
+  say 'Next steps: run `sarto status` to inspect the daemon, and `sarto login` to connect via Sarto Cloud (or add this host over SSH from Sarto on macOS).'
 else
   say 'Start it with sarto run, or set up its service with sarto service install.'
 fi

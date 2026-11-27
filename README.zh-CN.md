@@ -114,11 +114,11 @@ Sarto 驱动拥有 Shell 权限的 Agent，因此**从设计上保证你无需�
 ## 安装
 
 - **Mac 应用**（macOS 15+、Apple 芯片，内置 daemon 与 Node.js）：前往 [`sarto.1o.ink/releases/latest`](https://sarto.1o.ink/releases/latest) 下载 `Sarto-<版本>-arm64.dmg`，拖入「应用程序」。
-- **独立无界面 daemon**：
+- **独立无界面 daemon**（支持 macOS Apple 芯片与 Linux x64/arm64，glibc 2.28+，免 root，内置 Node.js）：
   ```sh
   curl -fsSL https://sarto.1o.ink/releases/latest/download/install.sh | sh
   ```
-  安装至 `~/.local/share/sarto`、链接 `~/.local/bin/sarto` 并注册 launchd 服务（传 `sh -s -- --no-service` 可跳过），随后运行 `sarto login`。
+  安装至 `~/.local/share/sarto`、链接 `~/.local/bin/sarto` 并注册用户级服务（macOS 使用 launchd，Linux 使用 `systemd --user` + linger；传 `sh -s -- --channel beta` 安装 Beta 版，容器环境传 `sh -s -- --no-service` 跳过服务注册），随后运行 `sarto login`（或直接在 macOS 版 Sarto 中通过 SSH 添加该主机）。
 - **从源码构建**（Xcode 16+、Node.js 22.13+、pnpm 10，详见 [CONTRIBUTING.md](./CONTRIBUTING.md)）：
   ```sh
   pnpm install && pnpm build:daemon && open apps/apple/Sarto.xcodeproj
