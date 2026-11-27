@@ -1034,6 +1034,8 @@
 "settings.remote.online" = "在线";
 "settings.remote.terminal" = "允许远程终端访问";
 "settings.remote.terminalSub" = "允许已配对的远程设备在本机打开终端会话";
+"settings.remote.pauseMobilePush" = "在电脑前时暂停手机推送";
+"settings.remote.pauseMobilePushSub" = "本机未锁屏且近期有操作时暂缓向手机发送 APNs 推送；离开电脑后仍未处理的通知会自动补发";
 
 "settings.advanced.proxy" = "网络代理";
 "settings.advanced.proxyMode" = "HTTP / HTTPS 代理模式";

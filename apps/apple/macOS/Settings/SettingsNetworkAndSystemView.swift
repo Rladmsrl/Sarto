@@ -68,8 +68,22 @@ struct RemoteCloudSettingsSectionView: View {
             // 2. Unified My Devices (Computers + Mobile signed in to the same Sarto account)
             myDevicesSection
 
-            // 3. Local Remote Sharing Permissions (Remote Terminal + Remote Claude Code Hosting)
+            // 3. Local Remote Sharing Permissions (Mobile Push + Remote Terminal + Remote Claude Code Hosting)
             SettingsGroupSection(l10n.tr("settings.remote.sharingGroup")) {
+                SettingsRowView(
+                    id: "remote.pauseMobilePush",
+                    highlightedID: router.highlightedRowID,
+                    title: l10n.tr("settings.remote.pauseMobilePush"),
+                    subtitle: l10n.tr("settings.remote.pauseMobilePushSub")
+                ) {
+                    Toggle("", isOn: $state.pauseMobilePushWhenActive)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                }
+
+                SettingsRowDivider()
+
                 SettingsRowView(
                     id: "remote.terminal",
                     highlightedID: router.highlightedRowID,

@@ -37,6 +37,8 @@ public final class LocalDaemonManager {
     /// The idle game's link status and the frames the game service sends, as the daemon relays them.
     @ObservationIgnored public var onGameEvent: ((HostEvent) -> Void)? = nil
     private var gameWatching = false
+    /// Whether the user is actively at this Mac, sent to the daemon so `onlyAway` pushes pause.
+    private var desktopPresent: Bool? = nil
 
     private var process: Process?
     /// The runtime folder the connected daemon runs from; nil when unknown, as for a daemon an
@@ -177,6 +179,7 @@ public final class LocalDaemonManager {
         let syncSubscribed = await subscribeSync(on: session)
         let hostsSubscribed = await subscribeOtherHosts(on: session)
         let gameSubscribed = await subscribeGame(on: session)
+        let presenceSynced = await syncPresence(on: session)
         guard gen == syncStartGeneration, self.syncSession === session else { return }
         syncTask = Task { [weak self] in
             for await event in session.events {
@@ -227,20 +230,22 @@ public final class LocalDaemonManager {
                 }
             }
         }
-        guard !accountSubscribed || !syncSubscribed || !hostsSubscribed || !gameSubscribed else { return }
+        guard !accountSubscribed || !syncSubscribed || !hostsSubscribed || !gameSubscribed || !presenceSynced else { return }
         subscribeRetryTask = Task { [weak self] in
             var needAccount = !accountSubscribed
             var needSync = !syncSubscribed
             var needHosts = !hostsSubscribed
             var needGame = !gameSubscribed
+            var needPresence = !presenceSynced
             var delay: Duration = .milliseconds(500)
-            for _ in 0..<40 where needAccount || needSync || needHosts || needGame {
+            for _ in 0..<40 where needAccount || needSync || needHosts || needGame || needPresence {
                 try? await Task.sleep(for: delay)
                 guard let self, !Task.isCancelled, self.syncSession === session else { return }
                 if needAccount { needAccount = !(await self.subscribeAccount(on: session)) }
                 if needSync { needSync = !(await self.subscribeSync(on: session)) }
                 if needHosts { needHosts = !(await self.subscribeOtherHosts(on: session)) }
                 if needGame { needGame = !(await self.subscribeGame(on: session)) }
+                if needPresence { needPresence = !(await self.syncPresence(on: session)) }
                 delay = min(delay * 2, .seconds(10))
             }
         }
@@ -304,6 +309,26 @@ public final class LocalDaemonManager {
         gameWatching = watching
         guard let session = syncSession else { return }
         Task { try? await session.daemonGameWatch(watching) }
+    }
+
+    /// Reports whether the user is actively at this Mac so `onlyAway` mobile pushes pause while present.
+    public func setDesktopPresence(_ present: Bool) {
+        guard desktopPresent != present else { return }
+        desktopPresent = present
+        guard let session = syncSession else { return }
+        Task { try? await session.daemonSetPresence(present) }
+    }
+
+    private func syncPresence(on session: SartoHostSession) async -> Bool {
+        guard let present = desktopPresent else { return true }
+        do {
+            try await session.daemonSetPresence(present)
+            return true
+        } catch let error as PortRPCError where error.code == "unknown_method" {
+            return true
+        } catch {
+            return false
+        }
     }
 
     /// Turns the idle game on or off for this Mac; nil when the daemon could not be asked.

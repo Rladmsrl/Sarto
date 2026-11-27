@@ -194,6 +194,8 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   let cloudTheme: CloudThemeSync | null = null
   let relayToken: RelayToken | null = null
   const accountConnections = new Set<ControlConnection>()
+  const presentConnections = new Set<ControlConnection>()
+  const presenceClosers = new WeakSet<ControlConnection>()
   const gameConnections = new Set<ControlConnection>()
   const watchingGameConnections = new Set<ControlConnection>()
   const gameClosers = new WeakSet<ControlConnection>()
@@ -280,6 +282,24 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       starting()
       changeSettings({ remote: { terminal: allowed } })
       return terminalReport()
+    },
+    'presence.set': async ({ present }, connection) => {
+      const running = starting()
+      if (present) {
+        presentConnections.add(connection)
+        if (!presenceClosers.has(connection)) {
+          presenceClosers.add(connection)
+          connection.onClose(() => {
+            if (presentConnections.delete(connection)) {
+              hosts?.setPresence(presentConnections.size > 0)
+            }
+          })
+        }
+      } else {
+        presentConnections.delete(connection)
+      }
+      running.setPresence(presentConnections.size > 0)
+      return null
     },
     'report.build': async ({ request }) =>
       daemonReport(

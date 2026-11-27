@@ -296,6 +296,7 @@ struct SartoMacApp: App {
     @State private var settingsRouter = PrismSettingsRouter()
     @State private var updater = SartoUpdater()
     @State private var problemReport = ProblemReportCoordinator()
+    @State private var presenceMonitor = DesktopPresenceMonitor()
     @State private var didWireAppLifecycle = false
     @State private var didBootstrapBoundDaemon = false
     @State private var announcedApprovals = AnnouncedApprovals()
@@ -455,7 +456,8 @@ struct SartoMacApp: App {
         appDelegate.onMenuBarResidentChange = { [islandCoordinator] resident in
             islandCoordinator.setMenuBarResident(resident)
         }
-        appDelegate.onWillTerminate = { [daemonManager, appState, updater, problemReport] in
+        appDelegate.onWillTerminate = { [daemonManager, appState, updater, problemReport, presenceMonitor] in
+            presenceMonitor.stop()
             problemReport.removeCrashMarkerOnCleanQuit()
             appState.flushDraftsNow()
             // A quit that installs an update waits for the daemon, whose files it replaces.
@@ -542,6 +544,13 @@ struct SartoMacApp: App {
             }
         }
         islandCoordinator.attach(to: appState)
+        presenceMonitor.onPresenceChanged = { [daemonManager] present in
+            daemonManager.setDesktopPresence(present)
+        }
+        appState.onPauseMobilePushWhenActiveChanged = { [presenceMonitor] enabled in
+            presenceMonitor.setEnabled(enabled)
+        }
+        presenceMonitor.start(enabled: appState.pauseMobilePushWhenActive)
         wireWorkspaceSyncBridge()
 
         bootstrapBoundDaemonIfNeeded()

@@ -223,6 +223,7 @@ enum PrismSettingsSearchCatalog {
         // Cloud Sync & Multi-Device
         .init(id: "rem.cloud", section: .remoteAndCloud, rowID: "remote.sync", titleKey: "settings.remote.cloudCardTitle", subtitleKey: "settings.remote.cloudCardSub", keywords: "sarto cloud official account sync e2ee vault recovery 官方云 账号 同步 恢复密钥 多设备"),
         .init(id: "rem.devices", section: .remoteAndCloud, rowID: "remote.devices", titleKey: "settings.myDevices.title", subtitleKey: "settings.myDevices.sub", keywords: "my devices computers mac iphone ipad mobile host mesh version upgrade update sidebar remove 我的设备 电脑 手机 版本 升级 更新 侧边栏 移除 互联"),
+        .init(id: "rem.push", section: .remoteAndCloud, rowID: "remote.pauseMobilePush", titleKey: "settings.remote.pauseMobilePush", subtitleKey: "settings.remote.pauseMobilePushSub", keywords: "mobile push apns iphone notification away active presence 手机 推送 通知 离开 电脑 暂停"),
         .init(id: "rem.term", section: .remoteAndCloud, rowID: "remote.terminal", titleKey: "settings.remote.terminal", subtitleKey: "settings.remote.terminalSub", keywords: "remote terminal allow access 远程 终端 权限"),
         .init(id: "rem.claude", section: .remoteAndCloud, rowID: "remote.claude", titleKey: "settings.remote.claudeTitle", subtitleKey: "settings.remote.claudeSub", keywords: "remote claude model host share borrow concurrent idle 远程 模型 借用 并发 空闲"),
 

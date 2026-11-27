@@ -2704,6 +2704,10 @@ public actor SartoHostSession {
         return res.objectValue?["allowed"]?.boolValue ?? allowed
     }
 
+    public func daemonSetPresence(_ present: Bool) async throws {
+        _ = try await request("presence.set", params: .object(["present": .bool(present)]))
+    }
+
     public func daemonSetVerbose(_ on: Bool) async throws -> Double? {
         let res = try await request("verbose.set", params: .object(["on": .bool(on)]))
         return res.objectValue?["until"]?.doubleValue

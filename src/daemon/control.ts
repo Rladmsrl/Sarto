@@ -142,6 +142,8 @@ export interface ControlCalls {
   'terminal.get': { params: undefined; result: TerminalReport }
   /** Allows devices the terminal, or stops allowing it, which closes their terminals at once. */
   'terminal.set': { params: { allowed: boolean }; result: TerminalReport }
+  /** Reports whether the user is actively at the desktop app, for `onlyAway` push notifications. */
+  'presence.set': { params: { present: boolean }; result: null }
   /**
    * What a computer adding this one over SSH connects with, after adding its `device`, whose key
    * came over the login, as a device of the owner's.
@@ -561,6 +563,13 @@ const validators: { [M in ControlMethod]: (raw: unknown) => Params<M> } = {
       throw new ControlError('invalid_params', 'allowed must be a boolean')
     }
     return { allowed }
+  },
+  'presence.set': (raw) => {
+    const { present } = record(raw)
+    if (typeof present !== 'boolean') {
+      throw new ControlError('invalid_params', 'present must be a boolean')
+    }
+    return { present }
   },
   'ssh.setup': (raw) => {
     const { device } = record(raw)

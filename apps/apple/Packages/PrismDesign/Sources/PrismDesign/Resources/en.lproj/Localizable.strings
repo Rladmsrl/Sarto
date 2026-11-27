@@ -1034,6 +1034,8 @@
 "settings.remote.online" = "Online";
 "settings.remote.terminal" = "Allow Remote Terminal";
 "settings.remote.terminalSub" = "Permit paired remote devices to open shell terminals on this Mac";
+"settings.remote.pauseMobilePush" = "Pause Mobile Push While Active";
+"settings.remote.pauseMobilePushSub" = "Hold APNs notifications to mobile devices while this Mac is unlocked and recently active; anything still unread or waiting is sent once you step away";
 
 "settings.advanced.proxy" = "Network Proxy";
 "settings.advanced.proxyMode" = "HTTP / HTTPS Proxy Mode";

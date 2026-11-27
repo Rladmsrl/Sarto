@@ -131,6 +131,7 @@ public final class SartoState {
         static let terminalFontFamily = "dev.sarto.pref.terminalFontFamily"
         static let hiddenHostIDs = "dev.sarto.pref.hiddenHostIDs"
         static let notifications = "dev.sarto.pref.notifications"
+        static let pauseMobilePushWhenActive = "dev.sarto.pref.pauseMobilePushWhenActive"
         static let relayOrigin = "dev.sarto.pref.relayOrigin"
         static let relayBearerToken = "dev.sarto.pref.relayBearerToken"
         static let uiTimestamps = "dev.sarto.pref.uiTimestamps"
@@ -264,6 +265,15 @@ public final class SartoState {
             markUiPrefMutated("notifications")
         }
     }
+    /// Local to this Mac: hold mobile APNs pushes while this computer is unlocked and recently active.
+    public var pauseMobilePushWhenActive: Bool = true {
+        didSet {
+            UserDefaults.standard.set(pauseMobilePushWhenActive, forKey: PrefKey.pauseMobilePushWhenActive)
+            guard !isInitializingPrefs else { return }
+            onPauseMobilePushWhenActiveChanged?(pauseMobilePushWhenActive)
+        }
+    }
+    @ObservationIgnored public var onPauseMobilePushWhenActiveChanged: ((Bool) -> Void)? = nil
     @ObservationIgnored private var isInitializingPrefs: Bool = true
     @ObservationIgnored private var isApplyingSyncedPrefs: Bool = false
     @ObservationIgnored private var isBatchUpdatingPalette: Bool = false
@@ -738,6 +748,9 @@ public final class SartoState {
         if let data = ud.data(forKey: PrefKey.notifications),
            let decoded = try? JSONDecoder().decode(PrismNotificationPrefs.self, from: data) {
             self.notificationPrefs = decoded
+        }
+        if ud.object(forKey: PrefKey.pauseMobilePushWhenActive) != nil {
+            self.pauseMobilePushWhenActive = ud.bool(forKey: PrefKey.pauseMobilePushWhenActive)
         }
         if let savedRelay = ud.string(forKey: PrefKey.relayOrigin) {
             self.relayOrigin = savedRelay

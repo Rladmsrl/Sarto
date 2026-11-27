@@ -64,6 +64,28 @@ struct M2ProtocolTests {
         await session.close()
     }
 
+    @Test("Control socket presence.set encodes present boolean matching src/daemon/control.ts")
+    func controlPresenceSetCompliance() async throws {
+        let transport = MockPortTransport { raw in
+            let req = try! JSONDecoder().decode(JSONValue.self, from: raw).objectValue!
+            let id = req["id"]!.doubleValue!
+            let method = req["method"]!.stringValue!
+            let params = req["params"]!.objectValue!
+            #expect(method == "presence.set")
+            #expect(params["present"] == .bool(true))
+            let reply = JSONValue.object([
+                "type": .string("response"),
+                "id": .number(id),
+                "result": .null,
+            ])
+            return [try! JSONEncoder().encode(reply)]
+        }
+
+        let session = SartoHostSession(transport: transport)
+        try await session.daemonSetPresence(true)
+        await session.close()
+    }
+
     @Test("Git and Files RPC payloads decode exact Sarto host JSON shapes")
     func gitAndFilesRPCDecoding() async throws {
         let transport = MockPortTransport { raw in

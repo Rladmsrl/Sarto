@@ -330,6 +330,8 @@ export class Hosts {
   private readonly usageChangedListeners = new Set<() => void>()
   /** What waits for the user by session, which each remote host process starts with. */
   private waiting: Record<string, string[]> = {}
+  /** Whether a desktop app reported the user is at this computer; null until any does. */
+  private present: boolean | null = null
   private readonly reportRequests = new Map<number, (result: ReportBuildResult) => void>()
   private nextReport = 1
   private readonly usageExportRequests = new Map<
@@ -516,6 +518,7 @@ export class Hosts {
         push: this.relayTarget.pushUrl,
         ...(this.relayTarget.discoverable ? { discoverable: true } : {}),
         waiting: this.waiting,
+        ...(this.present !== null ? { present: this.present } : {}),
       }),
       startMessages: () => [
         ...this.relayTarget.startMessages(),
@@ -726,6 +729,13 @@ export class Hosts {
   onAttention(listener: (message: Attention) => void): () => void {
     this.attentionListeners.add(listener)
     return () => this.attentionListeners.delete(listener)
+  }
+
+  /** Tells the remote host whether the user is at this computer now, for `onlyAway` pushes. */
+  setPresence(present: boolean): void {
+    if (this.present === present) return
+    this.present = present
+    this.remote.post({ type: 'remote-host:presence', present })
   }
 
   /** Renames a device, which its sessions hear; false when it is not paired or not running. */

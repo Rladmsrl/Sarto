@@ -14,6 +14,7 @@
 		16A692DB09F289AFAE7C0DB4 /* AgentAvailability.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EBCBDA9DCE3B77AA00EC56A /* AgentAvailability.swift */; };
 		1AE2BA7ACC8BE28D483607CF /* PrismSettingsRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01BB4D5EE8C0A275A969DF8D /* PrismSettingsRouter.swift */; };
 		1D6F9737EB949294ECD6127E /* ThreadTimelineModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE0AE72E3902044CF58D12FF /* ThreadTimelineModel.swift */; };
+		1F3F561E865CA96E8EAB6D50 /* DesktopPresenceMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A06334DD56851E93AF99149 /* DesktopPresenceMonitor.swift */; };
 		270E2478ECB9E23EB8AE6F2B /* UsageCore in Frameworks */ = {isa = PBXBuildFile; productRef = DBE37E286112AB22555CDF89 /* UsageCore */; };
 		2CCCDC1B40C85C5E87C23D43 /* ExpeditionWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8669843EA2D75ED074B91131 /* ExpeditionWindowView.swift */; };
 		2DA7D03E3F52328BAA78FE5A /* IslandViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DFA362578C4452E75E6D340 /* IslandViews.swift */; };
@@ -107,6 +108,7 @@
 		4ABC19CF9AAEFCEF9877C2C7 /* IslandUsageViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IslandUsageViews.swift; sourceTree = "<group>"; };
 		57911F287D767C7028EA8A51 /* SartoState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SartoState.swift; sourceTree = "<group>"; };
 		592032CA7B05DB2AF7078ADE /* UpdateInstallFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateInstallFlow.swift; sourceTree = "<group>"; };
+		5A06334DD56851E93AF99149 /* DesktopPresenceMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesktopPresenceMonitor.swift; sourceTree = "<group>"; };
 		5A13A053ABC104FF18DA711D /* SessionMarkdownExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionMarkdownExporter.swift; sourceTree = "<group>"; };
 		60CB420A93F43011A3FA6C09 /* PrismDeviceController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrismDeviceController.swift; sourceTree = "<group>"; };
 		6712122435D26B2E54B63ED2 /* NewSessionSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewSessionSheet.swift; sourceTree = "<group>"; };
@@ -258,6 +260,7 @@
 				CA1C9A93192EC5719BA1C7B9 /* ComposerTextEditor.swift */,
 				F1236BB960F29C2A5F5ECB43 /* DaemonManager.swift */,
 				40243CE65AE343967F5231A4 /* DaemonRuntime.swift */,
+				5A06334DD56851E93AF99149 /* DesktopPresenceMonitor.swift */,
 				780A6AFEAD08EC9B71588407 /* GlobalSessionSearchSheet.swift */,
 				D53724818126E257758F3376 /* ImportCLISessionsSheet.swift */,
 				38942CAD0CE394A2CDE7A56D /* MacSidebarView.swift */,
@@ -454,6 +457,7 @@
 				BFCF7CB00EA122739F9B52C4 /* ComposerTextEditor.swift in Sources */,
 				2E0C3459373EF01F21A18F6A /* DaemonManager.swift in Sources */,
 				D01FCED31CD392A68AE16A95 /* DaemonRuntime.swift in Sources */,
+				1F3F561E865CA96E8EAB6D50 /* DesktopPresenceMonitor.swift in Sources */,
 				D9CF872CAB78B4AF9D7D2E12 /* DisplayMapPicker.swift in Sources */,
 				2CCCDC1B40C85C5E87C23D43 /* ExpeditionWindowView.swift in Sources */,
 				F9856275D611EC9FD300670B /* FileDownload.swift in Sources */,
