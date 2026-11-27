@@ -15,7 +15,7 @@
 [![macOS 15+](https://img.shields.io/badge/macOS-15%2B%20Native-111111?logo=apple&logoColor=white)](#纯血-mac-质感prism灵动岛与液态额度)
 [![Agents](https://img.shields.io/badge/agents-46-2F80ED)](#支持的-agent)
 [![Telemetry](https://img.shields.io/badge/telemetry-none-2EA043)](./PRIVACY.zh-CN.md)
-[![Version](https://img.shields.io/badge/version-0.3.2-7C5CFF)](https://sarto.1o.ink/releases/latest)
+[![Version](https://img.shields.io/badge/version-0.3.3-7C5CFF)](https://sarto.1o.ink/releases/latest)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](./LICENSE)
 
 [下载](https://sarto.1o.ink/releases/latest) · [双循环理念](#双循环左边硬核交付右边轻松挂机) · [46 个 Agent](#主舞台严肃硬核的多-agent-ade) · [挂机远征](#挂机远征边-coding-边挂机) · [安全](./SECURITY.zh-CN.md) · [隐私](./PRIVACY.zh-CN.md) · [English](./README.md)
@@ -23,7 +23,7 @@
 </div>
 
 > [!NOTE]
-> Sarto 处于早期快速开发阶段：当前版本 v0.3.2，支持 Apple 芯片、macOS 15 及以上。
+> Sarto 处于早期快速开发阶段：当前版本 v0.3.3，支持 macOS 15+（Apple 芯片），并提供支持 macOS 与 Linux（`x64` / `arm64`，glibc 2.28+）的独立无头 daemon。
 
 ## 双循环：左边硬核交付，右边轻松挂机
 
@@ -56,7 +56,7 @@ flowchart LR
 ## 挂机远征：边 Coding 边挂机
 
 > [!NOTE]
-> **研发中：v0.3.2 中默认关闭并锁定。** 在服务端与数值平衡完成前，**设置**里的挂机游戏开关保持锁定，后台不会加载任何游戏模块，也不会产生任何游戏网络请求。
+> **研发中：v0.3.3 中默认关闭并锁定。** 在服务端与数值平衡完成前，**设置**里的挂机游戏开关保持锁定，后台不会加载任何游戏模块，也不会产生任何游戏网络请求。
 
 正式开放后，Sarto 将在右侧运行栏与独立的「远征」窗口中提供可选的 **挂机远征游戏**：
 
@@ -91,12 +91,12 @@ flowchart LR
 
 - **零 Electron，零第三方 Swift 依赖**：纯 Swift 6、SwiftUI、AppKit 与 Metal 打造；支持 Ed25519 + Apple 代码签名增量热更新（仅更应用时不断 daemon 与会话），并提供无界面 `sarto` CLI。
 
-## 隐私为本，跨 Mac 与 iPhone 端到端加密
+## 隐私为本，跨 Mac、Linux 主机与 iPhone 端到端加密
 
 Sarto 驱动拥有 Shell 权限的 Agent，因此**从设计上保证你无需信任任何服务器**：
 
-- **本地优先**：代码、对话与各 Agent 登录态只留在你的 Mac 上；零遥测、零统计、账号可选。
-- **端到端加密（`Noise_IK` + `AES-256-GCM`）**：一个侧栏串起账号下全部受信任的 Mac（8 位 `XXXX-XXXX` 核对码或 128-bit 恢复密钥配对）以及 **Sarto for iPhone**（适配 iPhone Duo 折叠屏，即将上架 App Store），中继只见填充密文，推送逐设备密封。
+- **本地优先**：代码、对话与各 Agent 登录态只留在你自己的机器上；零遥测、零统计、账号可选。
+- **端到端加密（`Noise_IK` + `AES-256-GCM`）**：一个侧栏串起账号下全部受信任的 Mac、无头 Linux 主机（支持 SSH 直连或 `sarto login` 设备码接入中继）以及 **Sarto for iPhone**（适配 iPhone Duo 折叠屏，即将上架 App Store），中继只见填充密文，推送逐设备密封（电脑活跃时可自动暂停手机推送）。
 - **协议与构建全程可验证**：应用与 daemon 采用 AGPL-3.0 开源，通信协议在 Apache-2.0 的 [`packages/sarto-wire`](./packages/sarto-wire/PROTOCOL.md) 完整公开，发布包由 [GitHub Actions](./.github/workflows/release-mac.yml) 构建并附 SLSA 溯源证明与 `SHA256SUMS.txt`。详见 [SECURITY.zh-CN.md](./SECURITY.zh-CN.md) 与 [PRIVACY.zh-CN.md](./PRIVACY.zh-CN.md)。
 
 ## 博采众长

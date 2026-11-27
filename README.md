@@ -15,7 +15,7 @@ Pure SwiftUI & Metal · Notch Dynamic Island · Remote Claude Code · Zero Elect
 [![macOS 15+](https://img.shields.io/badge/macOS-15%2B%20Native-111111?logo=apple&logoColor=white)](#pure-mac-craft-prism-notch-and-quotas)
 [![Agents](https://img.shields.io/badge/agents-46-2F80ED)](#supported-agents)
 [![Telemetry](https://img.shields.io/badge/telemetry-none-2EA043)](./PRIVACY.md)
-[![Version](https://img.shields.io/badge/version-0.3.2-7C5CFF)](https://sarto.1o.ink/releases/latest)
+[![Version](https://img.shields.io/badge/version-0.3.3-7C5CFF)](https://sarto.1o.ink/releases/latest)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](./LICENSE)
 
 [Download](https://sarto.1o.ink/releases/latest) · [How It Works](#the-dual-loop-ship-code-level-up) · [46 Agents](#main-stage-a-serious-multi-agent-ade) · [Idle Expedition](#idle-expedition-grind-while-you-code) · [Security](./SECURITY.md) · [Privacy](./PRIVACY.md) · [简体中文](./README.zh-CN.md)
@@ -23,7 +23,7 @@ Pure SwiftUI & Metal · Notch Dynamic Island · Remote Claude Code · Zero Elect
 </div>
 
 > [!NOTE]
-> Sarto is in early, active development: v0.3.2 for macOS 15 or later on Apple silicon.
+> Sarto is in early, active development: v0.3.3 for macOS 15+ (Apple silicon), with a standalone headless daemon for macOS & Linux (`x64` / `arm64`, glibc 2.28+).
 
 ## The dual loop: ship code, level up
 
@@ -56,7 +56,7 @@ flowchart LR
 ## Idle Expedition: grind while you code
 
 > [!NOTE]
-> **In development — locked off in v0.3.2.** While the game service and balance are still being finalized, the switch in **Settings** stays locked off, nothing loads in the background, and no game traffic leaves your Mac.
+> **In development — locked off in v0.3.3.** While the game service and balance are still being finalized, the switch in **Settings** stays locked off, nothing loads in the background, and no game traffic leaves your Mac.
 
 When enabled in an upcoming release, Sarto pairs your collapsible running-sessions rail with an optional **Idle Expedition** companion window:
 
@@ -91,12 +91,12 @@ Liquid quota tubes, plan rings, live session banner, model rankings and 7/30/90-
 
 - **Zero Electron, zero third-party Swift packages**: pure Swift 6, SwiftUI, AppKit and Metal, with Ed25519 + Apple code-signed delta updates that keep the daemon and running sessions alive on app-only updates, plus a headless `sarto` CLI daemon.
 
-## Private by design, across Macs and iPhone
+## Private by design, across Macs, Linux hosts and iPhone
 
 Sarto runs agents with shell access, so **you never have to trust a server with your work**:
 
-- **Local-first**: source code, threads and agent sign-ins stay on your Macs. Zero telemetry, zero analytics, optional account.
-- **End-to-end encrypted (`Noise_IK` + `AES-256-GCM`)**: one sidebar connects all trusted Macs of your account (8-character `XXXX-XXXX` commit-then-reveal pairing or 128-bit recovery key) and **Sarto for iPhone** (iPhone Duo foldable-ready, coming to the App Store soon) over padded ciphertext relays and sealed push notifications.
+- **Local-first**: source code, threads and agent sign-ins stay on your own machines. Zero telemetry, zero analytics, optional account.
+- **End-to-end encrypted (`Noise_IK` + `AES-256-GCM`)**: one sidebar connects all trusted Macs, headless Linux hosts (over SSH or relay, `sarto login` device code) and **Sarto for iPhone** (iPhone Duo foldable-ready, coming to the App Store soon) over padded ciphertext relays and sealed push notifications (auto-paused while your Mac is active).
 - **Verifiable to the wire**: AGPL-3.0 app and daemon, Apache-2.0 wire spec in [`packages/sarto-wire`](./packages/sarto-wire/PROTOCOL.md), and public [GitHub Actions](./.github/workflows/release-mac.yml) builds with SLSA provenance and `SHA256SUMS.txt`. See [SECURITY.md](./SECURITY.md) and [PRIVACY.md](./PRIVACY.md).
 
 ## Tailored from the best
